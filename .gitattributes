@@ -1,0 +1,8 @@
+# Normalize line endings
+* text=auto
+
+# Mark binary assets
+assets/* binary
+
+# Python
+*.py linguist-language=Python

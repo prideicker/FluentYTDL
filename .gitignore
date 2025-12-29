@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+venv/
+
+# PyInstaller
+/build/
+/dist/
+*.spec.user
+
+# Logs / outputs
+/logs/
+
+# Release artifacts
+/installer/*.zip
+/installer/*.msi
+
+# VSCode
+.vscode/*.log
+
+# bundled tools (large)
+assets/bin/**
+!assets/bin/**/.gitkeep
+
+# Local config (contains user paths / tokens)
+config.json
+
+# Ignore large built icon files if any (allow logo.png in repo if desired)
+assets/*.ico
+
+# Additional common patterns
+# Python compiled files
+*.py[cod]
+
+# PyInstaller / build outputs
+build/
+dist/
+*.spec
+
+# Runtime artifacts
+*.log
+*.part
+*.ytdl
+crash_reports/
+
+# Sensitive or noisy rabbish logs
+rabbish/*/*log.txt
+rabbish/*/*.log
+rabbish/*/restore_log.txt
+rabbish/*/move_log.txt
+
+# IDE / system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# virtual envs
+env/
+# 打包产物
+installer/
+dist/
+build/
+*.exe
+*.zip
+
+# 二进制工具（建议通过脚本下载，不要放源码里）
+src/fluentytdl/assets/bin/
+
+# Temporarily ignore external build moved to rabbish
+/rabbish/*/build_FluentYTDL/
+
+# Ignore local IDE settings
+/.gemini/

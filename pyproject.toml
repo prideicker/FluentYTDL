@@ -1,0 +1,47 @@
+[project]
+name = "FluentYTDL"
+version = "0.1.0"
+description = "Professional YouTube downloader (Stage 1: core architecture)"
+requires-python = ">=3.10"
+dependencies = [
+  "yt-dlp[default]>=2025.11.12",
+  "requests>=2.32.0",
+  "browser-cookie3>=0.19.1",
+  "PySide6>=6.6.0",
+  "PySide6-Fluent-Widgets>=1.5.0",
+  "loguru>=0.7.0",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pyright]
+pythonVersion = "3.10"
+extraPaths = ["src"]
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+include-package-data = true
+
+[project.scripts]
+# Console/launcher entry (optional; used by installers or users)
+fluentytdl = "fluentytdl.main:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "ruff>=0.12",
+  "pyright>=1.1",
+  "pyinstaller>=5.9",
+]

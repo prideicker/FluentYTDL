@@ -1,0 +1,411 @@
+from __future__ import annotations
+
+from typing import Any
+import os
+import subprocess
+
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget, QFrame
+
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    CardWidget,
+    FluentIcon,
+    InfoBar,
+    InfoBarPosition,
+    ProgressBar,
+    TransparentToolButton,
+    StrongBodyLabel,
+)
+
+from ...core.workers import DownloadWorker
+from ...utils.image_loader import ImageLoader
+from .download_card import _format_bytes, _format_time, _infer_stream_label, _strip_ansi
+
+
+class DownloadItemWidget(CardWidget):
+    """
+    重构后的下载列表项：
+    [缩略图] [标题]                  [按钮组]
+             [进度条]
+             [元数据: 大小/速度/时间]
+    """
+
+    remove_requested = Signal(QWidget)
+    resume_requested = Signal(QWidget)
+    state_changed = Signal(str)
+    selection_changed = Signal(bool)
+
+    def __init__(self, worker: DownloadWorker, title: str, opts: dict[str, Any], parent=None):
+        super().__init__(parent)
+        self.worker = worker
+        self.title_text = title
+        self.url = worker.url
+        self.opts = dict(opts)
+        
+        # Track created files persistently across worker restarts
+        self.recorded_paths: set[str] = set()
+
+        self.image_loader = ImageLoader(self)
+        self.image_loader.loaded.connect(self._on_thumb_loaded)
+
+        self._bind_worker(worker)
+
+        self.setFixedHeight(100)  # 稍微增高以容纳三行信息
+        
+        # 主布局
+        self.hLayout = QHBoxLayout(self)
+        self.hLayout.setContentsMargins(12, 12, 12, 12)
+        self.hLayout.setSpacing(16)
+
+        # 0. 批量选择复选框
+        self.selectBox = QCheckBox(self)
+        self.selectBox.setVisible(False)
+        self.selectBox.toggled.connect(self.selection_changed)
+        self.hLayout.addWidget(self.selectBox)
+
+        # 1. 左侧缩略图 (16:9) -> 128x72
+        self.iconLabel = QLabel(self)
+        self.iconLabel.setFixedSize(128, 72)
+        self.iconLabel.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 0.05); border-radius: 6px; border: 1px solid rgba(0,0,0,0.05);"
+        )
+        self.iconLabel.setScaledContents(True)
+        self.hLayout.addWidget(self.iconLabel)
+
+        # 2. 中间信息区 (Title, Progress, Meta)
+        self.infoLayout = QVBoxLayout()
+        self.infoLayout.setSpacing(4)
+        self.infoLayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # 标题 (粗体)
+        self.titleLabel = StrongBodyLabel(self.title_text, self)
+        self.titleLabel.setWordWrap(False)
+        # 截断处理在布局中自动发生，但可以通过 ElideMode 优化，这里暂且依赖 Layout
+
+        # 进度条 (细长)
+        self.progressBar = ProgressBar(self)
+        self.progressBar.setValue(0)
+        self.progressBar.setFixedHeight(4)
+
+        # 元数据 (灰色小字)
+        self.metaLabel = CaptionLabel("等待开始...", self)
+        self.metaLabel.setTextColor(QColor(120, 120, 120), QColor(150, 150, 150))
+
+        self.infoLayout.addWidget(self.titleLabel)
+        self.infoLayout.addWidget(self.progressBar)
+        self.infoLayout.addWidget(self.metaLabel)
+        self.hLayout.addLayout(self.infoLayout, 1)
+
+        # 3. 右侧按钮区
+        self.actionLayout = QHBoxLayout()
+        self.actionLayout.setSpacing(4)
+
+        self.actionBtn = TransparentToolButton(FluentIcon.PAUSE, self)
+        self.actionBtn.setToolTip("暂停任务")
+        self.actionBtn.clicked.connect(self.on_action_clicked)
+
+        self.folderBtn = TransparentToolButton(FluentIcon.FOLDER, self)
+        self.folderBtn.setToolTip("打开文件夹")
+        self.folderBtn.setEnabled(False)
+        self.folderBtn.clicked.connect(self._open_output_location)
+
+        self.deleteBtn = TransparentToolButton(FluentIcon.DELETE, self)
+        self.deleteBtn.setToolTip("删除任务")
+        self.deleteBtn.clicked.connect(self.on_delete_clicked)
+
+        self.actionLayout.addWidget(self.actionBtn)
+        self.actionLayout.addWidget(self.folderBtn)
+        self.actionLayout.addWidget(self.deleteBtn)
+        self.hLayout.addLayout(self.actionLayout)
+
+        # === 信号连接 ===
+        self._bind_worker(self.worker)
+        self._output_path: str | None = None
+        self._state: str = "queued"
+
+    # ... (复用原有逻辑) ...
+    def state(self) -> str:
+        return self._state
+
+    def set_state(self, state: str) -> None:
+        s = str(state or "").strip().lower()
+        if s not in {"running", "queued", "paused", "completed", "error"}:
+            s = "queued"
+        if s == self._state:
+            return
+        self._state = s
+        self.state_changed.emit(self._state)
+        
+        # 更新按钮图标
+        if s == "running":
+            self.actionBtn.setIcon(FluentIcon.PAUSE)
+            self.actionBtn.setToolTip("暂停")
+            self.actionBtn.setEnabled(True)
+        elif s in {"paused", "error", "queued"}:
+            self.actionBtn.setIcon(FluentIcon.PLAY)
+            self.actionBtn.setToolTip("开始")
+            self.actionBtn.setEnabled(True)
+            # 根据是否存在可打开的路径来决定文件夹按钮是否可用（即使是暂停状态）
+            try:
+                has_path = False
+                # 1. explicit output path
+                p = self._output_path or getattr(self.worker, "output_path", None)
+                if p and isinstance(p, str) and p.strip() and os.path.exists(p):
+                    has_path = True
+                # 2. recorded cache/part paths
+                if not has_path:
+                    for rp in getattr(self, "recorded_paths", set()):
+                        try:
+                            if rp and os.path.exists(rp):
+                                has_path = True
+                                break
+                        except Exception:
+                            continue
+                # 3. worker download dir
+                if not has_path:
+                    dd = getattr(self.worker, "download_dir", None)
+                    if dd and os.path.isdir(dd):
+                        has_path = True
+                self.folderBtn.setEnabled(bool(has_path))
+            except Exception:
+                # conservative: enable to allow user trying
+                try:
+                    self.folderBtn.setEnabled(True)
+                except Exception:
+                    pass
+        elif s == "completed":
+            self.actionBtn.setIcon(FluentIcon.ACCEPT)
+            self.actionBtn.setToolTip("已完成")
+            self.actionBtn.setEnabled(False)
+
+    def set_selection_mode(self, enabled: bool) -> None:
+        self.selectBox.setVisible(bool(enabled))
+        if not enabled:
+            try:
+                self.selectBox.setChecked(False)
+            except Exception:
+                pass
+
+    def is_selected(self) -> bool:
+        try:
+            return bool(self.selectBox.isVisible() and self.selectBox.isChecked())
+        except Exception:
+            return False
+
+    def _bind_worker(self, worker: DownloadWorker) -> None:
+        """Bind signals from a worker to this widget."""
+        self.worker = worker
+        try:
+            worker.progress.connect(self.on_progress)
+            worker.status_msg.connect(self.update_status)
+            worker.completed.connect(self.on_finished)
+            worker.error.connect(self.on_error)
+            worker.cancelled.connect(self.on_cancelled)
+            
+            # Track files
+            worker.output_path_ready.connect(self._record_path)
+            worker.progress.connect(self._check_filename_in_progress)
+        except Exception:
+            pass
+
+    def _record_path(self, path: str) -> None:
+        if path:
+            self.recorded_paths.add(path)
+
+    def _check_filename_in_progress(self, data: dict) -> None:
+        fn = data.get("filename")
+        if fn:
+            try:
+                self.recorded_paths.add(os.path.abspath(fn))
+            except Exception:
+                pass
+
+    def on_progress(self, d: dict) -> None:
+        self.update_progress(d)
+
+    def on_cancelled(self) -> None:
+        self.set_state("paused")
+
+    def update_progress(self, d: dict[str, Any]) -> None:
+        if d.get("status") == "downloading":
+            self.set_state("running")
+            
+            # Infer stream type (Video/Audio)
+            info = d.get("info_dict") or {}
+            vcodec = str(info.get("vcodec") or "none")
+            acodec = str(info.get("acodec") or "none")
+            
+            prefix = ""
+            if vcodec != "none" and acodec == "none":
+                prefix = "[视频] "
+            elif vcodec == "none" and acodec != "none":
+                prefix = "[音频] "
+            
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            downloaded = d.get("downloaded_bytes") or 0
+            speed = d.get("speed") or 0
+            eta = d.get("eta")
+
+            if total and total > 0:
+                self.progressBar.setValue(int(downloaded / total * 100))
+                size_str = f"{_format_bytes(total)}"
+            else:
+                # Indeterminate or unknown size
+                # Keep progress bar moving if we have speed? Or just 0.
+                # self.progressBar.setValue(0) 
+                # Actually, if we don't know total, we can't calculate percentage.
+                pass
+                size_str = "?"
+
+            speed_str = f"{_format_bytes(speed)}/s"
+            eta_str = f"剩余 {_format_time(eta)}"
+
+            # 元数据行：[视频] 大小 • 速度 • 剩余时间
+            self.metaLabel.setText(f"{prefix}{size_str} • {speed_str} • {eta_str}")
+
+    def update_status(self, msg: str) -> None:
+        clean_msg = _strip_ansi(msg)
+        # 仅在非下载状态下显示状态文本，或者覆盖元数据
+        # 这里选择覆盖元数据，因为状态信息（如“正在合并”）很重要
+        
+        # Highlight merge/postprocess status
+        if "合并" in clean_msg or "Merger" in clean_msg or "Merging" in clean_msg:
+            clean_msg = "正在合并音视频..."
+            self.progressBar.setValue(99)
+        elif "ExtractAudio" in clean_msg:
+            clean_msg = "正在提取音频..."
+            self.progressBar.setValue(99)
+            
+        self.metaLabel.setText(clean_msg)
+
+        lower = clean_msg.lower()
+        if "排队" in clean_msg or "等待" in clean_msg:
+            self.set_state("queued")
+        if "暂停" in clean_msg:
+            self.set_state("paused")
+
+    def on_finished(self) -> None:
+        self.progressBar.setValue(100)
+        self.metaLabel.setText("下载完成")
+        self.set_state("completed")
+        self.folderBtn.setEnabled(True)
+        InfoBar.success(
+            "下载完成",
+            self.title_text,
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+        )
+
+    def on_error(self, err_data: dict) -> None:
+        self.set_state("error")
+        msg = err_data.get("msg", "未知错误")
+        self.metaLabel.setText(f"错误: {msg}")
+        self.progressBar.setValue(0)
+
+    def _on_output_path_ready(self, path: str) -> None:
+        p = str(path or "").strip()
+        self._output_path = p or None
+
+    def _open_output_location(self) -> None:
+        # Try to resolve a sensible path to select/open:
+        # 1) explicit output file if exists
+        # 2) any recorded cache/.part/.ytdl file
+        # 3) parent directory of output path
+        # 4) worker.download_dir
+        try:
+            candidates: list[str] = []
+            p = self._output_path or getattr(self.worker, "output_path", None)
+            if isinstance(p, str) and p.strip():
+                p = os.path.abspath(p)
+                candidates.append(p)
+
+            # recorded paths (may include .part)
+            for rp in getattr(self, "recorded_paths", set()):
+                try:
+                    if rp:
+                        candidates.append(os.path.abspath(rp))
+                except Exception:
+                    continue
+
+            # worker dest_paths if available
+            dests = getattr(self.worker, "dest_paths", None)
+            if dests:
+                try:
+                    for d in dests:
+                        if d:
+                            candidates.append(os.path.abspath(d))
+                except Exception:
+                    pass
+
+            # Try candidates: prefer existing file to select, else parent dirs
+            for c in candidates:
+                try:
+                    if os.path.exists(c):
+                        # If it's a file, select it in explorer. If dir, open it.
+                        if os.path.isfile(c):
+                            if os.name == "nt":
+                                subprocess.Popen(f'explorer /select,"{os.path.normpath(c)}"')
+                            else:
+                                # Non-windows: open containing folder
+                                subprocess.Popen(["xdg-open", os.path.dirname(c)])
+                            return
+                        elif os.path.isdir(c):
+                            if os.name == "nt":
+                                subprocess.Popen(f'explorer "{os.path.normpath(c)}"')
+                            else:
+                                subprocess.Popen(["xdg-open", c])
+                            return
+                except Exception:
+                    continue
+
+            # If none exists, try parent of first candidate
+            if candidates:
+                try:
+                    first = candidates[0]
+                    parent = os.path.dirname(first)
+                    if os.path.isdir(parent):
+                        if os.name == "nt":
+                            subprocess.Popen(f'explorer "{os.path.normpath(parent)}"')
+                        else:
+                            subprocess.Popen(["xdg-open", parent])
+                        return
+                except Exception:
+                    pass
+
+            # Fallback: worker.download_dir
+            dd = getattr(self.worker, "download_dir", None)
+            if dd and os.path.isdir(dd):
+                try:
+                    if os.name == "nt":
+                        subprocess.Popen(f'explorer "{os.path.normpath(dd)}"')
+                    else:
+                        subprocess.Popen(["xdg-open", dd])
+                    return
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def on_action_clicked(self) -> None:
+        if self._state == "running":
+            # Fix: DownloadWorker uses .stop(), not .cancel()
+            if hasattr(self.worker, "stop"):
+                self.worker.stop()
+            elif hasattr(self.worker, "cancel"):
+                self.worker.cancel()
+        elif self._state in {"paused", "error", "queued"}:
+            self.resume_requested.emit(self)
+        
+    def load_thumbnail(self, path: str) -> None:
+        self.image_loader.load(path)
+
+    def _on_thumb_loaded(self, pixmap) -> None:
+        if pixmap and not pixmap.isNull():
+            self.iconLabel.setPixmap(pixmap)
+
+    def on_delete_clicked(self) -> None:
+        self.remove_requested.emit(self)
+

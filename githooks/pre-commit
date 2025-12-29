@@ -1,0 +1,47 @@
+#!/bin/sh
+# Pre-commit hook: block committing logs, runtime junk, or large files.
+# Install with: scripts\install_githooks.ps1 (copies to .git/hooks)
+
+set -e
+
+MAX_BYTES=$((5 * 1024 * 1024)) # 5MB
+errors=0
+
+# Get staged files
+files=$(git diff --cached --name-only --no-renames)
+for file in $files; do
+  # Check prohibited patterns
+  case "$file" in
+    *.log|logs/*|*.part|*.ytdl)
+      echo "ERROR: Attempt to commit a log/junk file: $file"
+      echo "Please remove it from staging (git reset <file>) or add to .gitignore."
+      errors=1
+      ;;
+  esac
+
+  # rabbish logs specifically
+  if echo "$file" | grep -E "move_log|restore_log|\.log$" >/dev/null 2>&1; then
+    if echo "$file" | grep -E "^rabbish/|/rabbish/" >/dev/null 2>&1; then
+      echo "ERROR: Attempt to commit rabbish log file: $file"
+      errors=1
+    fi
+  fi
+
+  # Check file size (if exists in working tree)
+  if [ -f "$file" ]; then
+    # Try different stat commands for portability
+    size=$(wc -c <"$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo "0")
+    if [ -n "$size" ] && [ "$size" -gt "$MAX_BYTES" ]; then
+      echo "ERROR: Attempt to commit a large file (>5MB): $file ($size bytes)"
+      errors=1
+    fi
+  fi
+
+done
+
+if [ "$errors" -ne 0 ]; then
+  echo "Commit blocked by pre-commit hook. Fix the issues and try again."
+  exit 1
+fi
+
+exit 0
