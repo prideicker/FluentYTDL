@@ -84,7 +84,7 @@ jobs:
         if: success()
         run: |
           echo "Checking access to repo with TEST_UPLOAD_PAT..."
-          curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token ${{ secrets.TEST_UPLOAD_PAT }}" "https://api.github.com/repos/prideicker/FluentYTDL" | xargs -I {} echo "Repo access HTTP status: {}"
+          curl -s -H "Authorization: token ${{ secrets.TEST_UPLOAD_PAT }}" "https://api.github.com/repos/prideicker/FluentYTDL" | grep '"full_name"' || echo "PAT may not have repo access or request failed"
 
       - name: Create Release and Upload Assets (uses PAT)
         if: success()
