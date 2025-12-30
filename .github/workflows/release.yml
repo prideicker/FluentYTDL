@@ -1,12 +1,12 @@
 # ==============================================================================
-#  FluentYTDL - 黄金标准发布流程 (Golden Standard Release Workflow)
+#  FluentYTDL - 黄金标准发布流程 (Golden Standard Release Workflow) - v2
 # ==============================================================================
 # 触发条件: 当一个 'v' 开头的标签 (例如 v1.0.0, v0.2.1)被推送到仓库时
 # 工作流程:
 # 1. 检出代码。
-# 2. 设置 Python 3.12 环境。
-# 3. 缓存并安装项目的所有依赖 (包括 PyInstaller)。
-# 4. 运行高可用的 `fetch_tools.ps1` 脚本获取 ffmpeg 和 yt-dlp。
+# 2. 设置 Python 3.12 环境，并利用其内置功能缓存 pip 依赖。
+# 3. 安装项目的所有依赖 (包括 PyInstaller)。
+# 4. 运行全自动的 `fetch_tools.ps1` 脚本获取 ffmpeg 和 yt-dlp。
 # 5. 运行 `package.ps1` 脚本进行专业打包，版本号自动从标签获取。
 # 6. 将打包好的 .zip 文件发布为一个新的 GitHub Release。
 # ==============================================================================
@@ -30,29 +30,20 @@ jobs:
       - name: "[1/6] Checkout Code"
         uses: actions/checkout@v4
 
-      - name: "[2/6] Setup Python"
-        uses: actions/setup-python@v4
+      - name: "[2/6] Setup Python with Dependency Cache"
+        uses: actions/setup-python@v5 # Using latest v5
         with:
           python-version: '3.12'
+          # 使用 setup-python 的内置缓存功能，这是目前最标准、最高效的做法。
+          cache: 'pip'
 
-      - name: "[3/6] Cache and Install Dependencies"
+      - name: "[3/6] Install Dependencies"
+        shell: pwsh
         run: |
-          # 缓存依赖，提升后续构建速度
-          $cachePath = "$env:LOCALAPPDATA\pip\Cache"
-          $cacheKey = "pip-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}"
-          $cacheRestoreKey = "pip-${{ runner.os }}-"
-          
-          # 使用 Actions 官方缓存机制
-          $cacheHit = & actions/cache@v3 `
-            --path $cachePath `
-            --key $cacheKey `
-            --restore-keys $cacheRestoreKey
-          
           # 安装所有项目依赖 (包括 dev 依赖，如 pyinstaller)
           # '.[dev]' 语法会根据 pyproject.toml 安装主依赖和 [project.optional-dependencies] 下的 dev 依赖
           pip install --upgrade pip
           pip install ".[dev]"
-        shell: pwsh
 
       - name: "[4/6] Prepare Tools (ffmpeg & yt-dlp)"
         id: fetch_tools
