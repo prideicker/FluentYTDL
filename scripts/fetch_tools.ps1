@@ -90,28 +90,37 @@ try {
 # 阶段四：获取 deno
 Write-Host "`n>> [4/5] Fetching latest deno from GitHub..." -ForegroundColor Cyan
 try {
-    $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/denoland/deno/releases/latest"
-    $zipAsset = $releaseInfo.assets | Where-Object { $_.name -eq 'deno-x86_64-pc-windows-msvc.zip' }
-    if (-not $zipAsset) { throw "Could not find 'deno-x86_64-pc-windows-msvc.zip' in the latest deno release." }
+    # 1. 获取最新 Release 信息
+    $denoRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/denoland/deno/releases/latest"
+    
+    # 2. 找到 Windows zip 文件
+    $zipAsset = $denoRelease.assets | Where-Object { $_.name -like '*x86_64-pc-windows-msvc.zip' } | Select-Object -First 1
+    if (-not $zipAsset) { throw "Could not find deno Windows zip asset." }
+    
+    # 3. 找到对应的校验文件 (关键修复：后缀名改为 .sha256sum)
+    $checksumAsset = $denoRelease.assets | Where-Object { $_.name -eq ($zipAsset.name + ".sha256sum") }
+    if (-not $checksumAsset) { 
+        # 备选方案：尝试找 .sha256 后缀，防止未来又改回去
+        $checksumAsset = $denoRelease.assets | Where-Object { $_.name -eq ($zipAsset.name + ".sha256") }
+    }
+    if (-not $checksumAsset) { throw "Could not find checksum file for $($zipAsset.name)." }
 
-    $checksumAssetName = "$($zipAsset.name).sha256"
-    $checksumAsset = $releaseInfo.assets | Where-Object { $_.name -eq $checksumAssetName }
-    if (-not $checksumAsset) { throw "Could not find '$checksumAssetName' in the latest deno release." }
-
-    $checksumFile = Join-Path $TempDir "deno.sha256"
-    $checksumUrl = $checksumAsset.browser_download_url
-    if ([string]::IsNullOrEmpty($checksumUrl)) { throw "deno checksum asset found, but its download URL is empty." }
-    Invoke-Download -Uri $checksumUrl -OutFile $checksumFile
-
+    # 4. 下载
     $zipPath = Join-Path $TempDir $zipAsset.name
-    $zipUrl = $zipAsset.browser_download_url
-    if ([string]::IsNullOrEmpty($zipUrl)) { throw "deno zip asset '$($zipAsset.name)' found, but its download URL is empty." }
-    Invoke-Download -Uri $zipUrl -OutFile $zipPath
+    $checksumFile = Join-Path $TempDir "deno.checksum"
 
-    $expectedHash = (Get-Content $checksumFile) -split ' ' | Select-Object -First 1
+    Invoke-Download -Uri $zipAsset.browser_download_url -OutFile $zipPath
+    Invoke-Download -Uri $checksumAsset.browser_download_url -OutFile $checksumFile
+
+    # 5. 校验 (Deno 的校验文件通常包含 "hash  filename" 格式)
+    $hashContent = Get-Content $checksumFile -Raw
+    # 提取哈希值 (第一列)
+    $expectedHash = ($hashContent -split '\s+')[0].Trim()
+    
+    # 调用内置函数进行校验
     Verify-Checksum -FilePath $zipPath -ExpectedHash $expectedHash
 } catch {
-    throw "Failed to fetch deno. Error: $_ "
+    throw "Failed to fetch deno. Error: $_"
 }
 
 
