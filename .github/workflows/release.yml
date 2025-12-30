@@ -80,6 +80,12 @@ jobs:
           name: release-artifacts
           path: release
 
+      - name: Check PAT access to repo (debug)
+        if: success()
+        run: |
+          echo "Checking access to repo with TEST_UPLOAD_PAT..."
+          curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token ${{ secrets.TEST_UPLOAD_PAT }}" "https://api.github.com/repos/prideicker/FluentYTDL" | xargs -I {} echo "Repo access HTTP status: {}"
+
       - name: Create Release and Upload Assets (uses PAT)
         if: success()
         uses: ncipollo/release-action@v1
@@ -89,7 +95,7 @@ jobs:
           artifacts: 'release/*.zip,release/*.sha256'
           draft: false
           tag: ${{ github.ref_name }}
-        # Add a small debug note for clarity
+
       - name: Debug: show release tag
         run: |
           echo "Release tag to publish: ${{ github.ref_name }}"
