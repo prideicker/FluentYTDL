@@ -1,106 +1,118 @@
 # 文件名: scripts/fetch_tools.ps1
-# 作用: 健壮的工具获取脚本，采用“本地优先，下载兜底”的冗余策略。
+# 作用: 全自动、高安全地从官方源获取最新的外部工具。
+#
+# 工作逻辑:
+# 1. 检查本地 `assets/bin` 目录是否已有所需工具。
+# 2. 对于 yt-dlp:
+#    a. 访问 GitHub API 获取最新 Release 信息。
+#    b. 自动下载 yt-dlp.exe 和官方校验和文件。
+#    c. 校验文件，确保安全。
+# 3. 对于 ffmpeg:
+#    a. 从社区信赖的 gyan.dev 下载一个指定的稳定版本。
+#    b. 下载对应的校验和文件。
+#    c. 校验文件，确保安全。
+# 4. 解压 ffmpeg 并将所有工具放置到正确的 `assets/bin` 子目录中。
 
 param (
-    [string]$BaseDir = "$PSScriptRoot\..\assets\bin"
+    [string]$TargetDir = "$PSScriptRoot\..\assets\bin"
 )
 
-$ErrorActionPreference = "SilentlyContinue" # 允许我们自定义错误处理
+$ErrorActionPreference = "Stop"
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+$TempDir = "$PSScriptRoot\temp_tools"
 
-# 1. 定义路径和状态变量
-$ffmpegDir = Join-Path -Path $BaseDir -ChildPath "ffmpeg"
-$ytDlpDir = Join-Path -Path $BaseDir -ChildPath "yt-dlp"
-$ffmpegPath = Join-Path -Path $ffmpegDir -ChildPath "ffmpeg.exe"
-$ytDlpPath = Join-Path -Path $ytDlpDir -ChildPath "yt-dlp.exe"
+# --- 函数定义 ---
 
-# --- 阶段一：检查本地 (主轮胎) ---
-Write-Host ">> [Phase 1] Checking for existing local tools..." -ForegroundColor Cyan
-if ((Test-Path $ffmpegPath) -and (Test-Path $ytDlpPath)) {
-    Write-Host "   Success: Local ffmpeg.exe and yt-dlp.exe found." -ForegroundColor Green
+function Invoke-Download([string]$Uri, [string]$OutFile) {
+    Write-Host "    Downloading: $Uri" -ForegroundColor Gray
+    Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec 600
+}
+
+function Verify-Checksum([string]$FilePath, [string]$ExpectedHash, [string]$Algorithm = "SHA256") {
+    Write-Host "    Verifying checksum for: $(Split-Path $FilePath -Leaf)" -ForegroundColor Gray
+    $actualHash = (Get-FileHash $FilePath -Algorithm $Algorithm).Hash.ToUpper()
+    if ($actualHash -ne $ExpectedHash.ToUpper()) {
+        throw "Checksum mismatch for `"$FilePath`". Expected '$ExpectedHash', but got '$actualHash'."
+    }
+    Write-Host "    [OK] Checksum valid." -ForegroundColor Green
+}
+
+# --- 脚本执行 ---
+
+# 阶段一：检查本地工具
+Write-Host ">> [1/4] Checking for existing local tools..." -ForegroundColor Cyan
+if ((Test-Path "$TargetDir\ffmpeg\ffmpeg.exe") -and (Test-Path "$TargetDir\yt-dlp\yt-dlp.exe")) {
+    Write-Host ">> Success: All required tools are already present." -ForegroundColor Green
     exit 0
 }
-Write-Host "   Notice: Local tools not found or incomplete. Proceeding to download fallback..." -ForegroundColor Yellow
 
-# --- 阶段二：下载 (备胎) ---
-# 确保目标目录存在
-New-Item -ItemType Directory -Force -Path $ffmpegDir | Out-Null
-New-Item -ItemType Directory -Force -Path $ytDlpDir | Out-Null
+# 清理并创建临时下载目录
+if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force }
+New-Item -ItemType Directory -Path $TempDir | Out-Null
 
-# 下载 yt-dlp (如果不存在)
-if (-not (Test-Path $ytDlpPath)) {
-    Write-Host ">> [Phase 2.1] Downloading yt-dlp..." -ForegroundColor Cyan
-    try {
-        $apiUrl = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
-        $releaseInfo = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
-        $asset = $releaseInfo.assets | Where-Object { $_.name -eq 'yt-dlp.exe' }
-        if ($asset) {
-            Write-Host "   Found yt-dlp.exe at $($asset.browser_download_url)"
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $ytDlpPath -UseBasicParsing
-            Write-Host "   yt-dlp downloaded successfully." -ForegroundColor Green
-        } else {
-            Write-Warning "   Could not find yt-dlp.exe in the latest GitHub release assets."
-        }
-    } catch {
-        Write-Warning "   Failed to download yt-dlp. Error: $($_.Exception.Message)"
-    }
+# 阶段二：获取 yt-dlp
+Write-Host "`n>> [2/4] Fetching latest yt-dlp..." -ForegroundColor Cyan
+try {
+    $ytDlpReleaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+    
+    $ytDlpExeAsset = $ytDlpReleaseInfo.assets | Where-Object { $_.name -eq 'yt-dlp.exe' }
+    $ytDlpChecksumAsset = $ytDlpReleaseInfo.assets | Where-Object { $_.name -eq 'SHA2-256SUMS' }
+
+    # 下载校验文件和主程序
+    $checksumsFile = Join-Path $TempDir "SHA2-256SUMS.txt"
+    Invoke-Download -Uri $ytDlpChecksumAsset.browser_download_url -OutFile $checksumsFile
+    
+    $ytDlpExePath = Join-Path $TempDir "yt-dlp.exe"
+    Invoke-Download -Uri $ytDlpExeAsset.browser_download_url -OutFile $ytDlpExePath
+
+    # 从校验文件中提取 yt-dlp.exe 的哈希值并验证
+    $ytDlpExpectedHashLine = Get-Content $checksumsFile | Select-String -Pattern "yt-dlp.exe"
+    $ytDlpExpectedHash = ($ytDlpExpectedHashLine -split ' ')[0]
+    Verify-Checksum -FilePath $ytDlpExePath -ExpectedHash $ytDlpExpectedHash
+} catch {
+    throw "Failed to fetch yt-dlp. Error: $_"
 }
 
-# 下载 ffmpeg (如果不存在)
-if (-not (Test-Path $ffmpegPath)) {
-    Write-Host ">> [Phase 2.2] Downloading ffmpeg..." -ForegroundColor Cyan
-    try {
-        $apiUrl = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
-        $releaseInfo = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
-        $asset = $releaseInfo.assets | Where-Object { $_.name -like '*win64-gpl*' -and $_.name -notlike '*shared*' } | Select-Object -First 1
-        
-        if ($asset) {
-            Write-Host "   Found ffmpeg build: $($asset.name)"
-            Write-Host "   URL: $($asset.browser_download_url)"
-            $zipPath = Join-Path -Path $PSScriptRoot -ChildPath "ffmpeg-temp.zip"
-            
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
-            Write-Host "   Downloaded. Extracting..."
-            
-            # 解压到临时目录，然后只移动我们需要的 ffmpeg.exe
-            $extractTempDir = Join-Path -Path $PSScriptRoot -ChildPath "ffmpeg-extract-temp"
-            if (Test-Path $extractTempDir) { Remove-Item $extractTempDir -Recurse -Force }
-            New-Item -ItemType Directory -Force -Path $extractTempDir | Out-Null
-            
-            Expand-Archive -Path $zipPath -DestinationPath $extractTempDir -Force
-            
-            # 在解压文件中找到 ffmpeg.exe
-            $nestedFfmpeg = Get-ChildItem -Path $extractTempDir -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
-            
-            if ($nestedFfmpeg) {
-                Move-Item -Path $nestedFfmpeg.FullName -Destination $ffmpegPath -Force
-                Write-Host "   ffmpeg.exe extracted and moved successfully." -ForegroundColor Green
-            } else {
-                Write-Warning "   Could not find ffmpeg.exe within the downloaded archive."
-            }
+# 阶段三：获取 ffmpeg
+Write-Host "`n>> [3/4] Fetching ffmpeg..." -ForegroundColor Cyan
+try {
+    # 我们选择一个特定的、经过验证的稳定版本，以确保构建的稳定性。
+    # 这里使用 gyan.dev 的 essentials 构建，因为它体积更小。
+    $ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-7.0-essentials_build.zip"
+    $ffmpegHashUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-7.0-essentials_build.zip.sha256"
+    
+    $ffmpegZipPath = Join-Path $TempDir "ffmpeg.zip"
+    $ffmpegHashPath = Join-Path $TempDir "ffmpeg_hash.txt"
 
-            # 清理临时文件和目录
-            Remove-Item $zipPath -Force
-            Remove-Item $extractTempDir -Recurse -Force
-
-        } else {
-            Write-Warning "   Could not find a suitable ffmpeg build in the latest GitHub release assets."
-        }
-    } catch {
-        Write-Warning "   Failed to download or process ffmpeg. Error: $($_.Exception.Message)"
-    }
+    # 下载校验文件和主程序
+    Invoke-Download -Uri $ffmpegHashUrl -OutFile $ffmpegHashPath
+    Invoke-Download -Uri $ffmpegUrl -OutFile $ffmpegZipPath
+    
+    # 提取哈希值并验证
+    $ffmpegExpectedHash = (Get-Content $ffmpegHashPath) -split ' ' | Select-Object -First 1
+    Verify-Checksum -FilePath $ffmpegZipPath -ExpectedHash $ffmpegExpectedHash
+} catch {
+    throw "Failed to fetch ffmpeg. Error: $_"
 }
 
-# --- 阶段三：最终验证 ---
-Write-Host ">> [Phase 3] Final verification..." -ForegroundColor Cyan
-$ffmpegOk = Test-Path $ffmpegPath
-$ytDlpOk = Test-Path $ytDlpPath
+# 阶段四：解压和部署
+Write-Host "`n>> [4/4] Deploying tools to $TargetDir..." -ForegroundColor Cyan
+# 清理旧目录并创建
+if (Test-Path $TargetDir) { Remove-Item $TargetDir -Recurse -Force }
+$ytDlpTargetDir = New-Item -ItemType Directory -Path (Join-Path $TargetDir "yt-dlp") -Force
+$ffmpegTargetDir = New-Item -ItemType Directory -Path (Join-Path $TargetDir "ffmpeg") -Force
 
-if ($ffmpegOk -and $ytDlpOk) {
-    Write-Host ">> All tools are ready!" -ForegroundColor Green
-    exit 0
-} else {
-    Write-Error "FATAL: Tool preparation failed after all attempts."
-    if (-not $ffmpegOk) { Write-Error "   ffmpeg.exe is still missing." }
-    if (-not $ytDlpOk) { Write-Error "   yt-dlp.exe is still missing." }
-    exit 1
-}
+# 解压 ffmpeg
+$ffmpegExtractPath = Join-Path $TempDir "ffmpeg_extracted"
+New-Item -ItemType Directory -Path $ffmpegExtractPath | Out-Null
+Expand-Archive -Path $ffmpegZipPath -DestinationPath $ffmpegExtractPath -Force
+
+# 移动工具到最终位置
+Move-Item -Path (Join-Path $ffmpegExtractPath "*\bin\ffmpeg.exe") -Destination $ffmpegTargetDir
+Move-Item -Path (Join-Path $ffmpegExtractPath "*\bin\ffprobe.exe") -Destination $ffmpegTargetDir
+Move-Item -Path $ytDlpExePath -Destination $ytDlpTargetDir
+
+# 清理临时目录
+Remove-Item $TempDir -Recurse -Force
+
+Write-Host "`n>> Success! All tools are ready." -ForegroundColor Green

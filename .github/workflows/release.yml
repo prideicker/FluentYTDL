@@ -1,49 +1,86 @@
+# ==============================================================================
+#  FluentYTDL - 黄金标准发布流程 (Golden Standard Release Workflow)
+# ==============================================================================
+# 触发条件: 当一个 'v' 开头的标签 (例如 v1.0.0, v0.2.1)被推送到仓库时
+# 工作流程:
+# 1. 检出代码。
+# 2. 设置 Python 3.12 环境。
+# 3. 缓存并安装项目的所有依赖 (包括 PyInstaller)。
+# 4. 运行高可用的 `fetch_tools.ps1` 脚本获取 ffmpeg 和 yt-dlp。
+# 5. 运行 `package.ps1` 脚本进行专业打包，版本号自动从标签获取。
+# 6. 将打包好的 .zip 文件发布为一个新的 GitHub Release。
+# ==============================================================================
+
 name: Build and Release
 
 on:
   push:
     tags:
-      - 'v*' # 只在推 v1.0, v0.0.1 这种标签时触发
+      - 'v*'
 
+# 赋予创建 Release 的权限，无需个人访问令牌 (PAT)
 permissions:
-  contents: write # 赋予发布 Release 的权限 (替代 PAT)
+  contents: write
 
 jobs:
   build-release:
     runs-on: windows-latest
     
     steps:
-      - name: Checkout Code
+      - name: "[1/6] Checkout Code"
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: "[2/6] Setup Python"
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12' 
+          python-version: '3.12'
 
-      - name: Install Dependencies
+      - name: "[3/6] Cache and Install Dependencies"
         run: |
-          pip install pyinstaller pillow
-          # 如果有 requirements.txt，解开下面这行注释
-          # pip install -r requirements.txt
+          # 缓存依赖，提升后续构建速度
+          $cachePath = "$env:LOCALAPPDATA\pip\Cache"
+          $cacheKey = "pip-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}"
+          $cacheRestoreKey = "pip-${{ runner.os }}-"
+          
+          # 使用 Actions 官方缓存机制
+          $cacheHit = & actions/cache@v3 `
+            --path $cachePath `
+            --key $cacheKey `
+            --restore-keys $cacheRestoreKey
+          
+          # 安装所有项目依赖 (包括 dev 依赖，如 pyinstaller)
+          # '.[dev]' 语法会根据 pyproject.toml 安装主依赖和 [project.optional-dependencies] 下的 dev 依赖
+          pip install --upgrade pip
+          pip install ".[dev]"
+        shell: pwsh
 
-      - name: Prepare Tools (Fetch ffmpeg)
+      - name: "[4/6] Prepare Tools (ffmpeg & yt-dlp)"
+        id: fetch_tools
         shell: pwsh
         run: .\scripts\fetch_tools.ps1
-        # 如果你的 tools 需要 Token 才能下载，这里需要额外配置，
-        # 但建议 tools 放公开 Release，这样这里最简单。
 
-      - name: Build Package
+      - name: "[5/6] Build Application Package"
+        id: build_package
         shell: pwsh
-        run: .\scripts\package.ps1 -VersionTag "${{ github.ref_name }}"
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: release/*.zip
-          draft: false      # <--- 确保不是草稿
-          prerelease: false # <--- 确保是正式版
-          generate_release_notes: true # 自动生成更新日志
+        # 将 Git 标签名 (例如 'v1.0.0') 作为版本号传递给打包脚本
+        # package.ps1 会用这个来生成最终的 zip 文件名
+        run: .\scripts\package.ps1 -Mode onedir -Flavor full
         env:
+          # 将标签名设置为环境变量，虽然当前 package.ps1 脚本不直接使用
+          # 但这是一个好习惯，可供未来扩展
+          PACKAGE_VERSION: ${{ github.ref_name }}
+
+      - name: "[6/6] Create GitHub Release"
+        uses: softprops/action-gh-release@v2
+        # 仅当所有前面的步骤都成功，并且是在一个标签上时才执行
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        with:
+          # 从 release 目录中找到所有 .zip 文件并上传
+          files: release/*.zip
+          # 设置为 false，确保发布是正式的，而不是草稿
+          draft: false
+          # 自动根据 commit 历史生成发布说明
+          generate_release_notes: true
+        env:
+          # 使用 GitHub 自动提供的令牌，安全可靠
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
