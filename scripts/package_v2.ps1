@@ -113,9 +113,24 @@ if (-not (Test-Path $toolSource)) {
 $releaseDir = Join-Path $root "release"
 if (-not (Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null }
 
-$version = Get-Version
+# Determine version: prefer tag (if running in CI with GITHUB_REF), otherwise use pyproject
+if ($env:GITHUB_REF -and $env:GITHUB_REF -match 'refs/tags/(?<tag>v?.+)') {
+    $version = $Matches.tag.TrimStart('v')
+    Write-Host "Using version from tag: $version"
+} else {
+    $version = Get-Version
+    Write-Host "Using version from pyproject.toml: $version"
+}
+
 $date = Get-Date -Format 'yyyyMMdd'
-$arch = if ($env:PROCESSOR_ARCHITECTURE -match '64') { 'win64' } else { 'win32' }
+# Arch detection - allow env override (FLUENTYTDL_ARCH), fallback to system properties
+if (-not [string]::IsNullOrWhiteSpace($env:FLUENTYTDL_ARCH)) {
+    $arch = $env:FLUENTYTDL_ARCH
+} elseif ([System.Environment]::Is64BitOperatingSystem) {
+    $arch = 'win64'
+} else {
+    $arch = 'win32'
+}
 
 # Name of the final folder/zip
 $baseName = "FluentYTDL-v$version-$arch-$date"
@@ -125,6 +140,18 @@ if ($Mode -eq 'onefile') { $baseName += "-full" } else { $baseName += "-portable
 $stagingDir = Join-Path $releaseDir "temp_$baseName"
 if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
 New-Item -ItemType Directory -Path $stagingDir | Out-Null
+
+# Prepare artifact metadata
+$artifactMeta = [PSCustomObject]@{
+    name = $baseName
+    version = $version
+    arch = $arch
+    mode = $Mode
+    flavor = $Flavor
+    timestamp = (Get-Date).ToString('o')
+    staging = $stagingDir
+    release_dir = $releaseDir
+}
 
 # A. Copy Executable
 if ($Mode -eq 'onefile') {
@@ -169,8 +196,13 @@ if (Test-Path $manualSource) {
 if ($NoZip) {
     Write-Host "`n[3/3] Zip skipped." -ForegroundColor Green
     Write-Host "Output available at: $stagingDir" -ForegroundColor Green
-    # Open explorer to the folder
-    Invoke-Item $stagingDir
+    # In CI we should not attempt to open Explorer
+    if (-not $env:GITHUB_ACTIONS) {
+        Invoke-Item $stagingDir
+    }
+    # write artifact metadata for consumers
+    $artifactMeta.staging = $stagingDir
+    $artifactMeta | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $releaseDir ($baseName + '.artifact.json')) -Encoding UTF8
     exit 0
 }
 
@@ -190,5 +222,12 @@ Write-Host "Success! Package created:" -ForegroundColor Green
 Write-Host "$zipPath" -ForegroundColor Green
 Write-Host "------------------------------------------" -ForegroundColor Green
 
-# Reveal in explorer
-Invoke-Item $releaseDir
+# write artifact metadata for CI consumption
+$artifactMeta.zip = $zipPath
+$artifactMeta.size_bytes = (Get-Item $zipPath).Length
+$artifactMeta | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $releaseDir ($baseName + '.artifact.json')) -Encoding UTF8
+
+# Avoid trying to open Explorer when running in CI
+if (-not $env:GITHUB_ACTIONS) {
+    Invoke-Item $releaseDir
+}
