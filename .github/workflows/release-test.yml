@@ -30,18 +30,17 @@ jobs:
           pip install pyinstaller
 
       - name: Fetch packaging tools (local-first)
+        shell: pwsh
         run: |
-          pwsh -NoProfile -Command "
-            $local = Get-ChildItem -Path .\release -Filter '*tools*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($local) {
+          $local = Get-ChildItem -Path .\release -Filter '*tools*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($local) {
               Write-Host "Using local tools zip: $($local.FullName)"
               if (-not (Test-Path '.\\assets\\bin')) { New-Item -ItemType Directory -Path '.\\assets\\bin' | Out-Null }
               Expand-Archive -Path $local.FullName -DestinationPath '.\\assets\\bin' -Force
-            } else {
+          } else {
               Write-Host "No local tools zip found; downloading from TOOLS_URL or Release"
-              pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\fetch_tools.ps1 -Url \"$Env:TOOLS_URL\" -GitHubRepo \"$Env:TOOLS_REPO\" -ReleaseTag \"$Env:TOOLS_RELEASE_TAG\" -Dest \".\\assets\\bin\" -Force
-            }
-          "
+              pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\fetch_tools.ps1 -Url "$Env:TOOLS_URL" -GitHubRepo "$Env:TOOLS_REPO" -ReleaseTag "$Env:TOOLS_RELEASE_TAG" -Dest ".\\assets\\bin" -Force
+          }
 
       - name: Run packaging script
         run: |
