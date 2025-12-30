@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0"
 
 echo Checking for package script...
-if not exist "package_v2.ps1" (
-    echo Error: package_v2.ps1 not found in current directory!
+if not exist "package.ps1" (
+    echo Error: package.ps1 not found in current directory!
     echo Current dir: %CD%
     pause
     exit /b 1
@@ -34,19 +34,19 @@ goto MENU
 :DO_SHELL
 echo.
 echo [CMD] Launching PowerShell Build (Shell)...
-powershell -NoProfile -ExecutionPolicy Bypass -File "package_v2.ps1" -Mode onefile -Flavor shell -NoZip
+powershell -NoProfile -ExecutionPolicy Bypass -File "package.ps1" -Mode onefile -Flavor shell -NoZip
 goto CHECK_ERROR
 
 :DO_FULL_ZIP
 echo.
 echo [CMD] Launching PowerShell Build (Full Zip)...
-powershell -NoProfile -ExecutionPolicy Bypass -File "package_v2.ps1" -Mode onefile -Flavor full
+powershell -NoProfile -ExecutionPolicy Bypass -File "package.ps1" -Mode onefile -Flavor full
 goto CHECK_ERROR
 
 :DO_DIR_FULL
 echo.
 echo [CMD] Launching PowerShell Build (Portable Folder)...
-powershell -NoProfile -ExecutionPolicy Bypass -File "package_v2.ps1" -Mode onedir -Flavor full
+powershell -NoProfile -ExecutionPolicy Bypass -File "package.ps1" -Mode onedir -Flavor full
 goto CHECK_ERROR
 
 :CHECK_ERROR

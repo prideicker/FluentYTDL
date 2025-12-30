@@ -1,10 +1,10 @@
 """
-Install an image as application icon: copies given image to assets/logo.png
+Install an image as application icon: copies given image to assets/logo.ico
 Usage:
-  python scripts/install_icon.py path/to/your/icon.png
+  python scripts/install_icon.py path/to/your/icon.ico
 
 This is a small helper so you can place the attached icon file into the project
-and the application will pick it up automatically (resource_path("assets","logo.png")).
+and the application will pick it up automatically (resource_path("assets","logo.ico")).
 """
 
 import sys
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     proj_root = Path(__file__).resolve().parents[1]
     assets_dir = proj_root / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
-    dst = assets_dir / "logo.png"
+    dst = assets_dir / "logo.ico"
     try:
         shutil.copy2(src, dst)
         print(f"Installed icon -> {dst}")

@@ -76,7 +76,7 @@ $pyArgs = @(
     "--name", "FluentYTDL",
     "--workpath", (Join-Path $root "build"),
     "--distpath", (Join-Path $root "dist"),
-    "--icon", (Join-Path $root "assets\logo.png") # Add application icon
+    "--icon", (Join-Path $root "assets\logo.ico") # Add application icon
 )
 
 if ($Mode -eq 'onefile') {
