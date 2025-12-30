@@ -70,7 +70,7 @@ jobs:
           path: release/*
 
   publish:
-    name: Publish Release
+    name: Publish Release (debug only)
     runs-on: ubuntu-latest
     needs: package
     steps:
@@ -80,22 +80,14 @@ jobs:
           name: release-artifacts
           path: release
 
-      - name: Check PAT access to repo (debug)
-        if: success()
+      - name: List artifacts
         run: |
-          echo "Checking access to repo with TEST_UPLOAD_PAT..."
-          curl -s -H "Authorization: token ${{ secrets.TEST_UPLOAD_PAT }}" "https://api.github.com/repos/prideicker/FluentYTDL" | grep '"full_name"' || echo "PAT may not have repo access or request failed"
-
-      - name: Create Release and Upload Assets (uses PAT)
-        if: success()
-        uses: ncipollo/release-action@v1
-        with:
-          # Explicitly pass the PAT token to the action (avoid using default GITHUB_TOKEN)
-          token: ${{ secrets.TEST_UPLOAD_PAT }}
-          artifacts: 'release/*.zip,release/*.sha256'
-          draft: false
-          tag: ${{ github.ref_name }}
+          echo "Listing release/"
+          ls -la release || true
 
       - name: Debug: show release tag
         run: |
           echo "Release tag to publish: ${{ github.ref_name }}"
+
+      - name: (temporary) End workflow
+        run: echo "Publish job is in debug mode; release creation is skipped for now"
