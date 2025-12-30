@@ -34,6 +34,11 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\package_v2.ps1 -Mode onedir -Flavor full
 
+      - name: Install test deps and run smoke tests
+        run: |
+          python -m pip install pytest
+          pytest -q tests/test_smoke.py
+
       - name: Create checksum for artifact
         if: success()
         run: |
