@@ -21,6 +21,23 @@ jobs:
       - name: Run packaging script
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File .\package.ps1 -Mode onedir -Flavor full -AutoInstallPyInstaller
+
+      - name: Create checksum for artifact
+        if: success()
+        run: |
+          pwsh -NoProfile -Command "Get-ChildItem release\*.zip | ForEach-Object { $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash; Set-Content -Path ($_.FullName + '.sha256') -Value ($hash + '  ' + $_.Name) -Encoding UTF8 }"
+
+      - name: Upload Release Assets (uses PAT)
+        if: success()
+        uses: ncipollo/release-action@v1
+        env:
+          # Use your provided PAT so release can trigger other workflows and perform uploads
+          GITHUB_TOKEN: ${{ secrets.TEST_UPLOAD_PAT }}
+        with:
+          artifacts: 'release/*.zip,release/*.sha256'
+          draft: false
+          tag: ${{ github.ref_name }}
+
       - name: Upload artifacts
         if: success()
         uses: actions/upload-artifact@v4
