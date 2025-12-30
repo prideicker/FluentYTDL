@@ -70,18 +70,21 @@ try {
     throw "Failed to fetch yt-dlp. Error: $_ "
 }
 
-# 阶段三：获取 ffmpeg
+# 阶段三：获取 ffmpeg (修复版)
 Write-Host "`n>> [3/5] Fetching latest ffmpeg from GitHub (BtbN)..." -ForegroundColor Cyan
 try {
-    # BtbN 的发布资产命名经常变化，直接使用其提供的固定 "latest" 链接更稳定。
-    # 这也意味着我们将跳过校验，但在 CI 环境中，来自 GitHub HTTPS 的下载风险很低。
+    # 使用 BtbN 提供的固定链接 (Master Builds)，避免 API 解析错误
+    # 这个链接始终指向最新的构建，无需去查 Release ID
     $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
     $zipPath = Join-Path $TempDir "ffmpeg.zip"
+
+    # 1. 下载 ZIP
+    Write-Host "    Downloading FFmpeg zip..." -NoNewline
+    Invoke-WebRequest -Uri $ffmpegUrl -OutFile $zipPath -ErrorAction Stop
+    Write-Host " [OK]" -ForegroundColor Green
     
-    Invoke-Download -Uri $ffmpegUrl -OutFile $zipPath
-    Write-Host "    [OK] FFmpeg downloaded. Note: Checksum verification is skipped for this dynamic 'latest' build." -ForegroundColor Green
 } catch {
-    throw "Failed to fetch ffmpeg. Error: $_ "
+    throw "Failed to fetch ffmpeg. Error: $_"
 }
 
 # 阶段四：获取 deno
@@ -122,20 +125,32 @@ $denoTargetDir = New-Item -ItemType Directory -Path (Join-Path $TargetDir "deno"
 # 部署 yt-dlp
 Move-Item -Path (Join-Path $TempDir "yt-dlp.exe") -Destination $ytDlpTargetDir
 
-# 部署 ffmpeg
-$ffmpegZipPath = Join-Path $TempDir "ffmpeg.zip"
-$ffmpegExtractPath = Join-Path $TempDir "ffmpeg_extracted"
-New-Item -ItemType Directory -Path $ffmpegExtractPath | Out-Null
-Expand-Archive -Path $ffmpegZipPath -DestinationPath $ffmpegExtractPath -Force
-# BtbN 的压缩包解压后会有一个不确定的子目录名，例如 'ffmpeg-master-latest-win64-gpl'
-# 我们需要找到这个目录，然后将其中的 bin 文件移动到目标位置
-$extractedFolder = Get-ChildItem -Path $ffmpegExtractPath -Directory | Select-Object -First 1
-if ($extractedFolder) {
-    $sourceBin = Join-Path $extractedFolder.FullName "bin"
-    Move-Item -Path (Join-Path $sourceBin "ffmpeg.exe") -Destination $ffmpegTargetDir
-    Move-Item -Path (Join-Path $sourceBin "ffprobe.exe") -Destination $ffmpegTargetDir
-} else {
-    throw "Could not find the extracted ffmpeg folder inside '$ffmpegExtractPath'."
+# 部署 ffmpeg (修复版)
+try {
+    Write-Host "    Extracting FFmpeg..." -NoNewline
+    $ffmpegZipPath = Join-Path $TempDir "ffmpeg.zip"
+    Expand-Archive -Path $ffmpegZipPath -DestinationPath $TempDir -Force
+    
+    # 找到解压后的内部文件夹 (例如 'ffmpeg-master-latest-win64-gpl')
+    $extractedRoot = Get-ChildItem -Path $TempDir -Directory | Where-Object { $_.Name -like "ffmpeg-*-gpl" } | Select-Object -First 1
+    
+    if ($extractedRoot) {
+        # 移动 bin 目录下的 exe 到我们的目标目录
+        $sourceBin = Join-Path $extractedRoot.FullName "bin"
+        
+        if (Test-Path (Join-Path $sourceBin "ffmpeg.exe")) {
+            Move-Item -Path (Join-Path $sourceBin "ffmpeg.exe") -Destination $ffmpegTargetDir -Force
+        }
+        if (Test-Path (Join-Path $sourceBin "ffprobe.exe")) {
+            Move-Item -Path (Join-Path $sourceBin "ffprobe.exe") -Destination $ffmpegTargetDir -Force
+        }
+        
+        Write-Host " [OK] FFmpeg installed." -ForegroundColor Green
+    } else {
+        throw "Failed to locate extracted ffmpeg folder structure inside '$TempDir'."
+    }
+} catch {
+    throw "Failed to deploy ffmpeg. Error: $_"
 }
 
 # 部署 deno
