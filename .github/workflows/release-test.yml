@@ -57,13 +57,7 @@ jobs:
               Set-Content -Path ($f.FullName + '.sha256') -Value $line -Encoding UTF8
           }
 
-      - name: Check PAT access to repo (debug)
-        if: success()
-        run: |
-          echo "Checking access to repo with TEST_UPLOAD_PAT..."
-          curl -s -H "Authorization: token ${{ secrets.TEST_UPLOAD_PAT }}" "https://api.github.com/repos/prideicker/FluentYTDL" | grep '"full_name"' || echo "PAT may not have repo access or request failed"
-
-      - name: Create Release and Upload Assets (uses PAT)
+      - name: Create Release and Upload Assets
         if: success()
         uses: ncipollo/release-action@v1
         with:
@@ -72,6 +66,6 @@ jobs:
           draft: true
           tag: ${{ github.ref_name }}
 
-      - name: Debug: show release tag
+      - name: Debug show release tag
         run: |
           echo "Release tag to publish: ${{ github.ref_name }}"
