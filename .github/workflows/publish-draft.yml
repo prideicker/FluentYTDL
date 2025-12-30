@@ -1,0 +1,31 @@
+name: Publish Draft Release
+
+on:
+  push:
+    branches:
+      - 'publish-trigger'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install jq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Publish draft release for tag
+        env:
+          TOKEN: ${{ secrets.TEST_UPLOAD_PAT }}
+          TAG: v0.1.0
+        run: |
+          set -e
+          echo "Looking up release for tag $TAG"
+          release=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/prideicker/FluentYTDL/releases/tags/$TAG")
+          id=$(echo "$release" | jq -r .id)
+          if [ -z "$id" ] || [ "$id" = "null" ]; then
+            echo "No release found for tag $TAG"; exit 1
+          fi
+          echo "Publishing release id $id"
+          curl -s -X PATCH -H "Authorization: token $TOKEN" -H "Content-Type: application/json" -d '{"draft":false}' "https://api.github.com/repos/prideicker/FluentYTDL/releases/$id" | jq .
+          echo "Published release for tag $TAG"
