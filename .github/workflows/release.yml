@@ -8,7 +8,7 @@ on:
 
 env:
   # optional: set a default tools URL or use release tag resolution
-  TOOLS_URL: ${{ secrets.TOOLS_URL }}
+  TOOLS_URL: 'https://raw.githubusercontent.com/prideicker/FluentYTDL/temp/add-test-tools/release/tools-windows-x64-test.zip'
   # alternatively set TOOLS_REPO (owner/repo) and TOOLS_RELEASE_TAG
   TOOLS_REPO: ''
   TOOLS_RELEASE_TAG: 'latest'
