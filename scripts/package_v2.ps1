@@ -90,6 +90,31 @@ if ($Mode -eq 'onefile') {
 $srcPath = Join-Path $root "src"
 $pyArgs += "--paths", "`"$srcPath`""
 
+# Pre-build: ensure icon conversion dependencies if needed
+$iconPath = Join-Path $root 'assets\logo.png'
+if ((Test-Path $iconPath) -and (([System.IO.Path]::GetExtension($iconPath)).ToLower() -eq '.png')) {
+    Write-Host "Detected PNG icon at $iconPath"
+    $pilOk = $false
+    try {
+        $test = & $python -c "import PIL; print('ok')" 2>$null
+        if ($test -eq 'ok') { $pilOk = $true }
+    } catch {
+        $pilOk = $false
+    }
+
+    if (-not $pilOk) {
+        if ($env:GITHUB_ACTIONS) {
+            Write-Host "Pillow not found; installing pillow in CI..."
+            Invoke-Expression "$python -m pip install --upgrade pip"
+            Invoke-Expression "$python -m pip install pillow"
+            try { $test = & $python -c "import PIL; print('ok')" 2>$null; if ($test -eq 'ok') { $pilOk = $true } } catch { $pilOk = $false }
+            if (-not $pilOk) { throw "Pillow installation failed; cannot convert PNG icon for PyInstaller. Convert icon to .ico or ensure pillow is installable in CI." }
+        } else {
+            Write-Warning "Pillow (PIL) not found; PyInstaller will fail to convert PNG icon to .ico. Convert your icon to .ico or install Pillow locally (pip install pillow)."
+        }
+    }
+}
+
 # Execute Build
 $buildCmd = "$python $pyArgs `"$mainScript`""
 Write-Host "Executing: $buildCmd" -ForegroundColor Gray
@@ -113,9 +138,22 @@ if (-not (Test-Path $toolSource)) {
 $releaseDir = Join-Path $root "release"
 if (-not (Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null }
 
+# Prefer version from tag when running in CI (triggered on tag)
 $version = Get-Version
-$date = Get-Date -Format 'yyyyMMdd'
-$arch = if ($env:PROCESSOR_ARCHITECTURE -match '64') { 'win64' } else { 'win32' }
+if ($env:GITHUB_REF -and ($env:GITHUB_REF -match 'refs/tags/v(.+)')) {
+    $version = $Matches[1]
+    Write-Host "CI: Using version from tag: $version"
+}
+# deterministic date for builds (allow override via env)
+$buildDate = if ($env:FLUENTYTDL_BUILD_DATE) { $env:FLUENTYTDL_BUILD_DATE } else { Get-Date -Format 'yyyyMMdd' }
+$date = $buildDate
+# determine arch robustly
+if ($env:GITHUB_ACTIONS) {
+    # On GitHub runners, prefer PROCESSOR_ARCHITECTURE or fall back to 64-bit detection
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -match '64' -or [Environment]::Is64BitProcess) { 'win64' } else { 'win32' }
+} else {
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -match '64') { 'win64' } else { 'win32' }
+}
 
 # Name of the final folder/zip
 $baseName = "FluentYTDL-v$version-$arch-$date"
@@ -190,5 +228,22 @@ Write-Host "Success! Package created:" -ForegroundColor Green
 Write-Host "$zipPath" -ForegroundColor Green
 Write-Host "------------------------------------------" -ForegroundColor Green
 
-# Reveal in explorer
-Invoke-Item $releaseDir
+# Emit artifact metadata for CI
+$meta = [PSCustomObject]@{
+    version = $version
+    name = $baseName
+    zip = (Split-Path $zipPath -Leaf)
+    path = $zipPath
+    date = $date
+}
+$metaJson = $meta | ConvertTo-Json -Depth 4
+$metaPath = Join-Path $releaseDir 'artifact-info.json'
+Set-Content -Path $metaPath -Value $metaJson -Encoding UTF8
+Write-Host "Wrote artifact metadata: $metaPath"
+
+# In CI we should not open Explorer
+if ($env:GITHUB_ACTIONS) {
+    Write-Host "CI detected: skipping Invoke-Item/explorer open"
+} else {
+    Invoke-Item $releaseDir
+}
