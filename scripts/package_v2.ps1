@@ -92,7 +92,7 @@ $pyArgs += "--paths", "`"$srcPath`""
 
 # Pre-build: ensure icon conversion dependencies if needed
 $iconPath = Join-Path $root 'assets\logo.png'
-if (Test-Path $iconPath -and ([System.IO.Path]::GetExtension($iconPath).ToLower() -eq '.png')) {
+if ((Test-Path $iconPath) -and (([System.IO.Path]::GetExtension($iconPath)).ToLower() -eq '.png')) {
     Write-Host "Detected PNG icon at $iconPath"
     $pilOk = $false
     try {
