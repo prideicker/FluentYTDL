@@ -90,6 +90,31 @@ if ($Mode -eq 'onefile') {
 $srcPath = Join-Path $root "src"
 $pyArgs += "--paths", "`"$srcPath`""
 
+# Pre-build: ensure icon conversion dependencies if needed
+$iconPath = Join-Path $root 'assets\logo.png'
+if (Test-Path $iconPath -and ([System.IO.Path]::GetExtension($iconPath).ToLower() -eq '.png')) {
+    Write-Host "Detected PNG icon at $iconPath"
+    $pilOk = $false
+    try {
+        $test = & $python -c "import PIL; print('ok')" 2>$null
+        if ($test -eq 'ok') { $pilOk = $true }
+    } catch {
+        $pilOk = $false
+    }
+
+    if (-not $pilOk) {
+        if ($env:GITHUB_ACTIONS) {
+            Write-Host "Pillow not found; installing pillow in CI..."
+            Invoke-Expression "$python -m pip install --upgrade pip"
+            Invoke-Expression "$python -m pip install pillow"
+            try { $test = & $python -c "import PIL; print('ok')" 2>$null; if ($test -eq 'ok') { $pilOk = $true } } catch { $pilOk = $false }
+            if (-not $pilOk) { throw "Pillow installation failed; cannot convert PNG icon for PyInstaller. Convert icon to .ico or ensure pillow is installable in CI." }
+        } else {
+            Write-Warning "Pillow (PIL) not found; PyInstaller will fail to convert PNG icon to .ico. Convert your icon to .ico or install Pillow locally (pip install pillow)."
+        }
+    }
+}
+
 # Execute Build
 $buildCmd = "$python $pyArgs `"$mainScript`""
 Write-Host "Executing: $buildCmd" -ForegroundColor Gray
