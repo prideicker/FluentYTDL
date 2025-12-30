@@ -48,8 +48,14 @@ jobs:
 
       - name: Create checksum for artifact
         if: success()
+        shell: pwsh
         run: |
-          pwsh -NoProfile -Command "Get-ChildItem release\*.zip | ForEach-Object { $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash; Set-Content -Path ($_.FullName + '.sha256') -Value ($hash + '  ' + $_.Name) -Encoding UTF8 }"
+          $files = Get-ChildItem release\*.zip -ErrorAction Stop
+          foreach ($f in $files) {
+              $hash = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash
+              $line = "${hash}  $($f.Name)"
+              Set-Content -Path ($f.FullName + '.sha256') -Value $line -Encoding UTF8
+          }
 
       - name: Upload Release Assets (draft)
         if: success()
