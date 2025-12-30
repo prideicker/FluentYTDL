@@ -1,9 +1,10 @@
 # 文件名: scripts/fetch_tools.ps1
-# 作用: 全自动、高安全地从官方 GitHub Release 源获取项目所需的全部外部工具。
+# 作用: 全自动、高安全、高容错地从官方 GitHub Release 源获取全部外部工具。
 #
-# v4 (最终版) 更新:
-# - 新增 Deno 的自动下载功能，从 denoland/deno 的官方 Release 获取。
-# - 统一所有工具 (yt-dlp, ffmpeg, deno) 的下载逻辑，全部使用 GitHub API。
+# v5 (最终加固版) 更新:
+# - 修正了 ffmpeg 校验文件名的拼写错误 (sha256sum.txt -> sha256.txt)。
+# - 对所有API调用和文件查找增加了严格的、前置的空值检查和明确的错误报告。
+# - 优化了代码结构，确保在任何资产(asset)查找失败时能立刻定位问题。
 
 param (
     [string]$TargetDir = "$PSScriptRoot\..\assets\bin"
@@ -47,13 +48,20 @@ Write-Host "`n>> [2/5] Fetching latest yt-dlp from GitHub..." -ForegroundColor C
 try {
     $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
     $exeAsset = $releaseInfo.assets | Where-Object { $_.name -eq 'yt-dlp.exe' }
+    if (-not $exeAsset) { throw "Could not find 'yt-dlp.exe' in the latest yt-dlp release." }
+    
     $checksumAsset = $releaseInfo.assets | Where-Object { $_.name -eq 'SHA2-256SUMS' }
+    if (-not $checksumAsset) { throw "Could not find 'SHA2-256SUMS' in the latest yt-dlp release." }
 
     $checksumsFile = Join-Path $TempDir "yt-dlp-SHA2-256SUMS.txt"
-    Invoke-Download -Uri $checksumAsset.browser_download_url -OutFile $checksumsFile
+    $checksumUrl = $checksumAsset.browser_download_url
+    if ([string]::IsNullOrEmpty($checksumUrl)) { throw "yt-dlp checksum asset found, but its download URL is empty." }
+    Invoke-Download -Uri $checksumUrl -OutFile $checksumsFile
     
     $exePath = Join-Path $TempDir "yt-dlp.exe"
-    Invoke-Download -Uri $exeAsset.browser_download_url -OutFile $exePath
+    $exeUrl = $exeAsset.browser_download_url
+    if ([string]::IsNullOrEmpty($exeUrl)) { throw "yt-dlp.exe asset found, but its download URL is empty." }
+    Invoke-Download -Uri $exeUrl -OutFile $exePath
 
     $expectedHashLine = Get-Content $checksumsFile | Select-String -Pattern "yt-dlp.exe"
     $expectedHash = ($expectedHashLine -split ' ')[0]
@@ -67,15 +75,21 @@ Write-Host "`n>> [3/5] Fetching latest ffmpeg from GitHub (BtbN)..." -Foreground
 try {
     $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
     $zipAsset = $releaseInfo.assets | Where-Object { $_.name -like '*win64-gpl-shared*.zip' } | Select-Object -First 1
-    $checksumAsset = $releaseInfo.assets | Where-Object { $_.name -eq 'sha256sum.txt' }
-    
-    if (-not $zipAsset) { throw "Could not find a suitable ffmpeg zip asset in the latest release." }
+    if (-not $zipAsset) { throw "Could not find a suitable '...win64-gpl-shared.zip' asset in the latest BtbN/FFmpeg-Builds release." }
 
-    $checksumsFile = Join-Path $TempDir "ffmpeg-sha256sum.txt"
-    Invoke-Download -Uri $ffmpegChecksumAsset.browser_download_url -OutFile $checksumsFile
+    # 修正：正确的校验文件名是 sha256.txt
+    $checksumAsset = $releaseInfo.assets | Where-Object { $_.name -eq 'sha256.txt' }
+    if (-not $checksumAsset) { throw "Could not find 'sha256.txt' in the latest BtbN/FFmpeg-Builds release." }
+    
+    $checksumsFile = Join-Path $TempDir "ffmpeg-sha256.txt"
+    $checksumUrl = $checksumAsset.browser_download_url
+    if ([string]::IsNullOrEmpty($checksumUrl)) { throw "ffmpeg checksum asset found, but its download URL is empty." }
+    Invoke-Download -Uri $checksumUrl -OutFile $checksumsFile
 
     $zipPath = Join-Path $TempDir $zipAsset.name
-    Invoke-Download -Uri $zipAsset.browser_download_url -OutFile $zipPath
+    $zipUrl = $zipAsset.browser_download_url
+    if ([string]::IsNullOrEmpty($zipUrl)) { throw "ffmpeg zip asset '$($zipAsset.name)' found, but its download URL is empty." }
+    Invoke-Download -Uri $zipUrl -OutFile $zipPath
     
     $expectedHashLine = Get-Content $checksumsFile | Select-String -Pattern $zipAsset.name
     $expectedHash = ($expectedHashLine -split ' ')[0]
@@ -89,13 +103,21 @@ Write-Host "`n>> [4/5] Fetching latest deno from GitHub..." -ForegroundColor Cya
 try {
     $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/denoland/deno/releases/latest"
     $zipAsset = $releaseInfo.assets | Where-Object { $_.name -eq 'deno-x86_64-pc-windows-msvc.zip' }
-    $checksumAsset = $releaseInfo.assets | Where-Object { $_.name -eq "$($zipAsset.name).sha256" }
+    if (-not $zipAsset) { throw "Could not find 'deno-x86_64-pc-windows-msvc.zip' in the latest deno release." }
+
+    $checksumAssetName = "$($zipAsset.name).sha256"
+    $checksumAsset = $releaseInfo.assets | Where-Object { $_.name -eq $checksumAssetName }
+    if (-not $checksumAsset) { throw "Could not find '$checksumAssetName' in the latest deno release." }
 
     $checksumFile = Join-Path $TempDir "deno.sha256"
-    Invoke-Download -Uri $checksumAsset.browser_download_url -OutFile $checksumFile
+    $checksumUrl = $checksumAsset.browser_download_url
+    if ([string]::IsNullOrEmpty($checksumUrl)) { throw "deno checksum asset found, but its download URL is empty." }
+    Invoke-Download -Uri $checksumUrl -OutFile $checksumFile
 
     $zipPath = Join-Path $TempDir $zipAsset.name
-    Invoke-Download -Uri $zipAsset.browser_download_url -OutFile $zipPath
+    $zipUrl = $zipAsset.browser_download_url
+    if ([string]::IsNullOrEmpty($zipUrl)) { throw "deno zip asset '$($zipAsset.name)' found, but its download URL is empty." }
+    Invoke-Download -Uri $zipUrl -OutFile $zipPath
 
     $expectedHash = (Get-Content $checksumFile) -split ' ' | Select-Object -First 1
     Verify-Checksum -FilePath $zipPath -ExpectedHash $expectedHash
