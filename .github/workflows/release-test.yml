@@ -61,6 +61,10 @@ jobs:
         if: success()
         uses: ncipollo/release-action@v1
         with:
+          token: ${{ secrets.TEST_UPLOAD_PAT }}
           artifacts: 'release/*.zip,release/*.sha256'
           draft: true
           tag: ${{ github.ref_name }}
+      - name: Debug: show release tag
+        run: |
+          echo "Release tag to publish: ${{ github.ref_name }}"

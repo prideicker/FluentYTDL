@@ -83,10 +83,13 @@ jobs:
       - name: Create Release and Upload Assets (uses PAT)
         if: success()
         uses: ncipollo/release-action@v1
-        env:
-          # Use your provided PAT so release can trigger other workflows and perform uploads
-          GITHUB_TOKEN: ${{ secrets.TEST_UPLOAD_PAT }}
         with:
+          # Explicitly pass the PAT token to the action (avoid using default GITHUB_TOKEN)
+          token: ${{ secrets.TEST_UPLOAD_PAT }}
           artifacts: 'release/*.zip,release/*.sha256'
           draft: false
           tag: ${{ github.ref_name }}
+        # Add a small debug note for clarity
+      - name: Debug: show release tag
+        run: |
+          echo "Release tag to publish: ${{ github.ref_name }}"
