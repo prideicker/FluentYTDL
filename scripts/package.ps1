@@ -17,7 +17,8 @@ Write-Host ">> [Step 2] 开始 PyInstaller 打包..." -ForegroundColor Cyan
 # 确保你处于虚拟环境或已安装 pyinstaller
 pyinstaller --noconfirm --onedir --windowed --clean `
     --name "FluentYTDL" `
-    --add-data "$Workspace\assets;assets" `
+    --add-data "$Workspace\assets\bin;bin" `
+    --add-data "$Workspace\assets\logo.png;assets" `
     "$Workspace\main.py" 
 # ↑↑↑ 注意：请确认 main.py 的路径是否正确，根据你实际结构调整
 
