@@ -1,6 +1,6 @@
 [project]
 name = "FluentYTDL"
-version = "0.1.0"
+version = "0.1.1"
 description = "Professional YouTube downloader (Stage 1: core architecture)"
 requires-python = ">=3.10"
 dependencies = [
