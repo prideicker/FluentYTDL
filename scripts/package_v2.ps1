@@ -113,23 +113,21 @@ if (-not (Test-Path $toolSource)) {
 $releaseDir = Join-Path $root "release"
 if (-not (Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null }
 
-# Determine version: prefer tag (if running in CI with GITHUB_REF), otherwise use pyproject
-if ($env:GITHUB_REF -and $env:GITHUB_REF -match 'refs/tags/(?<tag>v?.+)') {
-    $version = $Matches.tag.TrimStart('v')
-    Write-Host "Using version from tag: $version"
-} else {
-    $version = Get-Version
-    Write-Host "Using version from pyproject.toml: $version"
+# Prefer version from tag when running in CI (triggered on tag)
+$version = Get-Version
+if ($env:GITHUB_REF -and ($env:GITHUB_REF -match 'refs/tags/v(.+)')) {
+    $version = $Matches[1]
+    Write-Host "CI: Using version from tag: $version"
 }
-
-$date = Get-Date -Format 'yyyyMMdd'
-# Arch detection - allow env override (FLUENTYTDL_ARCH), fallback to system properties
-if (-not [string]::IsNullOrWhiteSpace($env:FLUENTYTDL_ARCH)) {
-    $arch = $env:FLUENTYTDL_ARCH
-} elseif ([System.Environment]::Is64BitOperatingSystem) {
-    $arch = 'win64'
+# deterministic date for builds (allow override via env)
+$buildDate = if ($env:FLUENTYTDL_BUILD_DATE) { $env:FLUENTYTDL_BUILD_DATE } else { Get-Date -Format 'yyyyMMdd' }
+$date = $buildDate
+# determine arch robustly
+if ($env:GITHUB_ACTIONS) {
+    # On GitHub runners, prefer PROCESSOR_ARCHITECTURE or fall back to 64-bit detection
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -match '64' -or [Environment]::Is64BitProcess) { 'win64' } else { 'win32' }
 } else {
-    $arch = 'win32'
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -match '64') { 'win64' } else { 'win32' }
 }
 
 # Name of the final folder/zip
@@ -140,18 +138,6 @@ if ($Mode -eq 'onefile') { $baseName += "-full" } else { $baseName += "-portable
 $stagingDir = Join-Path $releaseDir "temp_$baseName"
 if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
 New-Item -ItemType Directory -Path $stagingDir | Out-Null
-
-# Prepare artifact metadata
-$artifactMeta = [PSCustomObject]@{
-    name = $baseName
-    version = $version
-    arch = $arch
-    mode = $Mode
-    flavor = $Flavor
-    timestamp = (Get-Date).ToString('o')
-    staging = $stagingDir
-    release_dir = $releaseDir
-}
 
 # A. Copy Executable
 if ($Mode -eq 'onefile') {
@@ -196,13 +182,8 @@ if (Test-Path $manualSource) {
 if ($NoZip) {
     Write-Host "`n[3/3] Zip skipped." -ForegroundColor Green
     Write-Host "Output available at: $stagingDir" -ForegroundColor Green
-    # In CI we should not attempt to open Explorer
-    if (-not $env:GITHUB_ACTIONS) {
-        Invoke-Item $stagingDir
-    }
-    # write artifact metadata for consumers
-    $artifactMeta.staging = $stagingDir
-    $artifactMeta | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $releaseDir ($baseName + '.artifact.json')) -Encoding UTF8
+    # Open explorer to the folder
+    Invoke-Item $stagingDir
     exit 0
 }
 
@@ -222,12 +203,22 @@ Write-Host "Success! Package created:" -ForegroundColor Green
 Write-Host "$zipPath" -ForegroundColor Green
 Write-Host "------------------------------------------" -ForegroundColor Green
 
-# write artifact metadata for CI consumption
-$artifactMeta.zip = $zipPath
-$artifactMeta.size_bytes = (Get-Item $zipPath).Length
-$artifactMeta | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $releaseDir ($baseName + '.artifact.json')) -Encoding UTF8
+# Emit artifact metadata for CI
+$meta = [PSCustomObject]@{
+    version = $version
+    name = $baseName
+    zip = (Split-Path $zipPath -Leaf)
+    path = $zipPath
+    date = $date
+}
+$metaJson = $meta | ConvertTo-Json -Depth 4
+$metaPath = Join-Path $releaseDir 'artifact-info.json'
+Set-Content -Path $metaPath -Value $metaJson -Encoding UTF8
+Write-Host "Wrote artifact metadata: $metaPath"
 
-# Avoid trying to open Explorer when running in CI
-if (-not $env:GITHUB_ACTIONS) {
+# In CI we should not open Explorer
+if ($env:GITHUB_ACTIONS) {
+    Write-Host "CI detected: skipping Invoke-Item/explorer open"
+} else {
     Invoke-Item $releaseDir
 }
