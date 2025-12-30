@@ -4,26 +4,53 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: {}
+
+env:
+  # optional: set a default tools URL or use release tag resolution
+  TOOLS_URL: ${{ secrets.TOOLS_URL }}
+  # alternatively set TOOLS_REPO (owner/repo) and TOOLS_RELEASE_TAG
+  TOOLS_REPO: ''
+  TOOLS_RELEASE_TAG: 'latest'
 
 jobs:
   package:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-      - name: Install PyInstaller (for packaging script)
+
+      - name: Install PyInstaller
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
+
+      - name: Fetch packaging tools
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\fetch_tools.ps1 -Url "$Env:TOOLS_URL" -GitHubRepo "$Env:TOOLS_REPO" -ReleaseTag "$Env:TOOLS_RELEASE_TAG" -Dest ".\\assets\\bin" -Force
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run packaging script
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File .\package.ps1 -Mode onedir -Flavor full -AutoInstallPyInstaller
-      - name: Upload artifacts
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\package_v2.ps1 -Mode onedir -Flavor full
+
+      - name: Create checksum for artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        run: |
+          pwsh -NoProfile -Command "Get-ChildItem release\*.zip | ForEach-Object { sha256sum = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash; Set-Content -Path ($_.FullName + '.sha256') -Value ($sha256sum + '  ' + $_.Name) -Encoding UTF8 }"
+
+      - name: Upload Release Assets
+        if: success()
+        uses: ncipollo/release-action@v1
         with:
-          name: fluentydl-dist
-          path: dist/**
+          artifacts: 'release/*.zip,release/*.sha256'
+          draft: true
+          tag: ${{ github.ref_name }}
