@@ -1,0 +1,7 @@
+Planned moves for rabbish-related scripts:
+
+D:\YouTube\FluentYTDL\scripts\move_build_and_venv_to_rabbish.ps1 -> D:\YouTube\FluentYTDL\rabbish\move_build_and_venv_to_rabbish.ps1
+D:\YouTube\FluentYTDL\scripts\move_build_to_rabbish.ps1     -> D:\YouTube\FluentYTDL\rabbish\move_build_to_rabbish.ps1
+D:\YouTube\FluentYTDL\scripts\move_old_package_to_rabbish.ps1 -> D:\YouTube\FluentYTDL\rabbish\move_old_package_to_rabbish.ps1
+
+If any of above files are missing, they will be skipped. After moving, I will create/append move_log.txt in the rabbish root and add a small restore script 'rabbish/restore_scripts_to_scripts.ps1' to move them back.

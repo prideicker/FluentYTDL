@@ -37,11 +37,11 @@ jobs:
           $local = Get-ChildItem -Path .\release -Filter '*tools*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($local) {
               Write-Host "Using local tools zip: $($local.FullName)"
-              if (-not (Test-Path '.\\assets\\bin')) { New-Item -ItemType Directory -Path '.\\assets\\bin' | Out-Null }
-              Expand-Archive -Path $local.FullName -DestinationPath '.\\assets\\bin' -Force
+              if (-not (Test-Path '.\assets\bin')) { New-Item -ItemType Directory -Path '.\assets\bin' | Out-Null }
+              Expand-Archive -Path $local.FullName -DestinationPath '.\assets\bin' -Force
           } else {
               Write-Host "No local tools zip found; downloading from TOOLS_URL or Release"
-              pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\fetch_tools.ps1 -Url "$Env:TOOLS_URL" -GitHubRepo "$Env:TOOLS_REPO" -ReleaseTag "$Env:TOOLS_RELEASE_TAG" -Dest ".\\assets\\bin" -Force
+              pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\fetch_tools.ps1 -Url "$Env:TOOLS_URL" -GitHubRepo "$Env:TOOLS_REPO" -ReleaseTag "$Env:TOOLS_RELEASE_TAG" -Dest ".\assets\bin" -Force
           }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,9 +70,11 @@ jobs:
           path: release/*
 
   publish:
-    name: Publish Release (debug only)
+    name: Publish Release
     runs-on: ubuntu-latest
     needs: package
+    permissions:
+      contents: write
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
@@ -80,14 +82,11 @@ jobs:
           name: release-artifacts
           path: release
 
-      - name: List artifacts
-        run: |
-          echo "Listing release/"
-          ls -la release || true
-
-      - name: Debug: show release tag
-        run: |
-          echo "Release tag to publish: ${{ github.ref_name }}"
-
-      - name: (temporary) End workflow
-        run: echo "Publish job is in debug mode; release creation is skipped for now"
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "release/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
+          generateReleaseNotes: true
