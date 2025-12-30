@@ -87,7 +87,7 @@ try {
     throw "Failed to fetch ffmpeg. Error: $_"
 }
 
-# 阶段四：获取 deno
+# 阶段四：获取 deno (修复版 v2)
 Write-Host "`n>> [4/5] Fetching latest deno from GitHub..." -ForegroundColor Cyan
 try {
     # 1. 获取最新 Release 信息
@@ -97,28 +97,32 @@ try {
     $zipAsset = $denoRelease.assets | Where-Object { $_.name -like '*x86_64-pc-windows-msvc.zip' } | Select-Object -First 1
     if (-not $zipAsset) { throw "Could not find deno Windows zip asset." }
     
-    # 3. 找到对应的校验文件 (关键修复：后缀名改为 .sha256sum)
+    # 3. 找到对应的校验文件 (.sha256sum)
     $checksumAsset = $denoRelease.assets | Where-Object { $_.name -eq ($zipAsset.name + ".sha256sum") }
     if (-not $checksumAsset) { 
-        # 备选方案：尝试找 .sha256 后缀，防止未来又改回去
+        # 备选：尝试找 .sha256 (兼容旧版)
         $checksumAsset = $denoRelease.assets | Where-Object { $_.name -eq ($zipAsset.name + ".sha256") }
     }
     if (-not $checksumAsset) { throw "Could not find checksum file for $($zipAsset.name)." }
 
-    # 4. 下载
+    # 4. 下载 (使用 release 中的动态文件名, 而不是硬编码)
     $zipPath = Join-Path $TempDir $zipAsset.name
-    $checksumFile = Join-Path $TempDir "deno.checksum"
+    $checksumFile = Join-Path $TempDir "deno.checksum.txt"
 
     Invoke-Download -Uri $zipAsset.browser_download_url -OutFile $zipPath
     Invoke-Download -Uri $checksumAsset.browser_download_url -OutFile $checksumFile
 
-    # 5. 校验 (Deno 的校验文件通常包含 "hash  filename" 格式)
+    # 5. 校验 (使用更稳健的正则提取)
     $hashContent = Get-Content $checksumFile -Raw
-    # 提取哈希值 (第一列)
-    $expectedHash = ($hashContent -split '\s+')[0].Trim()
+    if ($hashContent -match "([a-fA-F0-9]{64})") {
+        $expectedHash = $matches[1]
+    } else {
+        throw "Could not parse a valid SHA256 hash from downloaded checksum file."
+    }
     
-    # 调用内置函数进行校验
+    # 调用内置函数进行校验, 保持脚本结构一致
     Verify-Checksum -FilePath $zipPath -ExpectedHash $expectedHash
+    
 } catch {
     throw "Failed to fetch deno. Error: $_"
 }
