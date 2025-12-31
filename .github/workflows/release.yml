@@ -1,14 +1,11 @@
 # ==============================================================================
-#  FluentYTDL - 黄金标准发布流程 (Golden Standard Release Workflow) - v2
+#  FluentYTDL - 多版本发布流程 (Multi-Build Release Workflow) - v3
 # ==============================================================================
 # 触发条件: 当一个 'v' 开头的标签 (例如 v1.0.0, v0.2.1)被推送到仓库时
-# 工作流程:
-# 1. 检出代码。
-# 2. 设置 Python 3.12 环境，并利用其内置功能缓存 pip 依赖。
-# 3. 安装项目的所有依赖 (包括 PyInstaller)。
-# 4. 运行全自动的 `fetch_tools.ps1` 脚本获取 ffmpeg 和 yt-dlp。
-# 5. 运行 `package.ps1` 脚本进行专业打包，版本号自动从标签获取。
-# 6. 将打包好的 .zip 文件发布为一个新的 GitHub Release。
+# 生成版本:
+# 1. portable   - onedir + full (带工具的便携目录版)
+# 2. shell      - onefile + shell (轻量单文件，无外部工具)
+# 3. full       - onefile + full (单文件 + 外部工具)
 # ==============================================================================
 
 name: Build and Release
@@ -18,7 +15,6 @@ on:
     tags:
       - 'v*'
 
-# 赋予创建 Release 的权限，无需个人访问令牌 (PAT)
 permissions:
   contents: write
 
@@ -27,51 +23,49 @@ jobs:
     runs-on: windows-latest
     
     steps:
-      - name: "[1/6] Checkout Code"
+      - name: "[1/8] Checkout Code"
         uses: actions/checkout@v4
 
-      - name: "[2/6] Setup Python with Dependency Cache"
-        uses: actions/setup-python@v5 # Using latest v5
+      - name: "[2/8] Setup Python with Dependency Cache"
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          # 使用 setup-python 的内置缓存功能，这是目前最标准、最高效的做法。
           cache: 'pip'
 
-      - name: "[3/6] Install Dependencies"
+      - name: "[3/8] Install Dependencies"
         shell: pwsh
         run: |
-          # 安装所有项目依赖 (包括 dev 依赖，如 pyinstaller)
-          # '.[dev]' 语法会根据 pyproject.toml 安装主依赖和 [project.optional-dependencies] 下的 dev 依赖
           pip install --upgrade pip
           pip install ".[dev]"
 
-      - name: "[4/6] Prepare Tools (ffmpeg & yt-dlp)"
-        id: fetch_tools
+      - name: "[4/8] Prepare Tools (ffmpeg & yt-dlp)"
         shell: pwsh
         run: .\scripts\fetch_tools.ps1
 
-      - name: "[5/6] Build Application Package"
-        id: build_package
+      - name: "[5/8] Build Portable Version (onedir + full)"
         shell: pwsh
-        # 将 Git 标签名 (例如 'v1.0.0') 作为版本号传递给打包脚本
-        # package.ps1 会用这个来生成最终的 zip 文件名
         run: .\scripts\package.ps1 -Mode onedir -Flavor full
         env:
-          # 将标签名设置为环境变量，虽然当前 package.ps1 脚本不直接使用
-          # 但这是一个好习惯，可供未来扩展
           PACKAGE_VERSION: ${{ github.ref_name }}
 
-      - name: "[6/6] Create GitHub Release"
+      - name: "[6/8] Build Shell Version (onefile + shell)"
+        shell: pwsh
+        run: .\scripts\package.ps1 -Mode onefile -Flavor shell
+        env:
+          PACKAGE_VERSION: ${{ github.ref_name }}
+
+      - name: "[7/8] Build Full Single-File Version (onefile + full)"
+        shell: pwsh
+        run: .\scripts\package.ps1 -Mode onefile -Flavor full
+        env:
+          PACKAGE_VERSION: ${{ github.ref_name }}
+
+      - name: "[8/8] Create GitHub Release"
         uses: softprops/action-gh-release@v2
-        # 仅当所有前面的步骤都成功，并且是在一个标签上时才执行
         if: success() && startsWith(github.ref, 'refs/tags/')
         with:
-          # 从 release 目录中找到所有 .zip 文件并上传
           files: release/*.zip
-          # 设置为 false，确保发布是正式的，而不是草稿
           draft: false
-          # 自动根据 commit 历史生成发布说明
           generate_release_notes: true
         env:
-          # 使用 GitHub 自动提供的令牌，安全可靠
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
