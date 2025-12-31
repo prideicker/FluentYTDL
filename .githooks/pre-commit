@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""
+Pre-commit hook: 阻止提交中包含大于 100MB 的文件。
+此脚本会检查已暂存的 (staged) 文件，并在发现 >100MB 文件时阻止提交。
+"""
+import sys, os, subprocess
+
+LIMIT = 100 * 1024 * 1024  # 100 MB
+
+try:
+    out = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z'])
+except subprocess.CalledProcessError:
+    sys.exit(0)
+
+names = [n for n in out.split(b"\0") if n]
+
+violations = []
+for b in names:
+    try:
+        fn = b.decode('utf-8')
+    except Exception:
+        fn = b.decode('latin-1')
+    if not os.path.exists(fn):
+        continue
+    try:
+        size = os.path.getsize(fn)
+    except Exception:
+        continue
+    if size > LIMIT:
+        violations.append((fn, size))
+
+if violations:
+    sys.stderr.write("Error: 提交中包含大于 100MB 的文件，提交已被阻止。\n")
+    for fn, size in violations:
+        sys.stderr.write(f"  - {fn} ({size} bytes)\n")
+    sys.stderr.write("建议：将大文件加入 .gitignore 或 将其迁移到 Git LFS。\n")
+    sys.exit(1)
+
+sys.exit(0)
