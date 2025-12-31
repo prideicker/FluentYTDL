@@ -15,6 +15,8 @@ from qfluentwidgets import (
     ImageLabel, Theme, isDarkTheme
 )
 
+import markdown
+
 from ..utils.paths import doc_path, resource_path
 
 # CSS for Markdown styling (Light/Dark adaptive)
@@ -283,7 +285,10 @@ class ManualReaderWidget(QWidget):
             except Exception as e:
                 content = f"# 读取错误\n\n无法读取手册文件: {e}"
         
-        self.browser.setMarkdown(content)
+        # Convert Markdown to HTML with extensions
+        # 'extra' includes: tables, fenced_code, footnotes, attr_list, def_list, abbr
+        html_content = markdown.markdown(content, extensions=['extra'])
+        self.browser.setHtml(html_content)
 
 
 class HelpWindow(FluentWindow):
