@@ -19,99 +19,192 @@ import markdown
 
 from ..utils.paths import doc_path, resource_path
 
-# CSS for Markdown styling (Light/Dark adaptive)
+# CSS for Markdown styling - Modern Fluent Design
+# Implements: max-width, breathing room, card sections, typography hierarchy, color system
 MARKDOWN_CSS = """
-/* Base font settings */
+/* ========== Base Container ========== */
 QTextBrowser {
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif;
     font-size: 14px;
-    line-height: 1.6;
-    padding: 24px;
+    line-height: 1.7;
+    padding: 40px 60px;
     border: none;
     background-color: transparent;
-    color: palette(text);
+    color: #333333;
 }
 
-/* Headers - Fluent Style */
+/* ========== Content Width Constraint ========== */
+/* Wrap all content in a virtual reading area */
+body {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* ========== Hero Section (H1) ========== */
 h1 {
-    font-size: 28px;
-    font-weight: 600;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid palette(highlight);
-    color: palette(text);
+    font-size: 32px;
+    font-weight: 700;
+    margin-top: 10px;
+    margin-bottom: 8px;
+    padding-bottom: 0;
+    border-bottom: none;
+    color: #0078D4;
+    letter-spacing: -0.5px;
 }
+/* Subtitle styling for the first paragraph after H1 */
+h1 + p {
+    font-size: 15px;
+    color: #666666;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #E0E0E0;
+}
+
+/* ========== Section Headers (H2) - Card-like ========== */
 h2 {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 600;
-    margin-top: 30px;
-    margin-bottom: 15px;
-    color: palette(text);
+    margin-top: 40px;
+    margin-bottom: 20px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #F5F5F5 0%, #FAFAFA 100%);
+    border-left: 4px solid #0078D4;
+    border-radius: 0 8px 8px 0;
+    color: #1A1A1A;
 }
+
+/* ========== Subsection Headers (H3) ========== */
 h3 {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
-    margin-top: 20px;
-    margin-bottom: 10px;
-    color: palette(text);
+    margin-top: 28px;
+    margin-bottom: 12px;
+    color: #333333;
+    padding-left: 12px;
+    border-left: 3px solid #0078D4;
 }
 
-/* Text elements */
-p { margin-bottom: 12px; color: palette(text); }
-li { margin-bottom: 6px; color: palette(text); }
-strong { font-weight: 700; color: palette(highlight); }
-a { color: palette(link); text-decoration: none; }
+/* ========== Body Text ========== */
+p {
+    margin-bottom: 16px;
+    color: #4B4B4B;
+    line-height: 1.75;
+}
 
-/* Tables - Critical for Troubleshooting Guide */
+/* ========== Lists with Breathing Room ========== */
+ul, ol {
+    margin: 16px 0;
+    padding-left: 24px;
+}
+li {
+    margin-bottom: 10px;
+    color: #4B4B4B;
+    line-height: 1.6;
+}
+li::marker {
+    color: #0078D4;
+}
+
+/* ========== Emphasis & Links ========== */
+strong {
+    font-weight: 600;
+    color: #0078D4;
+}
+em {
+    font-style: italic;
+    color: #555555;
+}
+a {
+    color: #0078D4;
+    text-decoration: none;
+    border-bottom: 1px dotted #0078D4;
+}
+a:hover {
+    color: #005A9E;
+}
+
+/* ========== Important Callouts (Blockquotes) ========== */
+blockquote {
+    margin: 20px 0;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #E8F4FD 0%, #F0F9FF 100%);
+    border-left: 4px solid #0078D4;
+    border-radius: 0 8px 8px 0;
+    color: #1A1A1A;
+    font-style: normal;
+}
+blockquote strong {
+    color: #005A9E;
+}
+
+/* ========== Tables - Clean Modern Look ========== */
 table {
-    border-collapse: collapse;
     width: 100%;
-    margin-top: 15px;
-    margin-bottom: 15px;
-    border: 1px solid palette(mid);
+    margin: 24px 0;
+    border-collapse: separate;
+    border-spacing: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 th {
-    background-color: palette(alternate-base);
-    color: palette(text);
-    padding: 10px 15px;
-    border: 1px solid palette(mid);
-    font-weight: 700;
+    background: linear-gradient(180deg, #F8F8F8 0%, #F0F0F0 100%);
+    color: #1A1A1A;
+    font-weight: 600;
+    padding: 14px 16px;
     text-align: left;
+    border-bottom: 2px solid #E0E0E0;
 }
 td {
-    padding: 10px 15px;
-    border: 1px solid palette(mid);
-    color: palette(text);
+    padding: 12px 16px;
+    color: #4B4B4B;
+    border-bottom: 1px solid #F0F0F0;
     vertical-align: top;
+    line-height: 1.5;
+}
+tr:last-child td {
+    border-bottom: none;
+}
+tr:hover td {
+    background-color: #FAFAFA;
 }
 
-/* Code blocks */
+/* ========== Code Blocks ========== */
 pre {
-    background-color: palette(alternate-base);
-    padding: 15px;
-    border-radius: 6px;
-    border: 1px solid palette(mid);
-    font-family: "Consolas", "Cascadia Code", monospace;
+    background: linear-gradient(180deg, #2D2D2D 0%, #1E1E1E 100%);
+    padding: 20px;
+    border-radius: 8px;
+    font-family: "Cascadia Code", "Consolas", "SF Mono", monospace;
     font-size: 13px;
-    color: palette(text);
-    margin: 10px 0;
+    color: #D4D4D4;
+    margin: 20px 0;
+    overflow-x: auto;
 }
 code {
-    font-family: "Consolas", "Cascadia Code", monospace;
-    background-color: palette(alternate-base);
-    padding: 2px 6px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    background-color: #F5F5F5;
+    padding: 3px 8px;
     border-radius: 4px;
-    color: palette(highlight);
+    font-size: 13px;
+    color: #C41E3A;
 }
 
-/* Blockquotes */
-blockquote {
-    border-left: 4px solid palette(highlight);
-    background-color: palette(alternate-base);
-    padding: 10px 15px;
-    margin: 15px 0;
-    color: palette(text); 
-    font-style: italic;
+/* ========== Horizontal Rules ========== */
+hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #E0E0E0, transparent);
+    margin: 40px 0;
+}
+
+/* ========== Footer/Version Info ========== */
+blockquote:last-of-type {
+    background: #F8F8F8;
+    border-left-color: #888888;
+    font-size: 12px;
+    color: #888888;
+    margin-top: 40px;
 }
 """
 
