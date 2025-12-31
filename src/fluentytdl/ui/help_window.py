@@ -257,19 +257,30 @@ class WelcomeGuideWidget(QWidget):
             self.next_btn.setText("下一步")
 
 class ManualReaderWidget(QWidget):
-    """The Markdown Reader Page."""
+    """The Markdown Reader Page, wrapped in a Fluent Card."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Main layout for the page with margins
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        self.browser = QTextBrowser(self)
+        # Card container to host the document
+        # This provides the correct 'Layer' background (elevated from window background)
+        self.card = CardWidget(self)
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.browser = QTextBrowser(self.card)
         self.browser.setOpenExternalLinks(True)
-        # Apply CSS
-        self.browser.document().setDefaultStyleSheet(MARKDOWN_CSS)
         
-        layout.addWidget(self.browser)
+        # Apply CSS (ensure transparency so Card background shows)
+        self.browser.document().setDefaultStyleSheet(MARKDOWN_CSS)
+        # Widget style: transparent background, no border
+        self.browser.setStyleSheet("background-color: transparent; border: none;")
+        
+        card_layout.addWidget(self.browser)
+        layout.addWidget(self.card)
         
         self.load_manual()
 
