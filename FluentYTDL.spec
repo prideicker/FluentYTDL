@@ -2,8 +2,8 @@
 
 
 a = Analysis(
-    ['D:\\FluentYTDL\\main.py'],
-    pathex=['D:\\FluentYTDL\\src'],
+    ['D:\\YouTube\\FluentYTDL\\main.py'],
+    pathex=['D:\\YouTube\\FluentYTDL\\src'],
     binaries=[],
     datas=[],
     hiddenimports=[],
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/logo.ico',
+    icon=['D:\\YouTube\\FluentYTDL\\assets\\logo.ico'],
 )
