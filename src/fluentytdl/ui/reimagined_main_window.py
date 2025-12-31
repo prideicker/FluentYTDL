@@ -829,12 +829,27 @@ class MainWindow(FluentWindow):
         self._help_window.activateWindow()
 
     def check_first_run(self):
-        if not config_manager.get("has_shown_welcome_guide", False):
-            logger.info("First run detected, showing Welcome Wizard.")
+        """Check if welcome guide should be shown based on version."""
+        from fluentytdl import __version__
+        
+        # Get the current major version (e.g., "1" from "1.0.16")
+        current_major = __version__.split(".")[0] if __version__ else "0"
+        
+        # Get the version when user last saw the guide
+        shown_for_version = config_manager.get("welcome_guide_shown_for_version", "")
+        shown_major = shown_for_version.split(".")[0] if shown_for_version else ""
+        
+        # Show welcome guide if:
+        # 1. Never shown before (empty version)
+        # 2. Major version has changed (e.g., 0.x.x -> 1.x.x)
+        should_show = not shown_for_version or (shown_major != current_major)
+        
+        if should_show:
+            logger.info(f"Showing Welcome Wizard (current: {__version__}, last shown: {shown_for_version})")
             w = WelcomeWizardDialog(self)
             w.exec()
-            # Dialog handles setting the config key upon finish/skip
-            # But just in case user forced closed it without finishing:
+            # Record the full version when guide was shown
+            config_manager.set("welcome_guide_shown_for_version", __version__)
             config_manager.set("has_shown_welcome_guide", True)
 
 

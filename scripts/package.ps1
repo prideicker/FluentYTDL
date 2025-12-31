@@ -2,13 +2,13 @@
 # Rebuilt for stability and correct directory structure.
 
 param(
-  [ValidateSet('onedir','onefile')]
-  [string]$Mode = 'onedir',
+    [ValidateSet('onedir', 'onefile')]
+    [string]$Mode = 'onedir',
 
-  [ValidateSet('full','shell')]
-  [string]$Flavor = 'full',
+    [ValidateSet('full', 'shell')]
+    [string]$Flavor = 'full',
 
-  [switch]$NoZip
+    [switch]$NoZip
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +36,8 @@ function Get-Python {
         try {
             $test = Invoke-Expression "$c -c `"import PyInstaller; print('ok')`"" 2>$null
             if ($test -match 'ok') { return $c }
-        } catch {}
+        }
+        catch {}
     }
     throw "Could not find Python with PyInstaller installed. Please install it (pip install pyinstaller)."
 }
@@ -81,7 +82,8 @@ $pyArgs = @(
 
 if ($Mode -eq 'onefile') {
     $pyArgs += "--onefile"
-} else {
+}
+else {
     $pyArgs += "--onedir"
     $pyArgs += "--contents-directory", "runtime" # Put runtime files in subdirectory
 }
@@ -117,9 +119,25 @@ $version = Get-Version
 $date = Get-Date -Format 'yyyyMMdd'
 $arch = if ($env:PROCESSOR_ARCHITECTURE -match '64') { 'win64' } else { 'win32' }
 
-# Name of the final folder/zip
+# Name of the final folder/zip (based on Mode + Flavor)
 $baseName = "FluentYTDL-v$version-$arch-$date"
-if ($Mode -eq 'onefile') { $baseName += "-full" } else { $baseName += "-portable" }
+if ($Mode -eq 'onefile') {
+    if ($Flavor -eq 'shell') {
+        $baseName += "-shell"  # Lightweight single exe without tools
+    }
+    else {
+        $baseName += "-full"   # Single exe (tools bundled separately)
+    }
+}
+else {
+    # onedir mode
+    if ($Flavor -eq 'shell') {
+        $baseName += "-portable-shell"  # Portable without tools
+    }
+    else {
+        $baseName += "-portable"        # Portable with tools
+    }
+}
 
 # Create a clean staging directory in release/temp
 $stagingDir = Join-Path $releaseDir "temp_$baseName"
@@ -131,7 +149,8 @@ if ($Mode -eq 'onefile') {
     $exeSrc = Join-Path $root "dist\FluentYTDL.exe"
     if (-not (Test-Path $exeSrc)) { throw "Build failed: $exeSrc not found" }
     Copy-Item $exeSrc -Destination $stagingDir
-} else {
+}
+else {
     # onedir: copy directory contents
     $dirSrc = Join-Path $root "dist\FluentYTDL"
     if (-not (Test-Path $dirSrc)) { throw "Build failed: $dirSrc not found" }
@@ -146,9 +165,13 @@ if ($Flavor -eq 'full') {
         
         Write-Host "Copying tools from $toolSource to $binTarget..."
         Copy-Item "$toolSource\*" -Destination $binTarget -Recurse -Force
-    } else {
+    }
+    else {
         throw "FATAL: Flavor is 'full', but no tools were found at '$toolSource'. The package cannot be built without them. Please ensure 'fetch_tools.ps1' ran successfully."
     }
+}
+else {
+    Write-Host "Flavor is 'shell': Skipping external tools (ffmpeg, yt-dlp, deno)." -ForegroundColor Yellow
 }
 
 # C. Copy Documentation (User Manual)
@@ -160,7 +183,8 @@ if (Test-Path $manualSource) {
     if (-not (Test-Path $manualTargetDir)) { New-Item -ItemType Directory -Path $manualTargetDir | Out-Null }
     Copy-Item $manualSource -Destination $manualTargetDir -Force
     Write-Host "Copied $manualSource to $manualTargetDir" -ForegroundColor Gray
-} else {
+}
+else {
     Write-Warning "User manual not found at $manualSource. Package will not include it."
 }
 
