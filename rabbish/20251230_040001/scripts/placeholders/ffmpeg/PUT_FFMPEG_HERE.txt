@@ -1,8 +1,0 @@
-将 ffmpeg/ffprobe 相关文件放到这个目录。
-
-推荐结构：
-- ffmpeg.exe
-- ffprobe.exe
-- *.dll（如有）
-
-程序会优先从 dist/_internal/ffmpeg 自动寻找 ffmpeg。

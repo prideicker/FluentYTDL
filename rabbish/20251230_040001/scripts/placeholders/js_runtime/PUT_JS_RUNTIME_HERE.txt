@@ -1,9 +1,0 @@
-将 YouTube JS Runtime 可执行文件放到这个目录（用于 yt-dlp 的 EJS/JS 运行时）。
-
-推荐文件名（任选其一或多个）：
-- deno.exe
-- node.exe
-- bun.exe
-- qjs.exe（QuickJS）
-
-程序会优先从 dist/_internal/js_runtime 自动寻找这些运行时。

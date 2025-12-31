@@ -4,6 +4,17 @@ __pycache__/
 *.pyo
 *.pyd
 
+# === 必须包含的忽略项 ===
+# 避免把临时文件、大文件或构建产物误提交
+rabbish/
+assets/*.mp4   # 假设你的大文件是视频
+*.exe
+*.zip
+dist/
+build/
+venv/
+# .git/          # 这个 git 自己会忽略，写不写无所谓
+
 # Virtual env
 .venv/
 venv/
