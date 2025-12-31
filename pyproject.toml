@@ -10,6 +10,7 @@ dependencies = [
   "PySide6>=6.6.0",
   "PySide6-Fluent-Widgets>=1.5.0",
   "loguru>=0.7.0",
+  "Pillow>=10.0",
 ]
 
 [tool.ruff]
