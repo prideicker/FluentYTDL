@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     FluentWindow, SubtitleLabel, NavigationInterface, NavigationItemPosition,
     FluentIcon, CardWidget, StrongBodyLabel, BodyLabel, PrimaryPushButton,
-    ImageLabel, Theme, isDarkTheme, SmoothScrollDelegate
+    ImageLabel, Theme, isDarkTheme, SmoothScrollDelegate, ScrollArea,
+    SettingCardGroup, SettingCard
 )
 
 import markdown
@@ -344,53 +345,149 @@ class WelcomeGuideWidget(QWidget):
         else:
             self.next_btn.setText("下一步")
 
-class ManualReaderWidget(QWidget):
-    """The Markdown Reader Page, wrapped in a Fluent Card."""
+class ManualReaderWidget(ScrollArea):
+    """User Manual Page built with native Fluent UI components."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Main layout for the page with margins
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        self.view = QWidget(self)
+        self.vBoxLayout = QVBoxLayout(self.view)
+        self.vBoxLayout.setContentsMargins(36, 20, 36, 36)
+        self.vBoxLayout.setSpacing(20)
         
-        # Card container to host the document
-        # This provides the correct 'Layer' background (elevated from window background)
-        self.card = CardWidget(self)
-        card_layout = QVBoxLayout(self.card)
-        card_layout.setContentsMargins(0, 0, 0, 0)
+        self.setWidget(self.view)
+        self.setWidgetResizable(True)
+        self.setObjectName("manualScrollArea")
         
-        self.browser = QTextBrowser(self.card)
-        self.browser.setOpenExternalLinks(True)
+        self._initUI()
+    
+    def _initUI(self):
+        # ========== Hero Section ==========
+        self.titleLabel = SubtitleLabel("FluentYTDL Pro 用户指南", self.view)
+        self.subtitleLabel = BodyLabel("从入门到精通的完整操作手册", self.view)
+        self.subtitleLabel.setTextColor(QColor(118, 118, 118), QColor(150, 150, 150))
         
-        # Apply Fluent-style smooth scrolling overlay
-        self.scrollDelegate = SmoothScrollDelegate(self.browser)
+        self.vBoxLayout.addWidget(self.titleLabel)
+        self.vBoxLayout.addWidget(self.subtitleLabel)
+        self.vBoxLayout.addSpacing(10)
         
-        # Apply CSS (ensure transparency so Card background shows)
-        self.browser.document().setDefaultStyleSheet(MARKDOWN_CSS)
-        # Widget style: transparent background, no border
-        self.browser.setStyleSheet("background-color: transparent; border: none;")
+        # ========== Quick Start Group ==========
+        self.quickStartGroup = SettingCardGroup("快速入门", self.view)
         
-        card_layout.addWidget(self.browser)
-        layout.addWidget(self.card)
+        self.envCard = SettingCard(
+            FluentIcon.DEVELOPER_TOOLS,
+            "环境准备",
+            "软件内置核心组件（yt-dlp、FFmpeg、Deno），开箱即用。推荐使用 Firefox 登录 YouTube。",
+            self.quickStartGroup
+        )
+        self.lazyModeCard = SettingCard(
+            FluentIcon.PASTE,
+            "懒人模式",
+            "在 设置 → 自动化 中开启「剪贴板自动识别」，复制链接即可自动弹出解析窗口。",
+            self.quickStartGroup
+        )
+        self.downloadCard = SettingCard(
+            FluentIcon.DOWNLOAD,
+            "确认下载",
+            "点击弹窗中的「下载」按钮，默认自动选择最佳画质。",
+            self.quickStartGroup
+        )
         
-        self.load_manual()
-
-    def load_manual(self):
-        # Locate the manual file
-        # Priority: localized docs/manuals/USER_MANUAL.md -> resource path
-        md_path = doc_path() / "manuals" / "USER_MANUAL.md"
+        self.quickStartGroup.addSettingCard(self.envCard)
+        self.quickStartGroup.addSettingCard(self.lazyModeCard)
+        self.quickStartGroup.addSettingCard(self.downloadCard)
+        self.vBoxLayout.addWidget(self.quickStartGroup)
         
-        content = "# 用户手册未找到\n\n请检查 `docs/manuals/USER_MANUAL.md` 文件是否存在。"
-        if md_path.exists():
-            try:
-                content = md_path.read_text(encoding="utf-8")
-            except Exception as e:
-                content = f"# 读取错误\n\n无法读取手册文件: {e}"
+        # ========== Core Features Group ==========
+        self.coreGroup = SettingCardGroup("核心功能", self.view)
         
-        # Convert Markdown to HTML with extensions
-        # 'extra' includes: tables, fenced_code, footnotes, attr_list, def_list, abbr
-        html_content = markdown.markdown(content, extensions=['extra'])
-        self.browser.setHtml(html_content)
+        self.basicDownloadCard = SettingCard(
+            FluentIcon.LINK,
+            "基本下载",
+            "支持视频、播放列表、频道页链接。粘贴链接后回车即可解析。",
+            self.coreGroup
+        )
+        self.abModeCard = SettingCard(
+            FluentIcon.MIX_VOLUMES,
+            "A+B 专业模式",
+            "在解析弹窗中点击「选择格式」，可自由组合视频流（如 4K）和音频流（如 Hi-Res）。",
+            self.coreGroup
+        )
+        self.batchCard = SettingCard(
+            FluentIcon.CHECKBOX,
+            "批量管理",
+            "在下载列表中使用「批量选择」，一键暂停、开始或删除多个任务。",
+            self.coreGroup
+        )
+        
+        self.coreGroup.addSettingCard(self.basicDownloadCard)
+        self.coreGroup.addSettingCard(self.abModeCard)
+        self.coreGroup.addSettingCard(self.batchCard)
+        self.vBoxLayout.addWidget(self.coreGroup)
+        
+        # ========== Advanced Settings Group ==========
+        self.advancedGroup = SettingCardGroup("高级配置", self.view)
+        
+        self.updateSourceCard = SettingCard(
+            FluentIcon.GLOBE,
+            "组件更新源",
+            "在 设置 → 核心组件 中可选择 GitHub（官方）或 GHProxy（加速镜像）。",
+            self.advancedGroup
+        )
+        self.jsRuntimeCard = SettingCard(
+            FluentIcon.CODE,
+            "JavaScript 运行时",
+            "yt-dlp 需要 JS 运行时解密参数。软件内置 Deno 支持，也可指定 Node/Bun 路径。",
+            self.advancedGroup
+        )
+        self.poTokenCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            "PO Token（实验性）",
+            "用于通过 YouTube 的 Proof of Origin 验证。在高级设置中可粘贴 Token。",
+            self.advancedGroup
+        )
+        
+        self.advancedGroup.addSettingCard(self.updateSourceCard)
+        self.advancedGroup.addSettingCard(self.jsRuntimeCard)
+        self.advancedGroup.addSettingCard(self.poTokenCard)
+        self.vBoxLayout.addWidget(self.advancedGroup)
+        
+        # ========== Troubleshooting Group ==========
+        self.troubleGroup = SettingCardGroup("错误查询手册", self.view)
+        
+        self.error403Card = SettingCard(
+            FluentIcon.CANCEL,
+            "HTTP 403 / 访问被拒",
+            "IP 被风控。解决：更新 Cookies（推荐 Firefox）、更换代理节点、等待 30 分钟。",
+            self.troubleGroup
+        )
+        self.errorFFmpegCard = SettingCard(
+            FluentIcon.DEVELOPER_TOOLS,
+            "ffmpeg not found",
+            "缺少 FFmpeg 组件。解决：在 设置 → 核心组件 中点击「检查更新」。",
+            self.troubleGroup
+        )
+        self.errorTimeoutCard = SettingCard(
+            FluentIcon.CLOUD,
+            "timed out / 网络超时",
+            "无法连接到 YouTube。解决：检查代理软件是否开启「系统代理」模式。",
+            self.troubleGroup
+        )
+        self.errorLoginCard = SettingCard(
+            FluentIcon.PEOPLE,
+            "Sign in / private / 需要登录",
+            "视频需要账号权限。解决：必须导入有效的 Cookies。",
+            self.troubleGroup
+        )
+        
+        self.troubleGroup.addSettingCard(self.error403Card)
+        self.troubleGroup.addSettingCard(self.errorFFmpegCard)
+        self.troubleGroup.addSettingCard(self.errorTimeoutCard)
+        self.troubleGroup.addSettingCard(self.errorLoginCard)
+        self.vBoxLayout.addWidget(self.troubleGroup)
+        
+        # ========== Footer ==========
+        self.vBoxLayout.addStretch(1)
 
 
 class HelpWindow(FluentWindow):
