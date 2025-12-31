@@ -13,7 +13,7 @@ assets/*.mp4   # 假设你的大文件是视频
 dist/
 build/
 venv/
-# .git/          # 这个 git 自己会忽略，写不写无所谓
+# .git/          # 这个 git 自己会忽略，写不写无所�?
 
 # Virtual env
 .venv/
@@ -66,7 +66,6 @@ rabbish/*/restore_log.txt
 rabbish/*/move_log.txt
 
 # IDE / system files
-.vscode/
 .idea/
 .DS_Store
 Thumbs.db
@@ -88,3 +87,9 @@ src/fluentytdl/assets/bin/
 
 # Ignore local IDE settings
 /.gemini/
+
+*.egg-info/
+__pycache__/
+.pytest_cache/
+
+release/
