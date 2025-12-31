@@ -20,7 +20,7 @@ import markdown
 from ..utils.paths import doc_path, resource_path
 
 # CSS for Markdown styling - Card-Based UI (Fluent Settings Style)
-# Optimized for readability: increased line-height, spacing, and padding
+# Optimized for readability with color hierarchy and DataGrid-style tables
 MARKDOWN_CSS = """
 /* ========== Base Container ========== */
 QTextBrowser {
@@ -30,36 +30,36 @@ QTextBrowser {
     padding: 30px 50px;
     border: none;
     background-color: transparent;
-    color: #333333;
+    color: #5e5e5e;  /* Secondary text color for body */
 }
 
 /* ========== Hero Title ========== */
 h1 {
     font-size: 28px;
     font-weight: 600;
-    margin: 0 0 10px 0;
-    color: #1A1A1A;
+    margin: 0 0 8px 0;
+    color: #202020;  /* Primary title color */
     letter-spacing: -0.4px;
 }
 
 /* Subtitle - immediately after H1 */
 h1 + p {
     font-size: 14px;
-    color: #666666;
-    margin: 0 0 30px 0;
-    line-height: 1.6;
+    color: #767676;  /* Tertiary text color */
+    margin: 0 0 28px 0;
+    line-height: 1.5;
 }
 
 /* ========== Section Cards (H2) ========== */
 h2 {
     font-size: 16px;
-    font-weight: 700;
-    margin: 30px 0 16px 0;
+    font-weight: 600;
+    margin: 28px 0 14px 0;
     padding: 0;
-    color: #1A1A1A;
+    color: #202020;
     background: none;
     border: none;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.1px;
 }
 
 /* ========== Step Cards (H3) - Main UI Component ========== */
@@ -67,10 +67,10 @@ h3 {
     font-size: 14px;
     font-weight: 600;
     margin: 0;
-    padding: 16px 20px;
-    color: #1A1A1A;
+    padding: 14px 18px;
+    color: #202020;
     background-color: #FAFAFA;
-    border: 1px solid #E5E5E5;
+    border: 1px solid #E8E8E8;
     border-bottom: none;
     border-radius: 8px 8px 0 0;
 }
@@ -78,90 +78,93 @@ h3 {
 /* Content following H3 - forms the card body */
 h3 + p, h3 + ul, h3 + ol, h3 + table {
     margin: 0;
-    padding: 16px 20px 20px 20px;
+    padding: 14px 18px 18px 18px;
     background-color: #FFFFFF;
-    border: 1px solid #E5E5E5;
+    border: 1px solid #E8E8E8;
     border-top: none;
     border-radius: 0 0 8px 8px;
-    margin-bottom: 24px;  /* Increased spacing between cards */
+    margin-bottom: 20px;
 }
 
 /* ========== Body Text ========== */
 p {
-    margin: 0 0 16px 0;
-    color: #555555;
-    line-height: 1.75;  /* More breathing room */
-    font-size: 14px;
-}
-
-/* ========== Lists - Compact, No Heavy Bullets ========== */
-ul, ol {
-    margin: 10px 0;
-    padding-left: 20px;
-}
-li {
-    margin-bottom: 8px;
-    color: #555555;
+    margin: 0 0 14px 0;
+    color: #5e5e5e;  /* Secondary color - softer than title */
     line-height: 1.7;
     font-size: 14px;
 }
 
-/* ========== Alert Box (Blockquote) - Key Tips ========== */
+/* ========== Lists ========== */
+ul, ol {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+li {
+    margin-bottom: 8px;
+    color: #5e5e5e;
+    line-height: 1.65;
+    font-size: 14px;
+}
+
+/* ========== InfoBar (Blockquote) - Key Tips ========== */
 blockquote {
-    margin: 16px 0;
-    padding: 16px 20px;
-    background-color: #F0F7FF;
+    margin: 14px 0;
+    padding: 14px 18px;
+    background-color: #EBF5FF;
     border-left: 3px solid #0078D4;
-    border-radius: 4px;
-    font-size: 13.5px;
-    color: #222222;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #202020;
     font-style: normal;
 }
 blockquote strong {
     color: #0078D4;
 }
 
-/* ========== Tables - Clean Card Style ========== */
+/* ========== DataGrid Style Tables (No vertical borders) ========== */
 table {
     width: 100%;
-    margin: 0; /* Margin handled by card wrapper usually, but for inside card: */
-    border-collapse: separate;
-    border-spacing: 0;
-    border: 1px solid #E5E5E5;
-    border-radius: 6px;
-    overflow: hidden;
-    font-size: 13.5px;
-    background-color: #FFFFFF;
+    margin: 0;
+    border-collapse: collapse;  /* Changed from separate */
+    border: none;  /* Remove outer border */
+    font-size: 13px;
+    background-color: transparent;
 }
 th {
-    background-color: #F9F9F9;
-    color: #444444;
+    background-color: transparent;  /* Transparent header */
+    color: #767676;  /* Subtle header text */
     font-weight: 600;
-    padding: 12px 16px;
+    font-size: 12px;
+    padding: 10px 14px;
     text-align: left;
-    border-bottom: 1px solid #E5E5E5;
-    white-space: nowrap;
+    border-bottom: 1px solid #E0E0E0;  /* Only bottom border */
+    border-top: none;
+    border-left: none;
+    border-right: none;
 }
 td {
-    padding: 12px 16px;
-    color: #555555;
-    border-bottom: 1px solid #F0F0F0;
+    padding: 12px 14px;
+    color: #5e5e5e;
+    border-bottom: 1px solid #F0F0F0;  /* Very subtle row separator */
+    border-top: none;
+    border-left: none;
+    border-right: none;
     vertical-align: top;
-    line-height: 1.6;
+    line-height: 1.55;
 }
 tr:last-child td {
     border-bottom: none;
 }
 
-/* ========== Code - Subtle Inline ========== */
+/* ========== Code - Styled Inline ========== */
 code {
     font-family: "Cascadia Code", "Consolas", monospace;
     background-color: #F3F3F3;
-    padding: 3px 6px;
+    padding: 2px 6px;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 12px;
     color: #333333;
-    border: 1px solid #EEEEEE;
+    border: none;
 }
 
 /* ========== Code Blocks ========== */
@@ -172,16 +175,16 @@ pre {
     font-family: "Cascadia Code", "Consolas", monospace;
     font-size: 13px;
     color: #D4D4D4;
-    margin: 16px 0;
+    margin: 14px 0;
     overflow-x: auto;
 }
 
-/* ========== Horizontal Rules - Subtle ========== */
+/* ========== Horizontal Rules ========== */
 hr {
     border: none;
     height: 1px;
     background-color: #EEEEEE;
-    margin: 32px 0;
+    margin: 28px 0;
 }
 
 /* ========== Footer ========== */
@@ -190,7 +193,7 @@ blockquote:last-of-type {
     border-left-color: #CCCCCC;
     font-size: 12px;
     color: #999999;
-    margin-top: 40px;
+    margin-top: 36px;
 }
 
 /* ========== Strong/Bold - Brand Color ========== */
