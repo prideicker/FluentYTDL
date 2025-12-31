@@ -73,7 +73,7 @@ h3 {
 }
 
 /* Content following H3 - forms the card body */
-h3 + p, h3 + ul, h3 + ol {
+h3 + p, h3 + ul, h3 + ol, h3 + table {
     margin: 0;
     padding: 12px 16px 14px 16px;
     background-color: #FFFFFF;
