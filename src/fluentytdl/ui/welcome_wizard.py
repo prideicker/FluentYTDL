@@ -44,7 +44,9 @@ class WelcomeWizardDialog(MessageBoxBase):
         self.widget.setFixedSize(700, 500)
         
     def _on_finished(self):
-        # Mark as shown in config
+        # Mark as shown in config, record version
+        from fluentytdl import __version__
+        config_manager.set("welcome_guide_shown_for_version", __version__)
         config_manager.set("has_shown_welcome_guide", True)
         self.accept()
 

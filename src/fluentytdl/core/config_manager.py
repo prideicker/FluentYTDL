@@ -76,6 +76,8 @@ class ConfigManager:
         
         # Whether the user has seen the welcome guide (wizard)
         "has_shown_welcome_guide": False,
+        # Version when user last saw the welcome guide (for version-aware re-trigger)
+        "welcome_guide_shown_for_version": "",
     }
 
     def __new__(cls) -> "ConfigManager":
