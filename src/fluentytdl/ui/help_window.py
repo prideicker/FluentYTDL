@@ -22,17 +22,37 @@ MARKDOWN_CSS = """
 /* Base font settings */
 QTextBrowser {
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.6;
-    padding: 20px;
+    padding: 24px;
     border: none;
     background-color: transparent;
+    color: palette(text);
 }
 
-/* Headers */
-h1 { font-size: 28px; font-weight: 600; margin-bottom: 16px; color: palette(text); }
-h2 { font-size: 22px; font-weight: 600; margin-top: 24px; margin-bottom: 12px; border-bottom: 1px solid palette(mid); padding-bottom: 6px; color: palette(text); }
-h3 { font-size: 18px; font-weight: 600; margin-top: 16px; margin-bottom: 8px; color: palette(text); }
+/* Headers - Fluent Style */
+h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid palette(highlight);
+    color: palette(text);
+}
+h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-top: 30px;
+    margin-bottom: 15px;
+    color: palette(text);
+}
+h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    color: palette(text);
+}
 
 /* Text elements */
 p { margin-bottom: 12px; color: palette(text); }
@@ -40,27 +60,56 @@ li { margin-bottom: 6px; color: palette(text); }
 strong { font-weight: 700; color: palette(highlight); }
 a { color: palette(link); text-decoration: none; }
 
-/* Code blocks (approximated with pre/code) */
+/* Tables - Critical for Troubleshooting Guide */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 15px;
+    margin-bottom: 15px;
+    border: 1px solid palette(mid);
+}
+th {
+    background-color: palette(alternate-base);
+    color: palette(text);
+    padding: 10px 15px;
+    border: 1px solid palette(mid);
+    font-weight: 700;
+    text-align: left;
+}
+td {
+    padding: 10px 15px;
+    border: 1px solid palette(mid);
+    color: palette(text);
+    vertical-align: top;
+}
+
+/* Code blocks */
 pre {
     background-color: palette(alternate-base);
-    padding: 12px;
+    padding: 15px;
     border-radius: 6px;
-    font-family: "Consolas", monospace;
+    border: 1px solid palette(mid);
+    font-family: "Consolas", "Cascadia Code", monospace;
     font-size: 13px;
     color: palette(text);
+    margin: 10px 0;
 }
 code {
-    font-family: "Consolas", monospace;
+    font-family: "Consolas", "Cascadia Code", monospace;
     background-color: palette(alternate-base);
-    padding: 2px 4px;
+    padding: 2px 6px;
     border-radius: 4px;
+    color: palette(highlight);
 }
+
+/* Blockquotes */
 blockquote {
     border-left: 4px solid palette(highlight);
     background-color: palette(alternate-base);
-    padding: 8px 12px;
-    margin: 12px 0;
-    color: palette(text);
+    padding: 10px 15px;
+    margin: 15px 0;
+    color: palette(text); 
+    font-style: italic;
 }
 """
 
