@@ -353,7 +353,7 @@ class ManualReaderWidget(ScrollArea):
         self.view = QWidget(self)
         self.vBoxLayout = QVBoxLayout(self.view)
         self.vBoxLayout.setContentsMargins(36, 20, 36, 36)
-        self.vBoxLayout.setSpacing(20)
+        self.vBoxLayout.setSpacing(24)
         
         self.setWidget(self.view)
         self.setWidgetResizable(True)
@@ -363,128 +363,124 @@ class ManualReaderWidget(ScrollArea):
     
     def _initUI(self):
         # ========== Hero Section ==========
-        self.titleLabel = SubtitleLabel("FluentYTDL Pro 用户指南", self.view)
-        self.subtitleLabel = BodyLabel("从入门到精通的完整操作手册", self.view)
+        self.titleLabel = SubtitleLabel("FluentYTDL Pro 全能手册", self.view)
+        self.subtitleLabel = BodyLabel("集操作指导、设置详解与错误查询于一体的完整指南", self.view)
         self.subtitleLabel.setTextColor(QColor(118, 118, 118), QColor(150, 150, 150))
         
         self.vBoxLayout.addWidget(self.titleLabel)
         self.vBoxLayout.addWidget(self.subtitleLabel)
         self.vBoxLayout.addSpacing(10)
         
-        # ========== Quick Start Group ==========
-        self.quickStartGroup = SettingCardGroup("快速入门", self.view)
+        # ========== Section 1: Usage Guide ==========
+        self.usageGroup = SettingCardGroup("📘 核心操作指南", self.view)
         
-        self.envCard = SettingCard(
-            FluentIcon.DEVELOPER_TOOLS,
-            "环境准备",
-            "软件内置核心组件（yt-dlp、FFmpeg、Deno），开箱即用。推荐使用 Firefox 登录 YouTube。",
-            self.quickStartGroup
-        )
-        self.lazyModeCard = SettingCard(
+        self.quickDownloadCard = SettingCard(
             FluentIcon.PASTE,
-            "懒人模式",
-            "在 设置 → 自动化 中开启「剪贴板自动识别」，复制链接即可自动弹出解析窗口。",
-            self.quickStartGroup
+            "快速下载 (Quick Download)",
+            "复制 YouTube 链接，在主页按 Ctrl+V 或点击粘贴按钮，回车即可解析。支持视频、播放列表和频道。",
+            self.usageGroup
         )
-        self.downloadCard = SettingCard(
-            FluentIcon.DOWNLOAD,
-            "确认下载",
-            "点击弹窗中的「下载」按钮，默认自动选择最佳画质。",
-            self.quickStartGroup
+        self.formatCard = SettingCard(
+            FluentIcon.VIDEO,
+            "画质与格式选择",
+            "• 默认优先下载最佳画质 (1080P/4K)。\n"
+            "• 点击「选择格式」进入专业模式，可自由组合视频流 (Video) 和音频流 (Audio)。",
+            self.usageGroup
         )
-        
-        self.quickStartGroup.addSettingCard(self.envCard)
-        self.quickStartGroup.addSettingCard(self.lazyModeCard)
-        self.quickStartGroup.addSettingCard(self.downloadCard)
-        self.vBoxLayout.addWidget(self.quickStartGroup)
-        
-        # ========== Core Features Group ==========
-        self.coreGroup = SettingCardGroup("核心功能", self.view)
-        
-        self.basicDownloadCard = SettingCard(
-            FluentIcon.LINK,
-            "基本下载",
-            "支持视频、播放列表、频道页链接。粘贴链接后回车即可解析。",
-            self.coreGroup
-        )
-        self.abModeCard = SettingCard(
-            FluentIcon.MIX_VOLUMES,
-            "A+B 专业模式",
-            "在解析弹窗中点击「选择格式」，可自由组合视频流（如 4K）和音频流（如 Hi-Res）。",
-            self.coreGroup
+        self.lazyCard = SettingCard(
+            FluentIcon.CHAT,
+            "懒人模式 (Lazy Mode)",
+            "开启后，软件会自动监听剪贴板。只要复制了 YouTube 链接，就会自动弹出下载窗口，无需手动粘贴。",
+            self.usageGroup
         )
         self.batchCard = SettingCard(
-            FluentIcon.CHECKBOX,
-            "批量管理",
-            "在下载列表中使用「批量选择」，一键暂停、开始或删除多个任务。",
-            self.coreGroup
+            FluentIcon.ACCEPT,
+            "批量管理任务",
+            "在下载列表中，使用 Toolbar 上的「批量选择」工具，可以一次性暂停、开始或删除多个任务。",
+            self.usageGroup
         )
         
-        self.coreGroup.addSettingCard(self.basicDownloadCard)
-        self.coreGroup.addSettingCard(self.abModeCard)
-        self.coreGroup.addSettingCard(self.batchCard)
-        self.vBoxLayout.addWidget(self.coreGroup)
+        self.usageGroup.addSettingCard(self.quickDownloadCard)
+        self.usageGroup.addSettingCard(self.formatCard)
+        self.usageGroup.addSettingCard(self.lazyCard)
+        self.usageGroup.addSettingCard(self.batchCard)
+        self.vBoxLayout.addWidget(self.usageGroup)
+
+        # ========== Section 2: Settings Guide ==========
+        self.settingsGroup = SettingCardGroup("⚙️ 设置功能详解", self.view)
         
-        # ========== Advanced Settings Group ==========
-        self.advancedGroup = SettingCardGroup("高级配置", self.view)
-        
-        self.updateSourceCard = SettingCard(
-            FluentIcon.GLOBE,
-            "组件更新源",
-            "在 设置 → 核心组件 中可选择 GitHub（官方）或 GHProxy（加速镜像）。",
-            self.advancedGroup
+        self.networkCard = SettingCard(
+            FluentIcon.WIFI,
+            "网络连接 (Network)",
+            "• 代理设置：软件默认跟随系统代理。如下载失败，请手动指定 http://127.0.0.1:端口。\n"
+            "• 端口必须与您的代理软件（v2ray/clash）保持一致 (常见 7890/10809)。",
+            self.settingsGroup
         )
-        self.jsRuntimeCard = SettingCard(
-            FluentIcon.CODE,
-            "JavaScript 运行时",
-            "yt-dlp 需要 JS 运行时解密参数。软件内置 Deno 支持，也可指定 Node/Bun 路径。",
-            self.advancedGroup
-        )
-        self.poTokenCard = SettingCard(
-            FluentIcon.FINGERPRINT,
-            "PO Token（实验性）",
-            "用于通过 YouTube 的 Proof of Origin 验证。在高级设置中可粘贴 Token。",
-            self.advancedGroup
-        )
-        
-        self.advancedGroup.addSettingCard(self.updateSourceCard)
-        self.advancedGroup.addSettingCard(self.jsRuntimeCard)
-        self.advancedGroup.addSettingCard(self.poTokenCard)
-        self.vBoxLayout.addWidget(self.advancedGroup)
-        
-        # ========== Troubleshooting Group ==========
-        self.troubleGroup = SettingCardGroup("错误查询手册", self.view)
-        
-        self.error403Card = SettingCard(
-            FluentIcon.CANCEL,
-            "HTTP 403 / 访问被拒",
-            "IP 被风控。解决：更新 Cookies（推荐 Firefox）、更换代理节点、等待 30 分钟。",
-            self.troubleGroup
-        )
-        self.errorFFmpegCard = SettingCard(
-            FluentIcon.DEVELOPER_TOOLS,
-            "ffmpeg not found",
-            "缺少 FFmpeg 组件。解决：在 设置 → 核心组件 中点击「检查更新」。",
-            self.troubleGroup
-        )
-        self.errorTimeoutCard = SettingCard(
-            FluentIcon.CLOUD,
-            "timed out / 网络超时",
-            "无法连接到 YouTube。解决：检查代理软件是否开启「系统代理」模式。",
-            self.troubleGroup
-        )
-        self.errorLoginCard = SettingCard(
+        self.cookiesCard = SettingCard(
             FluentIcon.PEOPLE,
-            "Sign in / private / 需要登录",
-            "视频需要账号权限。解决：必须导入有效的 Cookies。",
-            self.troubleGroup
+            "账号与 Cookies",
+            "• 这里的设置决定了能否下载 4K/会员/年龄限制视频。\n"
+            "• 推荐选择「从 Firefox 读取」，这是目前最稳定的过风控方案。",
+            self.settingsGroup
+        )
+        self.componentCard = SettingCard(
+            FluentIcon.DEVELOPER_TOOLS,
+            "核心组件 (Components)",
+            "• 管理 yt-dlp 和 FFmpeg 的版本。\n"
+            "• 如果下载报错，第一件事就是来这里点击「检查更新」。",
+            self.settingsGroup
+        )
+        self.behaviorCard = SettingCard(
+            FluentIcon.GAME,
+            "行为策略 (Behavior)",
+            "• 并发数：决定同时通过几个任务。\n"
+            "• 删除任务时：可设置是否默认删除本地文件，防止误删。",
+            self.settingsGroup
         )
         
-        self.troubleGroup.addSettingCard(self.error403Card)
-        self.troubleGroup.addSettingCard(self.errorFFmpegCard)
-        self.troubleGroup.addSettingCard(self.errorTimeoutCard)
-        self.troubleGroup.addSettingCard(self.errorLoginCard)
-        self.vBoxLayout.addWidget(self.troubleGroup)
+        self.settingsGroup.addSettingCard(self.networkCard)
+        self.settingsGroup.addSettingCard(self.cookiesCard)
+        self.settingsGroup.addSettingCard(self.componentCard)
+        self.settingsGroup.addSettingCard(self.behaviorCard)
+        self.vBoxLayout.addWidget(self.settingsGroup)
+
+        # ========== Section 3: Error Reference ==========
+        self.errorGroup = SettingCardGroup("❌ 常见错误与故障排查", self.view)
+        
+        self.err403Card = SettingCard(
+            FluentIcon.CANCEL,
+            "HTTP 403 Forbidden / 拒绝访问",
+            "【原因】IP 被 YouTube 风控，或非浏览器流量被拦截。\n"
+            "【解决】1. 导入 Firefox Cookies (最有效)；2. 更换冷门代理节点。",
+            self.errorGroup
+        )
+        self.errFfmpegCard = SettingCard(
+            FluentIcon.CUT,
+            "ffmpeg not found / 合并失败",
+            "【原因】系统中缺少 FFmpeg 组件，无法进行视频音频合并。\n"
+            "【解决】前往「设置 → 核心组件」，点击检查更新，或手动下载 ffmpeg.exe 放入 bin 目录。",
+            self.errorGroup
+        )
+        self.errTimeoutCard = SettingCard(
+            FluentIcon.CLOUD,
+            "timed out / 10060 / 网络超时",
+            "【原因】无法连接到 YouTube 服务器。\n"
+            "【解决】检查代理软件是否开启了「系统代理」模式（System Proxy）。",
+            self.errorGroup
+        )
+        self.errLoginCard = SettingCard(
+            FluentIcon.INFO,
+            "Sign in / Private Video",
+            "【原因】该视频需要登录才能观看（会员或私享）。\n"
+            "【解决】必须配置有效的 Cookies 才能下载此类视频。",
+            self.errorGroup
+        )
+        
+        self.errorGroup.addSettingCard(self.err403Card)
+        self.errorGroup.addSettingCard(self.errFfmpegCard)
+        self.errorGroup.addSettingCard(self.errTimeoutCard)
+        self.errorGroup.addSettingCard(self.errLoginCard)
+        self.vBoxLayout.addWidget(self.errorGroup)
         
         # ========== Footer ==========
         self.vBoxLayout.addStretch(1)
