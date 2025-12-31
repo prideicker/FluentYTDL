@@ -20,13 +20,14 @@ import markdown
 from ..utils.paths import doc_path, resource_path
 
 # CSS for Markdown styling - Card-Based UI (Fluent Settings Style)
+# Optimized for readability: increased line-height, spacing, and padding
 MARKDOWN_CSS = """
 /* ========== Base Container ========== */
 QTextBrowser {
     font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif;
     font-size: 14px;
-    line-height: 1.5;
-    padding: 30px 40px;
+    line-height: 1.6;
+    padding: 30px 50px;
     border: none;
     background-color: transparent;
     color: #333333;
@@ -34,29 +35,31 @@ QTextBrowser {
 
 /* ========== Hero Title ========== */
 h1 {
-    font-size: 26px;
+    font-size: 28px;
     font-weight: 600;
-    margin: 0 0 6px 0;
+    margin: 0 0 10px 0;
     color: #1A1A1A;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.4px;
 }
 
 /* Subtitle - immediately after H1 */
 h1 + p {
-    font-size: 13px;
+    font-size: 14px;
     color: #666666;
-    margin: 0 0 24px 0;
+    margin: 0 0 30px 0;
+    line-height: 1.6;
 }
 
 /* ========== Section Cards (H2) ========== */
 h2 {
-    font-size: 15px;
-    font-weight: 600;
-    margin: 24px 0 12px 0;
+    font-size: 16px;
+    font-weight: 700;
+    margin: 30px 0 16px 0;
     padding: 0;
     color: #1A1A1A;
     background: none;
     border: none;
+    letter-spacing: 0.2px;
 }
 
 /* ========== Step Cards (H3) - Main UI Component ========== */
@@ -64,54 +67,54 @@ h3 {
     font-size: 14px;
     font-weight: 600;
     margin: 0;
-    padding: 14px 16px;
+    padding: 16px 20px;
     color: #1A1A1A;
-    background-color: #F9F9F9;
-    border: 1px solid #E8E8E8;
+    background-color: #FAFAFA;
+    border: 1px solid #E5E5E5;
     border-bottom: none;
-    border-radius: 6px 6px 0 0;
+    border-radius: 8px 8px 0 0;
 }
 
 /* Content following H3 - forms the card body */
 h3 + p, h3 + ul, h3 + ol, h3 + table {
     margin: 0;
-    padding: 12px 16px 14px 16px;
+    padding: 16px 20px 20px 20px;
     background-color: #FFFFFF;
-    border: 1px solid #E8E8E8;
+    border: 1px solid #E5E5E5;
     border-top: none;
-    border-radius: 0 0 6px 6px;
-    margin-bottom: 8px;
+    border-radius: 0 0 8px 8px;
+    margin-bottom: 24px;  /* Increased spacing between cards */
 }
 
 /* ========== Body Text ========== */
 p {
-    margin: 0 0 12px 0;
-    color: #666666;
-    line-height: 1.5;
-    font-size: 13px;
+    margin: 0 0 16px 0;
+    color: #555555;
+    line-height: 1.75;  /* More breathing room */
+    font-size: 14px;
 }
 
 /* ========== Lists - Compact, No Heavy Bullets ========== */
 ul, ol {
-    margin: 8px 0;
+    margin: 10px 0;
     padding-left: 20px;
 }
 li {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     color: #555555;
-    line-height: 1.45;
-    font-size: 13px;
+    line-height: 1.7;
+    font-size: 14px;
 }
 
 /* ========== Alert Box (Blockquote) - Key Tips ========== */
 blockquote {
-    margin: 10px 0;
-    padding: 10px 14px;
-    background-color: #EBF5FF;
+    margin: 16px 0;
+    padding: 16px 20px;
+    background-color: #F0F7FF;
     border-left: 3px solid #0078D4;
     border-radius: 4px;
-    font-size: 13px;
-    color: #1A1A1A;
+    font-size: 13.5px;
+    color: #222222;
     font-style: normal;
 }
 blockquote strong {
@@ -121,27 +124,30 @@ blockquote strong {
 /* ========== Tables - Clean Card Style ========== */
 table {
     width: 100%;
-    margin: 16px 0;
+    margin: 0; /* Margin handled by card wrapper usually, but for inside card: */
     border-collapse: separate;
     border-spacing: 0;
-    border: 1px solid #E8E8E8;
+    border: 1px solid #E5E5E5;
     border-radius: 6px;
     overflow: hidden;
-    font-size: 13px;
+    font-size: 13.5px;
+    background-color: #FFFFFF;
 }
 th {
-    background-color: #F5F5F5;
-    color: #333333;
+    background-color: #F9F9F9;
+    color: #444444;
     font-weight: 600;
-    padding: 10px 12px;
+    padding: 12px 16px;
     text-align: left;
-    border-bottom: 1px solid #E8E8E8;
+    border-bottom: 1px solid #E5E5E5;
+    white-space: nowrap;
 }
 td {
-    padding: 10px 12px;
+    padding: 12px 16px;
     color: #555555;
     border-bottom: 1px solid #F0F0F0;
     vertical-align: top;
+    line-height: 1.6;
 }
 tr:last-child td {
     border-bottom: none;
@@ -150,22 +156,23 @@ tr:last-child td {
 /* ========== Code - Subtle Inline ========== */
 code {
     font-family: "Cascadia Code", "Consolas", monospace;
-    background-color: #F0F0F0;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 12px;
+    background-color: #F3F3F3;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 13px;
     color: #333333;
+    border: 1px solid #EEEEEE;
 }
 
 /* ========== Code Blocks ========== */
 pre {
     background-color: #2D2D2D;
-    padding: 14px 16px;
-    border-radius: 6px;
+    padding: 16px 20px;
+    border-radius: 8px;
     font-family: "Cascadia Code", "Consolas", monospace;
-    font-size: 12px;
+    font-size: 13px;
     color: #D4D4D4;
-    margin: 12px 0;
+    margin: 16px 0;
     overflow-x: auto;
 }
 
@@ -173,17 +180,17 @@ pre {
 hr {
     border: none;
     height: 1px;
-    background-color: #E5E5E5;
-    margin: 24px 0;
+    background-color: #EEEEEE;
+    margin: 32px 0;
 }
 
 /* ========== Footer ========== */
 blockquote:last-of-type {
-    background-color: #F5F5F5;
-    border-left-color: #999999;
-    font-size: 11px;
-    color: #888888;
-    margin-top: 30px;
+    background-color: #FAFAFA;
+    border-left-color: #CCCCCC;
+    font-size: 12px;
+    color: #999999;
+    margin-top: 40px;
 }
 
 /* ========== Strong/Bold - Brand Color ========== */
