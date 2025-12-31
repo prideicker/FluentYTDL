@@ -19,192 +19,177 @@ import markdown
 
 from ..utils.paths import doc_path, resource_path
 
-# CSS for Markdown styling - Modern Fluent Design
-# Implements: max-width, breathing room, card sections, typography hierarchy, color system
+# CSS for Markdown styling - Card-Based UI (Fluent Settings Style)
 MARKDOWN_CSS = """
 /* ========== Base Container ========== */
 QTextBrowser {
     font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif;
     font-size: 14px;
-    line-height: 1.7;
-    padding: 40px 60px;
+    line-height: 1.5;
+    padding: 30px 40px;
     border: none;
     background-color: transparent;
     color: #333333;
 }
 
-/* ========== Content Width Constraint ========== */
-/* Wrap all content in a virtual reading area */
-body {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 0 20px;
-}
-
-/* ========== Hero Section (H1) ========== */
+/* ========== Hero Title ========== */
 h1 {
-    font-size: 32px;
-    font-weight: 700;
-    margin-top: 10px;
-    margin-bottom: 8px;
-    padding-bottom: 0;
-    border-bottom: none;
-    color: #0078D4;
-    letter-spacing: -0.5px;
-}
-/* Subtitle styling for the first paragraph after H1 */
-h1 + p {
-    font-size: 15px;
-    color: #666666;
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #E0E0E0;
-}
-
-/* ========== Section Headers (H2) - Card-like ========== */
-h2 {
-    font-size: 20px;
+    font-size: 26px;
     font-weight: 600;
-    margin-top: 40px;
-    margin-bottom: 20px;
-    padding: 16px 20px;
-    background: linear-gradient(135deg, #F5F5F5 0%, #FAFAFA 100%);
-    border-left: 4px solid #0078D4;
-    border-radius: 0 8px 8px 0;
+    margin: 0 0 6px 0;
     color: #1A1A1A;
+    letter-spacing: -0.3px;
 }
 
-/* ========== Subsection Headers (H3) ========== */
-h3 {
-    font-size: 16px;
+/* Subtitle - immediately after H1 */
+h1 + p {
+    font-size: 13px;
+    color: #666666;
+    margin: 0 0 24px 0;
+}
+
+/* ========== Section Cards (H2) ========== */
+h2 {
+    font-size: 15px;
     font-weight: 600;
-    margin-top: 28px;
-    margin-bottom: 12px;
-    color: #333333;
-    padding-left: 12px;
-    border-left: 3px solid #0078D4;
+    margin: 24px 0 12px 0;
+    padding: 0;
+    color: #1A1A1A;
+    background: none;
+    border: none;
+}
+
+/* ========== Step Cards (H3) - Main UI Component ========== */
+h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+    padding: 14px 16px;
+    color: #1A1A1A;
+    background-color: #F9F9F9;
+    border: 1px solid #E8E8E8;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+}
+
+/* Content following H3 - forms the card body */
+h3 + p, h3 + ul, h3 + ol {
+    margin: 0;
+    padding: 12px 16px 14px 16px;
+    background-color: #FFFFFF;
+    border: 1px solid #E8E8E8;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    margin-bottom: 8px;
 }
 
 /* ========== Body Text ========== */
 p {
-    margin-bottom: 16px;
-    color: #4B4B4B;
-    line-height: 1.75;
+    margin: 0 0 12px 0;
+    color: #666666;
+    line-height: 1.5;
+    font-size: 13px;
 }
 
-/* ========== Lists with Breathing Room ========== */
+/* ========== Lists - Compact, No Heavy Bullets ========== */
 ul, ol {
-    margin: 16px 0;
-    padding-left: 24px;
+    margin: 8px 0;
+    padding-left: 20px;
 }
 li {
-    margin-bottom: 10px;
-    color: #4B4B4B;
-    line-height: 1.6;
-}
-li::marker {
-    color: #0078D4;
-}
-
-/* ========== Emphasis & Links ========== */
-strong {
-    font-weight: 600;
-    color: #0078D4;
-}
-em {
-    font-style: italic;
+    margin-bottom: 6px;
     color: #555555;
-}
-a {
-    color: #0078D4;
-    text-decoration: none;
-    border-bottom: 1px dotted #0078D4;
-}
-a:hover {
-    color: #005A9E;
+    line-height: 1.45;
+    font-size: 13px;
 }
 
-/* ========== Important Callouts (Blockquotes) ========== */
+/* ========== Alert Box (Blockquote) - Key Tips ========== */
 blockquote {
-    margin: 20px 0;
-    padding: 16px 20px;
-    background: linear-gradient(135deg, #E8F4FD 0%, #F0F9FF 100%);
-    border-left: 4px solid #0078D4;
-    border-radius: 0 8px 8px 0;
+    margin: 10px 0;
+    padding: 10px 14px;
+    background-color: #EBF5FF;
+    border-left: 3px solid #0078D4;
+    border-radius: 4px;
+    font-size: 13px;
     color: #1A1A1A;
     font-style: normal;
 }
 blockquote strong {
-    color: #005A9E;
+    color: #0078D4;
 }
 
-/* ========== Tables - Clean Modern Look ========== */
+/* ========== Tables - Clean Card Style ========== */
 table {
     width: 100%;
-    margin: 24px 0;
+    margin: 16px 0;
     border-collapse: separate;
     border-spacing: 0;
-    border-radius: 8px;
+    border: 1px solid #E8E8E8;
+    border-radius: 6px;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    font-size: 13px;
 }
 th {
-    background: linear-gradient(180deg, #F8F8F8 0%, #F0F0F0 100%);
-    color: #1A1A1A;
+    background-color: #F5F5F5;
+    color: #333333;
     font-weight: 600;
-    padding: 14px 16px;
+    padding: 10px 12px;
     text-align: left;
-    border-bottom: 2px solid #E0E0E0;
+    border-bottom: 1px solid #E8E8E8;
 }
 td {
-    padding: 12px 16px;
-    color: #4B4B4B;
+    padding: 10px 12px;
+    color: #555555;
     border-bottom: 1px solid #F0F0F0;
     vertical-align: top;
-    line-height: 1.5;
 }
 tr:last-child td {
     border-bottom: none;
 }
-tr:hover td {
-    background-color: #FAFAFA;
+
+/* ========== Code - Subtle Inline ========== */
+code {
+    font-family: "Cascadia Code", "Consolas", monospace;
+    background-color: #F0F0F0;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: #333333;
 }
 
 /* ========== Code Blocks ========== */
 pre {
-    background: linear-gradient(180deg, #2D2D2D 0%, #1E1E1E 100%);
-    padding: 20px;
-    border-radius: 8px;
-    font-family: "Cascadia Code", "Consolas", "SF Mono", monospace;
-    font-size: 13px;
+    background-color: #2D2D2D;
+    padding: 14px 16px;
+    border-radius: 6px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 12px;
     color: #D4D4D4;
-    margin: 20px 0;
+    margin: 12px 0;
     overflow-x: auto;
 }
-code {
-    font-family: "Cascadia Code", "Consolas", monospace;
-    background-color: #F5F5F5;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 13px;
-    color: #C41E3A;
-}
 
-/* ========== Horizontal Rules ========== */
+/* ========== Horizontal Rules - Subtle ========== */
 hr {
     border: none;
     height: 1px;
-    background: linear-gradient(90deg, transparent, #E0E0E0, transparent);
-    margin: 40px 0;
+    background-color: #E5E5E5;
+    margin: 24px 0;
 }
 
-/* ========== Footer/Version Info ========== */
+/* ========== Footer ========== */
 blockquote:last-of-type {
-    background: #F8F8F8;
-    border-left-color: #888888;
-    font-size: 12px;
+    background-color: #F5F5F5;
+    border-left-color: #999999;
+    font-size: 11px;
     color: #888888;
-    margin-top: 40px;
+    margin-top: 30px;
+}
+
+/* ========== Strong/Bold - Brand Color ========== */
+strong {
+    font-weight: 600;
+    color: #0078D4;
 }
 """
 
