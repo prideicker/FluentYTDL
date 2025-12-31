@@ -92,6 +92,16 @@ else {
 $srcPath = Join-Path $root "src"
 $pyArgs += "--paths", "`"$srcPath`""
 
+# Bundle docs and assets into the executable
+$docsPath = Join-Path $root "docs"
+$assetsPath = Join-Path $root "assets"
+if (Test-Path $docsPath) {
+    $pyArgs += "--add-data", "`"$docsPath;docs`""
+}
+if (Test-Path $assetsPath) {
+    $pyArgs += "--add-data", "`"$assetsPath;assets`""
+}
+
 # Execute Build
 $buildCmd = "$python $pyArgs `"$mainScript`""
 Write-Host "Executing: $buildCmd" -ForegroundColor Gray
