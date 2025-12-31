@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     FluentWindow, SubtitleLabel, NavigationInterface, NavigationItemPosition,
     FluentIcon, CardWidget, StrongBodyLabel, BodyLabel, PrimaryPushButton,
-    ImageLabel, Theme, isDarkTheme
+    ImageLabel, Theme, isDarkTheme, SmoothScrollBar
 )
 
 import markdown
@@ -273,6 +273,10 @@ class ManualReaderWidget(QWidget):
         
         self.browser = QTextBrowser(self.card)
         self.browser.setOpenExternalLinks(True)
+        
+        # Replace default scrollbars with Fluent-style SmoothScrollBar
+        self.browser.setVerticalScrollBar(SmoothScrollBar(Qt.Orientation.Vertical, self.browser))
+        self.browser.setHorizontalScrollBar(SmoothScrollBar(Qt.Orientation.Horizontal, self.browser))
         
         # Apply CSS (ensure transparency so Card background shows)
         self.browser.document().setDefaultStyleSheet(MARKDOWN_CSS)
