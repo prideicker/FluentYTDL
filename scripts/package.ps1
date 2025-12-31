@@ -83,7 +83,7 @@ if ($Mode -eq 'onefile') {
     $pyArgs += "--onefile"
 } else {
     $pyArgs += "--onedir"
-    $pyArgs += "--contents-directory", "." # Keep folder structure clean
+    $pyArgs += "--contents-directory", "runtime" # Put runtime files in subdirectory
 }
 
 # Add source path to search path
