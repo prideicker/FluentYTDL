@@ -113,39 +113,42 @@ class WelcomeGuideWidget(QWidget):
         # Step 1: Welcome
         self.step1 = WizardCard(
             "欢迎使用 FluentYTDL Pro",
-            "这是一款强大且美观的视频下载工具。\n只需 30 秒，带您快速了解核心功能。",
+            "分享精彩，从未如此简单。\n全能、极速、现代化的视频下载工具。\n只需一分钟，带您解锁最佳使用姿势。",
             FluentIcon.HOME
         )
         
         # Step 2: Dependencies
         self.step2 = WizardCard(
-            "核心组件管理",
-            "软件依赖 yt-dlp 和 FFmpeg 运行。\n我们会自动检查更新，您也可以在“设置 -> 核心组件”中手动管理。\n遇到问题？试试“手动导入”功能。",
+            "准备工作与依赖",
+            "1. 核心组件: 软件已内置 yt-dlp、FFmpeg 和 deno，开箱即用。\n"
+            "2. 关键建议: 强烈推荐安装 Firefox 浏览器 并登录 YouTube 账号，\n"
+            "这是目前最稳定、免配置的下载方案。",
             FluentIcon.SETTING
         )
         
         # Step 3: How to Download
         self.step3 = WizardCard(
-            "极速下载",
-            "最快的方式：\n1. 复制视频链接\n2. 软件自动识别并弹窗\n3. 点击下载\n\n记得在设置中开启“剪贴板自动识别”哦！",
+            "两种下载姿势",
+            "• 懒人模式: 在设置中开启“剪贴板自动识别”，复制链接即刻弹窗（推荐！）。\n"
+            "• 手动模式: 在主页搜索栏粘贴链接，回车即可。",
             FluentIcon.PASTE
         )
 
         # Step 4: Cookies (Critical Tip)
         self.step_cookies = WizardCard(
-            "关键提示：Cookies 设置",
-            "Cookies (Netscape 格式): 用于下载会员或年龄限制视频。\n"
-            "⚠️ 注意: 直接调用 Chrome/Edge 浏览器的 Cookies 通常会失败，"
-            "因为 Windows 会对这些文件进行系统级加密保护。\n"
-            "✅ 推荐方案: 使用浏览器插件 (如 'Get cookies.txt LOCALLY') 导出为文件，"
-            "或使用 Firefox 浏览器。",
+            "解锁限制与 Cookie",
+            "遇到“需要登录”或“会员视频”？\n"
+            "✅ Firefox 用户: 软件通常能自动读取无需配置。\n"
+            "🔄 其他浏览器: 请使用插件 ('Get cookies.txt LOCALLY') 导出 Netscape 格式文件，并在设置中手动导入。",
             FluentIcon.PEOPLE
         )
         
         # Step 5: Advanced
         self.step4 = WizardCard(
-            "专业级控制",
-            "需要特定格式？\n在解析弹窗或播放列表中，尝试点击“选择格式”。\n支持独家的 A+B 模式，随意组合视频流与音频流。",
+            "简易与专业并行",
+            "• 默认智能选择最佳画质。\n"
+            "• 专家模式: 解析后点击“选择格式”，体验独家 A+B 模式 —— \n"
+            "随意组合 4K 视频流与 Hi-Res 音频流，定制您的完美文件。",
             FluentIcon.VIDEO
         )
         
