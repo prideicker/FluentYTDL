@@ -150,11 +150,8 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     if isinstance(cookiefile, str) and cookiefile:
         args += ["--cookies", cookiefile]
 
-    cookies_from_browser = ydl_opts.get("cookiesfrombrowser")
-    if isinstance(cookies_from_browser, (tuple, list)) and cookies_from_browser:
-        browser = str(cookies_from_browser[0] or "").strip()
-        if browser:
-            args += ["--cookies-from-browser", browser]
+    # 已移除 --cookies-from-browser 支持，避免 DPAPI 错误
+    # 所有 Cookie 统一通过 Cookie Sentinel 管理，使用 --cookies 文件方式
 
     js_runtimes = ydl_opts.get("js_runtimes")
     if isinstance(js_runtimes, dict):
@@ -231,17 +228,56 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     if ydl_opts.get("addmetadata") is True:
         args += ["--add-metadata"]
 
-    # Audio-only conversion via postprocessors
+    # 封面下载
+    if ydl_opts.get("writethumbnail") is True:
+        args += ["--write-thumbnail"]
+    
+    # 转换封面格式（用于嵌入）
+    convert_thumbnail_format = ydl_opts.get("convert_thumbnail")
+    if isinstance(convert_thumbnail_format, str) and convert_thumbnail_format:
+        args += ["--convert-thumbnails", convert_thumbnail_format]
+
+    # Postprocessors handling
     postprocessors = ydl_opts.get("postprocessors")
     if isinstance(postprocessors, list):
+        has_extract_audio = False
+        has_embed_metadata = False
+        
         for pp in postprocessors:
             if not isinstance(pp, dict):
                 continue
-            if str(pp.get("key") or "").strip() == "FFmpegExtractAudio":
+            key = str(pp.get("key") or "").strip()
+            
+            # 音频提取
+            if key == "FFmpegExtractAudio":
                 codec = str(pp.get("preferredcodec") or "mp3").strip() or "mp3"
                 quality = str(pp.get("preferredquality") or "192").strip() or "192"
                 args += ["--extract-audio", "--audio-format", codec, "--audio-quality", f"{quality}K"]
-                break
+                has_extract_audio = True
+            
+            # 封面嵌入 - 注意：现在由外置工具处理，yt-dlp 只负责下载封面
+            # EmbedThumbnail 后处理器已移除，此处保留代码仅供参考
+            elif key == "EmbedThumbnail":
+                # 不再使用 yt-dlp 内置的封面嵌入，改用外置 AtomicParsley/FFmpeg
+                pass
+            
+            # 元数据嵌入
+            elif key == "FFmpegMetadata":
+                has_embed_metadata = True
+            
+            # 封面格式转换（备用方式）
+            elif key == "FFmpegThumbnailsConvertor":
+                fmt = str(pp.get("format") or "jpg").strip()
+                if fmt and "--convert-thumbnails" not in args:
+                    args += ["--convert-thumbnails", fmt]
+        
+        # 注意：封面嵌入现在由外置工具 (AtomicParsley/FFmpeg) 处理
+        # yt-dlp 只负责下载封面（通过 writethumbnail 选项）
+        # 不再添加 --embed-thumbnail 参数
+        
+        # 添加元数据嵌入参数
+        if has_embed_metadata:
+            args += ["--embed-metadata"]
 
     return args
 

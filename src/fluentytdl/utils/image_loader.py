@@ -4,6 +4,7 @@ from PySide6.QtCore import QObject, QUrl, Signal, Qt
 from PySide6.QtGui import QPainter, QPainterPath, QPixmap
 from PySide6.QtNetwork import (
     QNetworkAccessManager,
+    QNetworkDiskCache,
     QNetworkProxy,
     QNetworkProxyFactory,
     QNetworkReply,
@@ -13,71 +14,102 @@ from PySide6.QtNetwork import (
 from ..core.config_manager import config_manager
 from .logger import logger
 
+# 全局共享的 QNetworkAccessManager（复用 HTTP 连接）
+_global_manager: QNetworkAccessManager | None = None
+_global_manager_initialized: bool = False
+
+
+def _get_global_manager() -> QNetworkAccessManager:
+    """获取全局共享的网络管理器，复用 HTTP 连接"""
+    global _global_manager, _global_manager_initialized
+    
+    if _global_manager is None:
+        _global_manager = QNetworkAccessManager()
+        
+        # 启用磁盘缓存
+        try:
+            import tempfile
+            from pathlib import Path
+            cache_dir = Path(tempfile.gettempdir()) / "fluentytdl_thumb_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            disk_cache = QNetworkDiskCache()
+            disk_cache.setCacheDirectory(str(cache_dir))
+            disk_cache.setMaximumCacheSize(50 * 1024 * 1024)  # 50MB 缓存
+            _global_manager.setCache(disk_cache)
+            logger.debug("[ImageLoader] 已启用磁盘缓存: {}", cache_dir)
+        except Exception as e:
+            logger.warning("[ImageLoader] 磁盘缓存初始化失败: {}", e)
+    
+    if not _global_manager_initialized:
+        _global_manager_initialized = True
+        _apply_proxy_to_manager(_global_manager)
+    
+    return _global_manager
+
+
+def _apply_proxy_to_manager(manager: QNetworkAccessManager) -> None:
+    """应用代理配置到网络管理器"""
+    proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
+    proxy_url_str = str(config_manager.get("proxy_url", "") or "").strip()
+
+    if proxy_mode == "off":
+        try:
+            QNetworkProxyFactory.setUseSystemConfiguration(False)
+        except Exception:
+            pass
+        manager.setProxy(QNetworkProxy(QNetworkProxy.ProxyType.NoProxy))
+        return
+
+    if proxy_mode == "system":
+        try:
+            QNetworkProxyFactory.setUseSystemConfiguration(True)
+        except Exception:
+            pass
+        return
+
+    if not proxy_url_str:
+        logger.warning("[ImageLoader] 代理模式=手动，但 URL 为空")
+        return
+
+    lower = proxy_url_str.lower()
+    if not (lower.startswith("http://") or lower.startswith("https://") or lower.startswith("socks5://")):
+        scheme = "socks5" if proxy_mode == "socks5" else "http"
+        proxy_url_str = f"{scheme}://" + proxy_url_str
+        lower = proxy_url_str.lower()
+
+    url = QUrl(proxy_url_str)
+    if not url.isValid() or not url.host() or url.port() <= 0:
+        logger.error("[ImageLoader] 代理 URL 无效: {}", proxy_url_str)
+        return
+
+    proxy_type = QNetworkProxy.ProxyType.HttpProxy
+    if proxy_mode == "socks5" or lower.startswith("socks5://") or "socks5" in lower:
+        proxy_type = QNetworkProxy.ProxyType.Socks5Proxy
+
+    proxy = QNetworkProxy(proxy_type, url.host(), url.port())
+    manager.setProxy(proxy)
+    logger.info("[ImageLoader] 配置代理: {}:{}", url.host(), url.port())
+
 
 class ImageLoader(QObject):
-    """通用异步图片加载器（增强版：代理修正 + 详细日志 + WebP→JPG 兜底）。"""
+    """通用异步图片加载器
+    
+    优化特性：
+    - 全局共享 QNetworkAccessManager，复用 HTTP 连接
+    - 50MB 磁盘缓存，加速重复加载
+    - 支持 HTTP Keep-Alive
+    - WebP→JPG 自动转换（兼容性）
+    """
 
     loaded = Signal(QPixmap)
     loaded_with_url = Signal(str, QPixmap)
+    failed = Signal(str)  # 加载失败时发射，参数为 URL
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.manager = QNetworkAccessManager(self)
-        self._apply_proxy()
-
-    def _apply_proxy(self) -> None:
-        """从配置中读取代理并应用到 NetworkManager。"""
-
-        proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
-        proxy_url_str = str(config_manager.get("proxy_url", "") or "").strip()
-
-        if proxy_mode == "off":
-            # 强制不走系统代理
-            try:
-                QNetworkProxyFactory.setUseSystemConfiguration(False)
-            except Exception:
-                pass
-            self.manager.setProxy(QNetworkProxy(QNetworkProxy.ProxyType.NoProxy))
-            return
-
-        if proxy_mode == "system":
-            # 跟随系统代理
-            try:
-                QNetworkProxyFactory.setUseSystemConfiguration(True)
-            except Exception:
-                pass
-            return
-
-        # manual http/socks5
-        if not proxy_url_str:
-            logger.warning("[ImageLoader] 代理模式=手动，但 URL 为空")
-            return
-
-        # [关键修正] 确保 URL 有 scheme，否则 QUrl 解析不出 host/port
-        lower = proxy_url_str.lower()
-        if not (lower.startswith("http://") or lower.startswith("https://") or lower.startswith("socks5://")):
-            scheme = "socks5" if proxy_mode == "socks5" else "http"
-            proxy_url_str = f"{scheme}://" + proxy_url_str
-            lower = proxy_url_str.lower()
-
-        url = QUrl(proxy_url_str)
-        logger.info(
-            "[ImageLoader] 配置代理: {}:{} (原始: {})",
-            url.host(),
-            url.port(),
-            proxy_url_str,
-        )
-
-        if not url.isValid() or not url.host() or url.port() <= 0:
-            logger.error("[ImageLoader] 代理 URL 无效: {}", proxy_url_str)
-            return
-
-        proxy_type = QNetworkProxy.ProxyType.HttpProxy
-        if proxy_mode == "socks5" or lower.startswith("socks5://") or "socks5" in lower:
-            proxy_type = QNetworkProxy.ProxyType.Socks5Proxy
-
-        proxy = QNetworkProxy(proxy_type, url.host(), url.port())
-        self.manager.setProxy(proxy)
+        # 使用全局共享的网络管理器
+        self.manager = _get_global_manager()
 
     def load(
         self,
@@ -86,32 +118,39 @@ class ImageLoader(QObject):
         radius: int = 0,
     ) -> None:
         """开始加载图片。"""
-
         url_str = str(url_str or "").strip()
         if not url_str:
-            logger.debug("[ImageLoader] URL 为空，跳过加载")
             return
 
         url_str = self._force_youtube_webp_to_jpg(url_str)
-        logger.debug("[ImageLoader] 开始下载图片: {}", url_str)
 
         request = QNetworkRequest(QUrl(url_str))
+        
+        # 设置请求头
         request.setRawHeader(
             b"User-Agent",
-            (
-                b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                b"AppleWebKit/537.36 (KHTML, like Gecko) "
-                b"Chrome/120.0.0.0 Safari/537.36"
-            ),
+            b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        )
+        
+        # 启用缓存
+        request.setAttribute(
+            QNetworkRequest.Attribute.CacheLoadControlAttribute,
+            QNetworkRequest.CacheLoadControl.PreferCache,
+        )
+        
+        # 启用 HTTP 流水线（如果服务器支持）
+        request.setAttribute(
+            QNetworkRequest.Attribute.HttpPipeliningAllowedAttribute,
+            True,
         )
 
         reply = self.manager.get(request)
 
-        # 记录 SSL 错误（不自动忽略）
+        # SSL 错误处理
         try:
             reply.sslErrors.connect(
-                lambda errors: logger.error(
-                    "[ImageLoader] SSL errors ({}): {}",
+                lambda errors: logger.warning(
+                    "[ImageLoader] SSL 警告 ({}): {}",
                     url_str,
                     ", ".join(e.errorString() for e in errors),
                 )
@@ -133,51 +172,21 @@ class ImageLoader(QObject):
         try:
             # 1. 检查网络错误
             err = reply.error()
-            try:
-                err_code: object = int(err)  # type: ignore[arg-type]
-            except Exception:
-                err_code = getattr(err, "value", str(err))
-
-            # 注意：PySide6 的枚举对象在 bool 上恒为 True，不能用 if err: 判断
             if err != QNetworkReply.NetworkError.NoError:
-                try:
-                    http_status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-                except Exception:
-                    http_status = None
-                logger.error(
-                    "[ImageLoader] 网络错误 ({}): {} (Code: {}, HTTP: {})",
-                    original_url,
-                    reply.errorString(),
-                    err_code,
-                    http_status,
-                )
+                self.failed.emit(str(original_url))
                 return
 
             # 2. 检查数据有效性
             data = reply.readAll()
             if data.size() == 0:
-                logger.error("[ImageLoader] 下载数据为空: {}", original_url)
+                self.failed.emit(str(original_url))
                 return
 
             # 3. 尝试解码
             pixmap = QPixmap()
             if not pixmap.loadFromData(data):
-                logger.error(
-                    "[ImageLoader] 图片解码失败 (数据大小: {} bytes). 可能是不支持的格式或非图片数据。",
-                    data.size(),
-                )
-                try:
-                    logger.debug("[ImageLoader] 数据头: {}", bytes(data[:20]))
-                except Exception:
-                    pass
+                self.failed.emit(str(original_url))
                 return
-
-            logger.debug(
-                "[ImageLoader] 图片加载成功: {} (尺寸: {}x{})",
-                original_url,
-                pixmap.width(),
-                pixmap.height(),
-            )
 
             # 4. 后处理 (缩放/圆角)
             if target_size:
@@ -214,6 +223,7 @@ class ImageLoader(QObject):
 
     @staticmethod
     def _force_youtube_webp_to_jpg(url_str: str) -> str:
+        """将 YouTube WebP 缩略图 URL 转换为 JPG 格式"""
         # YouTube 缩略图常见：
         # https://i.ytimg.com/vi_webp/VIDEO_ID/maxresdefault.webp
         # -> https://i.ytimg.com/vi/VIDEO_ID/maxresdefault.jpg

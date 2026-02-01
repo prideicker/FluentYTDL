@@ -308,19 +308,50 @@ def _infer_entry_url(entry: dict[str, Any]) -> str:
 
 
 def _infer_entry_thumbnail(entry: dict[str, Any]) -> str:
+    """推断视频条目的缩略图 URL，优先使用中等质量以加速加载"""
     thumb = str(entry.get("thumbnail") or "").strip()
-    if thumb:
-        return thumb
-
+    
+    # 尝试从 thumbnails 列表中找到合适尺寸的缩略图
     thumbs = entry.get("thumbnails")
     if isinstance(thumbs, list) and thumbs:
-        # Prefer the last one (often higher resolution)
-        for t in reversed(thumbs):
+        # 优先选择中等质量（~320x180），避免加载过大的图片
+        preferred_ids = {"mqdefault", "medium", "default", "sddefault", "hqdefault"}
+        for t in thumbs:
+            if not isinstance(t, dict):
+                continue
+            t_id = str(t.get("id") or "").lower()
+            if t_id in preferred_ids:
+                u = str(t.get("url") or "").strip()
+                if u:
+                    return u
+        
+        # 如果没有找到首选，选择宽度在 200-400 之间的
+        for t in thumbs:
+            if not isinstance(t, dict):
+                continue
+            w = t.get("width") or 0
+            if 200 <= w <= 400:
+                u = str(t.get("url") or "").strip()
+                if u:
+                    return u
+        
+        # 最后回退到第一个可用的
+        for t in thumbs:
             if not isinstance(t, dict):
                 continue
             u = str(t.get("url") or t.get("src") or "").strip()
             if u:
                 return u
+    
+    # 如果有直接的 thumbnail 字段，尝试转换为中等质量
+    if thumb:
+        # YouTube URL 优化：maxresdefault/hqdefault -> mqdefault
+        if "i.ytimg.com" in thumb or "i9.ytimg.com" in thumb:
+            for high_res in ["maxresdefault", "hqdefault", "sddefault"]:
+                if high_res in thumb:
+                    return thumb.replace(high_res, "mqdefault")
+        return thumb
+    
     return ""
 
 
@@ -480,6 +511,7 @@ class SelectionDialog(MessageBoxBase):
         self.image_loader = ImageLoader(self)
         self.image_loader.loaded.connect(self._on_thumb_loaded)
         self.image_loader.loaded_with_url.connect(self._on_thumb_loaded_with_url)
+        self.image_loader.failed.connect(self._on_thumb_failed)
 
         self.thumb_label: ImageLabel | None = None
 
@@ -507,6 +539,9 @@ class SelectionDialog(MessageBoxBase):
         self._thumb_cache: dict[str, Any] = {}
         self._thumb_url_to_rows: dict[str, set[int]] = {}
         self._thumb_requested: set[str] = set()
+        self._thumb_pending: list[str] = []  # 待加载的缩略图队列
+        self._thumb_inflight: int = 0  # 当前正在下载的数量
+        self._thumb_max_concurrent: int = 12  # 最大并发数（图片较小可以更高）
 
         self._detail_queue: deque[int] = deque()
         self._detail_inflight_row: int | None = None
@@ -516,6 +551,12 @@ class SelectionDialog(MessageBoxBase):
         self._idle_timer = QTimer(self)
         self._idle_timer.setInterval(2000)
         self._idle_timer.timeout.connect(self._on_idle_tick)
+        
+        # 缩略图延迟加载定时器（等待表格布局完成）
+        self._thumb_init_timer = QTimer(self)
+        self._thumb_init_timer.setSingleShot(True)
+        self._thumb_init_timer.setInterval(0)  # 0ms - 在当前事件循环完成后立即执行
+        self._thumb_init_timer.timeout.connect(self._on_thumb_init_timeout)
 
         # UI 初始化：顶部标题（主要用于播放列表；单视频解析成功时隐藏）
         self.titleLabel = SubtitleLabel("", self)
@@ -814,7 +855,7 @@ class SelectionDialog(MessageBoxBase):
         # 右侧信息
         v_info = QVBoxLayout()
         v_info.setAlignment(Qt.AlignmentFlag.AlignTop)
-        v_info.setSpacing(4)
+        v_info.setSpacing(6)
 
         title = str(info.get("title") or "Unknown")
         uploader = str(info.get("uploader") or "Unknown")
@@ -828,9 +869,10 @@ class SelectionDialog(MessageBoxBase):
 
         title_label = SubtitleLabel(title, self)
         title_label.setWordWrap(True)
-        try:
-            title_label.setMaximumHeight(title_label.fontMetrics().lineSpacing() * 2 + 4)
-        except: pass
+        # 移除固定高度限制，让标题自然撑开容器
+        # 如果需要限制最大行数，可使用 CSS 的 line-clamp（但 Qt 不原生支持）
+        # 或者通过 elide 手动裁剪文本（但会失去完整性）
+        # 方案一：完全自适应，让标题自然折行
         v_info.addWidget(title_label)
 
         meta_line1 = CaptionLabel(f"{uploader} • {duration_str}", self)
@@ -962,7 +1004,9 @@ class SelectionDialog(MessageBoxBase):
         self._idle_timer.start()
         self._enqueue_detail_rows([0, 1, 2], priority=True)
         self._maybe_start_next_detail()
-        self._load_thumbs_for_visible_rows()
+        
+        # 延迟加载缩略图（等待表格布局完成）
+        self._thumb_init_timer.start()
 
     def _build_playlist_rows(self, info: dict[str, Any]) -> None:
         entries = info.get("entries") or []
@@ -1380,10 +1424,15 @@ class SelectionDialog(MessageBoxBase):
         rows = list(range(first, last + 1))
         self._enqueue_detail_rows(rows, priority=False)
 
-    def _load_thumbs_for_visible_rows(self) -> None:
-        first, last = self._visible_row_range()
-        first = max(0, first - 6)
-        last = min(len(self._playlist_rows) - 1, last + 10)
+    def _on_thumb_init_timeout(self) -> None:
+        """延迟加载首批缩略图（等待表格布局完成）"""
+        if self._is_closing or not self._is_playlist:
+            return
+        # 首次加载：预加载更多行（前 20 行）
+        self._load_thumbs_batch(0, min(20, len(self._playlist_rows) - 1))
+
+    def _load_thumbs_batch(self, first: int, last: int) -> None:
+        """批量加载指定范围的缩略图"""
         for row in range(first, last + 1):
             if not (0 <= row < len(self._playlist_rows)):
                 continue
@@ -1395,8 +1444,26 @@ class SelectionDialog(MessageBoxBase):
                 continue
             if url in self._thumb_requested:
                 continue
+            # 加入待加载队列
+            self._thumb_pending.append(url)
             self._thumb_requested.add(url)
+        
+        # 启动并发加载
+        self._process_thumb_queue()
+
+    def _process_thumb_queue(self) -> None:
+        """处理缩略图加载队列，控制并发数"""
+        while self._thumb_pending and self._thumb_inflight < self._thumb_max_concurrent:
+            url = self._thumb_pending.pop(0)
+            self._thumb_inflight += 1
             self.image_loader.load(url, target_size=(150, 84), radius=8)
+
+    def _load_thumbs_for_visible_rows(self) -> None:
+        first, last = self._visible_row_range()
+        # 扩大预加载范围
+        first = max(0, first - 8)
+        last = min(len(self._playlist_rows) - 1, last + 15)
+        self._load_thumbs_batch(first, last)
 
     def _apply_thumb_to_row(self, row: int, url: str) -> None:
         pix = self._thumb_cache.get(url)
@@ -1408,6 +1475,10 @@ class SelectionDialog(MessageBoxBase):
                 pass
 
     def _on_thumb_loaded_with_url(self, url: str, pixmap) -> None:
+        # 减少并发计数，触发下一批加载
+        self._thumb_inflight = max(0, self._thumb_inflight - 1)
+        self._process_thumb_queue()
+        
         if self._is_closing:
             return
         if not self._is_playlist:
@@ -1418,6 +1489,12 @@ class SelectionDialog(MessageBoxBase):
         self._thumb_cache[u] = pixmap
         for row in self._thumb_url_to_rows.get(u, set()):
             self._apply_thumb_to_row(row, u)
+
+    def _on_thumb_failed(self, url: str) -> None:
+        """缩略图加载失败时的回调"""
+        # 减少并发计数，继续处理队列
+        self._thumb_inflight = max(0, self._thumb_inflight - 1)
+        self._process_thumb_queue()
 
     def _select_all(self) -> None:
         self._set_all_checks(True)
@@ -1660,6 +1737,7 @@ class SelectionDialog(MessageBoxBase):
         # 1. Single Video Mode
         if not self._is_playlist:
             if not self.video_info:
+                print("[DEBUG] get_selected_tasks: video_info is None")
                 return []
                 
             info = self.video_info
@@ -1670,12 +1748,26 @@ class SelectionDialog(MessageBoxBase):
             ydl_opts: dict[str, Any] = {}
             
             # Delegate to the format selector component
-            if hasattr(self, "_format_selector"):
+            has_selector = hasattr(self, "_format_selector")
+            print(f"[DEBUG] get_selected_tasks: has_format_selector={has_selector}")
+            
+            if has_selector:
                 sel = self._format_selector.get_selection_result()
+                print(f"[DEBUG] get_selected_tasks: selection result = {sel}")
                 if sel and sel.get("format"):
                     ydl_opts["format"] = sel["format"]
                     ydl_opts.update(sel.get("extra_opts") or {})
                     tasks.append((title, url, ydl_opts, thumb))
+                else:
+                    # 修复：即使没有格式选择，也应该使用默认格式
+                    print("[DEBUG] get_selected_tasks: No format in selection, using default")
+                    ydl_opts["format"] = "bestvideo+bestaudio/best"
+                    tasks.append((title, url, ydl_opts, thumb))
+            else:
+                # 没有格式选择器，使用默认格式
+                print("[DEBUG] get_selected_tasks: No format selector, using default")
+                ydl_opts["format"] = "bestvideo+bestaudio/best"
+                tasks.append((title, url, ydl_opts, thumb))
             
             return tasks
 

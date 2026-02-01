@@ -54,6 +54,9 @@ class DependencyManager(QObject):
             "yt-dlp": ComponentInfo("yt-dlp", "yt-dlp", "yt-dlp.exe"),
             "ffmpeg": ComponentInfo("ffmpeg", "FFmpeg", "ffmpeg.exe"),
             "deno": ComponentInfo("deno", "JS Runtime (Deno)", "deno.exe"),
+            "pot-provider": ComponentInfo("pot-provider", "POT Provider", "bgutil-pot-provider.exe"),
+            "ytarchive": ComponentInfo("ytarchive", "ytarchive", "ytarchive.exe"),
+            "atomicparsley": ComponentInfo("atomicparsley", "AtomicParsley", "AtomicParsley.exe"),
         }
 
     def get_target_dir(self, component_key: str) -> Path:
@@ -222,6 +225,19 @@ class UpdateCheckerWorker(QThread):
                 line = out.splitlines()[0]
                 m = re.search(r"ffmpeg version ([^\s]+)", line)
                 if m: return m.group(1)
+            elif key == "pot-provider":
+                # bgutil-ytdlp-pot-provider-rs
+                # Output: something like "bgutil-pot-provider 0.1.5" or just version
+                m = re.search(r"(\d+\.\d+\.\d+)", out)
+                if m: return m.group(1)
+            elif key == "ytarchive":
+                # ytarchive outputs: "ytarchive v0.4.0" or similar
+                m = re.search(r"v?(\d+\.\d+\.\d+)", out)
+                if m: return m.group(1)
+            elif key == "atomicparsley":
+                # AtomicParsley outputs: "AtomicParsley version: 20240608.083822.1ed9031" or similar
+                m = re.search(r"(\d{8}\.\d+\.\w+)", out)
+                if m: return m.group(1)
                 
             return "installed" # Fallback if parsing fails
         except Exception:
@@ -283,6 +299,60 @@ class UpdateCheckerWorker(QThread):
                      break
             return tag, dl_url
 
+        elif key == "pot-provider":
+            # bgutil-ytdlp-pot-provider-rs from jim60105
+            url = "https://api.github.com/repos/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest"
+            resp = requests.get(url, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            tag = data["tag_name"].lstrip("v")  # e.g. "0.1.5"
+            
+            # Find windows exe or zip
+            dl_url = ""
+            for asset in data.get("assets", []):
+                name = asset["name"].lower()
+                # Look for windows exe: bgutil-pot-windows-x86_64.exe
+                if "windows" in name and name.endswith(".exe"):
+                    dl_url = asset["browser_download_url"]
+                    break
+            return tag, dl_url
+
+        elif key == "ytarchive":
+            # Kethsar/ytarchive from GitHub
+            url = "https://api.github.com/repos/Kethsar/ytarchive/releases/latest"
+            resp = requests.get(url, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            tag = data["tag_name"].lstrip("v")  # e.g. "0.4.0"
+            
+            # Find windows amd64 executable
+            dl_url = ""
+            for asset in data.get("assets", []):
+                name = asset["name"].lower()
+                # ytarchive_windows_amd64.exe
+                if "windows" in name and "amd64" in name and name.endswith(".exe"):
+                    dl_url = asset["browser_download_url"]
+                    break
+            return tag, dl_url
+
+        elif key == "atomicparsley":
+            # wez/atomicparsley from GitHub
+            url = "https://api.github.com/repos/wez/atomicparsley/releases/latest"
+            resp = requests.get(url, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            tag = data["tag_name"]  # e.g. "20240608.083822.1ed9031"
+            
+            # Find Windows zip asset
+            dl_url = ""
+            for asset in data.get("assets", []):
+                name = asset["name"].lower()
+                # AtomicParsleyWindows.zip
+                if "windows" in name and name.endswith(".zip"):
+                    dl_url = asset["browser_download_url"]
+                    break
+            return tag, dl_url
+
         return "unknown", ""
 
 
@@ -334,10 +404,16 @@ class DownloaderWorker(QThread):
             
             if self.url.endswith(".zip"):
                 self._handle_zip(tmp_path, dest_dir)
+                # zip handling doesn't move the temp file, so we need to delete it
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
             else:
                 self._handle_exe(tmp_path)
+                # _handle_exe uses shutil.move, which moves the file, so no need to delete
+                # But if it exists (move failed), clean it up
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
 
-            os.remove(tmp_path)
             self.finished_signal.emit(self.key)
 
         except Exception as e:

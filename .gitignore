@@ -1,95 +1,195 @@
-# Python
+# ==============================================================================
+# FluentYTDL .gitignore
+# ==============================================================================
+# 此文件定义了不应提交到 Git 仓库的文件和目录
+# ==============================================================================
+
+# ==============================================================================
+# Python 相关
+# ==============================================================================
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
 *.pyo
 *.pyd
 
-# === 必须包含的忽略项 ===
-# 避免把临时文件、大文件或构建产物误提交
-rabbish/
-assets/*.mp4   # 假设你的大文件是视频
-*.exe
-*.zip
-dist/
-build/
+# 虚拟环境
 venv/
-# .git/          # 这个 git 自己会忽略，写不写无所�?
-
-# Virtual env
 .venv/
-venv/
+env/
+.env/
+ENV/
 
-# PyInstaller
-/build/
-/dist/
-*.spec.user
+# Python egg 文件
+*.egg
+*.egg-info/
+.eggs/
 
-# Logs / outputs
-/logs/
+# pytest 缓存
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
 
-# Release artifacts
-/installer/*.zip
-/installer/*.msi
+# mypy / 类型检查
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# VSCode
-.vscode/*.log
-
-# bundled tools (large)
-assets/bin/**
-!assets/bin/**/.gitkeep
-
-# Local config (contains user paths / tokens)
-config.json
-
-# Ignore large built icon files if any (allow logo.png in repo if desired)
-assets/*.ico
-
-# Additional common patterns
-# Python compiled files
-*.py[cod]
-
-# PyInstaller / build outputs
+# ==============================================================================
+# 构建产物 / 打包输出
+# ==============================================================================
 build/
 dist/
+release/
 *.spec
 
-# Runtime artifacts
+# PyInstaller 临时文件
+*.manifest
+*.spec.user
+
+# 安装包输出
+installer/*.exe
+installer/*.msi
+installer/*.zip
+
+# ==============================================================================
+# 外部工具 / 二进制文件 (通过脚本下载)
+# ==============================================================================
+# 主工具目录
+assets/bin/
+bin/
+tools/*.exe
+
+# 保留 .gitkeep 占位文件
+!assets/bin/.gitkeep
+!bin/.gitkeep
+
+# ==============================================================================
+# 敏感信息 / 用户配置
+# ==============================================================================
+# 用户配置文件 (包含个人设置/路径)
+config.json
+
+# Cookie 文件 (包含登录凭据)
+cookies.txt
+**/cookies.txt
+
+# 环境变量文件
+.env
+.env.*
+!.env.example
+
+# API 密钥 / Token
+*.key
+*.pem
+*.p12
+secrets/
+
+# ==============================================================================
+# 日志文件
+# ==============================================================================
+logs/
 *.log
+debug_*.txt
+*_debug.txt
+
+# ==============================================================================
+# 临时文件 / 缓存
+# ==============================================================================
+# 下载临时文件
 *.part
 *.ytdl
+*.temp
+*.tmp
+
+# 缓存目录
+cache/
+.cache/
 crash_reports/
 
-# Sensitive or noisy rabbish logs
-rabbish/*/*log.txt
-rabbish/*/*.log
-rabbish/*/restore_log.txt
-rabbish/*/move_log.txt
+# ==============================================================================
+# IDE / 编辑器配置
+# ==============================================================================
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
 
-# IDE / system files
+# JetBrains (PyCharm 等)
 .idea/
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Gemini AI
+.gemini/
+
+# ==============================================================================
+# 系统文件
+# ==============================================================================
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# virtual envs
-env/
-# 打包产物
-installer/
-dist/
-build/
-*.exe
-*.zip
+# ==============================================================================
+# 项目特定
+# ==============================================================================
+# 废弃/归档的代码
+rabbish/
 
-# 二进制工具（建议通过脚本下载，不要放源码里）
-src/fluentytdl/assets/bin/
+# 测试输出
+tests/output/
+test_*.mp4
+test_*.mp3
 
-# Temporarily ignore external build moved to rabbish
-/rabbish/*/build_FluentYTDL/
+# 开发用的临时检查脚本
+check_icons.py
+check_all_icons.py
 
-# Ignore local IDE settings
-/.gemini/
+# 记录历史 (包含用户下载历史)
+record_history.json
 
-*.egg-info/
-__pycache__/
-.pytest_cache/
+# 本地调试文件
+*_debug_*.txt
+channel_page_debug*.txt
+channel_page_tmp.py
+temp_*.txt
+temp_*.py
 
-release/
+# ==============================================================================
+# 大文件
+# ==============================================================================
+# 视频/音频文件
+*.mp4
+*.mkv
+*.webm
+*.avi
+*.mov
+*.mp3
+*.m4a
+*.flac
+*.wav
+
+# 压缩包
+*.7z
+*.rar
+
+# 排除示例和文档中的媒体文件
+!docs/**/*.mp4
+!assets/demo/**/*

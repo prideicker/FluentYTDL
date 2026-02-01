@@ -34,7 +34,6 @@ class YtDlpAuthOptions:
 class AntiBlockingOptions:
     """Anti-blocking / anti-bot options."""
 
-    rotate_user_agent: bool = True
     player_clients: tuple[str, ...] = ("android", "ios", "web")
     sleep_interval_min: int = 1
     sleep_interval_max: int = 5
@@ -97,15 +96,6 @@ class YoutubeService:
                 pass
         getattr(self._logger, level.lower(), self._logger.info)(message)
 
-    def _random_user_agent(self) -> str:
-        # Keep this list short and realistic; expand later if needed.
-        user_agents: list[str] = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-        ]
-        return random.choice(user_agents)
-
     def build_ydl_options(self, options: YoutubeServiceOptions | None = None) -> dict[str, Any]:
         """Construct yt-dlp options with anti-blocking and auth."""
 
@@ -149,8 +139,8 @@ class YoutubeService:
 
         self._maybe_configure_youtube_js_runtime(ydl_opts)
 
-        if anti.rotate_user_agent:
-            ydl_opts["user_agent"] = self._random_user_agent()
+        # User-Agent: 不再自定义，让 yt-dlp 根据客户端类型自动处理
+        # yt-dlp 会根据 extractor_args 中的 player_client 自动匹配合适的 UA
 
         # Proxy: options.network.proxy > SettingsPage proxy
         proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
@@ -177,58 +167,82 @@ class YoutubeService:
             else:
                 ydl_opts["proxy"] = ""
 
-        # Cookies: options.auth overrides SettingsPage.
-        # - cookie_mode=file: only load cookiefile if it exists AND looks like Netscape format
-        # - cookie_mode=browser: use cookiesfrombrowser as a fallback (Windows DPAPI can be flaky)
+        # Cookies: 统一通过 Cookie Sentinel 管理
+        # 新架构：所有 Cookie 统一写入 bin/cookies.txt，yt-dlp 始终读取该文件
+        # 优先级: options.auth.cookies_file (直接指定) > Cookie Sentinel
         has_valid_cookie = False
+        cookiefile = None
 
-        cookiefile = (auth.cookies_file or "").strip() or None
-        cookies_from_browser = (auth.cookies_from_browser or "").strip() or None
-
-        cookie_mode = "file" if cookiefile else ("browser" if cookies_from_browser else str(config_manager.get("cookie_mode") or "browser"))
-        config_cookie_file = str(config_manager.get("cookie_file") or "").strip() or None
-        config_cookie_browser = str(config_manager.get("cookie_browser") or "chrome").strip() or None
-
-        if cookie_mode == "file" and not cookiefile:
-            cookiefile = config_cookie_file
-        if cookie_mode == "browser" and not cookies_from_browser:
-            cookies_from_browser = config_cookie_browser
-
-        cookie_exists = bool(cookiefile and os.path.exists(cookiefile))
-        self._emit_log(
-            "info",
-            f"[DEBUG] CookieMode={cookie_mode}, CookieFile={cookiefile or ''}, Exists={cookie_exists}",
-        )
-
-        if cookie_mode == "file" and cookiefile:
-            if os.path.exists(cookiefile):
-                if self._is_probably_json_cookie_file(cookiefile):
+        # 1. 检查 auth options 中是否直接指定了 cookie 文件（向后兼容）
+        direct_cookiefile = (auth.cookies_file or "").strip() or None
+        
+        if direct_cookiefile and os.path.exists(direct_cookiefile):
+            # 直接指定的 cookie 文件优先
+            if self._is_probably_json_cookie_file(direct_cookiefile):
+                self._emit_log(
+                    "error",
+                    "Cookies 文件疑似为 JSON 格式，yt-dlp 只支持 Netscape HTTP Cookie File 格式；已忽略该文件。",
+                )
+            else:
+                yt_cookie_count = self._count_youtube_related_cookies(direct_cookiefile)
+                if yt_cookie_count <= 0:
                     self._emit_log(
-                        "error",
-                        "Cookies 文件疑似为 JSON 格式，yt-dlp 只支持 Netscape HTTP Cookie File 格式；已忽略该文件。",
+                        "warning",
+                        "已读取 cookies.txt，但未发现 YouTube/Google 域相关 cookies。"
+                        "请确认是在 youtube.com 登录后导出，且为 Netscape 格式。",
                     )
                 else:
-                    yt_cookie_count = self._count_youtube_related_cookies(cookiefile)
-                    if yt_cookie_count <= 0:
-                        self._emit_log(
-                            "warning",
-                            "已读取 cookies.txt，但未发现 YouTube/Google 域相关 cookies。"
-                            "请确认是在 youtube.com 登录后导出，且为 Netscape 格式。",
-                        )
-                    else:
-                        ydl_opts["cookiefile"] = cookiefile
+                    cookiefile = direct_cookiefile
+                    has_valid_cookie = True
+                    self._emit_log(
+                        "info",
+                        f"✅ 已加载 Cookie 文件: {cookiefile} (YouTube/Google cookies: {yt_cookie_count})",
+                    )
+        else:
+            # 2. 通过 Cookie Sentinel 获取统一的 bin/cookies.txt
+            try:
+                from .cookie_sentinel import cookie_sentinel
+                
+                sentinel_cookie_file = cookie_sentinel.get_cookie_file_path()
+                
+                if cookie_sentinel.exists:
+                    yt_cookie_count = self._count_youtube_related_cookies(sentinel_cookie_file)
+                    if yt_cookie_count > 0:
+                        cookiefile = sentinel_cookie_file
                         has_valid_cookie = True
+                        
+                        # 显示状态信息
+                        age = cookie_sentinel.age_minutes
+                        age_str = f"{int(age)}分钟前" if age is not None else "未知"
+                        status_emoji = "⚠️" if cookie_sentinel.is_stale else "✅"
+                        
                         self._emit_log(
                             "info",
-                            f"✅ 已加载 Cookie 文件: {cookiefile} (YouTube/Google cookies: {yt_cookie_count})",
+                            f"{status_emoji} Cookie Sentinel: {cookie_sentinel.get_status_info()['source']} "
+                            f"(更新于 {age_str}, {yt_cookie_count} 个 YouTube Cookie)",
                         )
-            else:
-                self._emit_log("warning", f"Cookies 文件不存在: {cookiefile}")
-        elif cookie_mode == "browser" and cookies_from_browser:
-            # Note: this may fail on Windows with DPAPI errors depending on browser updates.
-            ydl_opts["cookiesfrombrowser"] = (cookies_from_browser,)
-            has_valid_cookie = True
-            self._emit_log("warning", f"使用浏览器 Cookies（Windows 上可能不稳定）: {cookies_from_browser}")
+                    else:
+                        self._emit_log(
+                            "warning",
+                            f"Cookie Sentinel 文件存在但未发现 YouTube 相关 Cookie",
+                        )
+                else:
+                    self._emit_log(
+                        "info",
+                        "Cookie Sentinel 文件不存在，将使用无 Cookie 模式下载（可能受限）",
+                    )
+                    
+            except Exception as e:
+                self._emit_log("warning", f"Cookie Sentinel 获取失败: {e}")
+        
+        # 设置 cookiefile 到 ydl_opts
+        if cookiefile:
+            ydl_opts["cookiefile"] = cookiefile
+        
+        self._emit_log(
+            "debug",
+            f"[Cookie] Path={cookiefile or 'None'}, Valid={has_valid_cookie}",
+        )
 
         # --- Smart client switching ---
         # With Cookies: keep yt-dlp default (web) extractor behavior (best for 4K/Premium).
@@ -246,29 +260,51 @@ class YoutubeService:
         else:
             self._emit_log("info", "🚀 Cookies 模式激活：使用 Web 默认客户端获取更完整的格式列表")
 
-        # --- Optional: YouTube PO Token ---
-        # Context: YouTube is rolling out PO Token enforcement. yt-dlp recommends using
-        # the `mweb` client together with a PO Token when default clients fail.
-        po_token = str(config_manager.get("youtube_po_token") or "").strip()
-        if po_token:
-            extractor_args = cast(dict[str, Any], ydl_opts.setdefault("extractor_args", {}))
-            youtube_args = cast(dict[str, Any], extractor_args.setdefault("youtube", {}))
+        # === POT Token 统一处理 (类似 cookies 处理) ===
+        # 优先级: 1. POT Provider 服务 (自动) > 2. 手动 PO Token (配置项)
+        pot_token_source = None  # 'provider' / 'manual' / None
 
-            # PO Token for mweb.gvs is typically session-bound; cookies are usually required.
-            if not has_valid_cookie:
-                self._emit_log(
-                    "warning",
-                    "已配置 PO Token，但当前未加载有效 Cookies。mweb.gvs PO Token 通常需要配合 cookies 使用。",
-                )
+        # 1. 优先使用 POT Provider 服务
+        if config_manager.get("pot_provider_enabled", True):
+            try:
+                from fluentytdl.core.pot_manager import pot_manager
+                if pot_manager.is_running():
+                    pot_args = pot_manager.get_extractor_args()
+                    if pot_args:
+                        # POT Provider 服务正常运行
+                        extractor_args = cast(dict[str, Any], ydl_opts.setdefault("extractor_args", {}))
+                        # 设置 youtubepot-bgutilhttp 的 base_url
+                        extractor_args["youtubepot-bgutilhttp"] = {
+                            "base_url": [f"http://127.0.0.1:{pot_manager.active_port}"]
+                        }
+                        pot_token_source = "provider"
+                        self._emit_log("info", f"🔐 POT Provider 已启用 (端口 {pot_manager.active_port})")
+            except Exception as e:
+                logger.debug(f"POT Provider 不可用: {e}")
 
-            # Prefer adding mweb as a fallback client when token is present.
-            # Use a single comma-separated value to match yt-dlp syntax.
-            youtube_args["player_client"] = ["default,mweb"]
-            youtube_args["po_token"] = [po_token]
-            # Remove aggressive skips that are intended for no-cookie mobile simulation.
-            # With PO Token, we want the most browser-like, complete extraction.
-            youtube_args.pop("player_skip", None)
-            self._emit_log("info", "🔐 已注入 YouTube PO Token：将优先尝试 mweb 客户端")
+        # 2. 回退到手动 PO Token
+        if not pot_token_source:
+            po_token = str(config_manager.get("youtube_po_token") or "").strip()
+            if po_token:
+                extractor_args = cast(dict[str, Any], ydl_opts.setdefault("extractor_args", {}))
+                youtube_args = cast(dict[str, Any], extractor_args.setdefault("youtube", {}))
+
+                # PO Token for mweb.gvs is typically session-bound; cookies are usually required.
+                if not has_valid_cookie:
+                    self._emit_log(
+                        "warning",
+                        "已配置 PO Token，但当前未加载有效 Cookies。mweb.gvs PO Token 通常需要配合 cookies 使用。",
+                    )
+
+                # Prefer adding mweb as a fallback client when token is present.
+                youtube_args["player_client"] = ["default,mweb"]
+                youtube_args["po_token"] = [po_token]
+                youtube_args.pop("player_skip", None)
+                pot_token_source = "manual"
+                self._emit_log("info", "🔐 已注入 YouTube PO Token：将优先尝试 mweb 客户端")
+
+        if not pot_token_source:
+            self._emit_log("debug", "未启用 POT Token (可在设置中配置 POT Provider 或手动 Token)")
 
         # FFmpeg location
         ffmpeg_path = str(config_manager.get("ffmpeg_path") or "").strip()
@@ -291,6 +327,28 @@ class YoutubeService:
                 # yt-dlp accepts either the ffmpeg.exe path or its containing folder.
                 ydl_opts["ffmpeg_location"] = str(bundled_ffmpeg)
                 self._emit_log("info", f"已启用内置 FFmpeg: {bundled_ffmpeg}")
+
+        # === 后处理：封面嵌入 & 元数据嵌入 ===
+        embed_thumbnail = config_manager.get("embed_thumbnail", True)
+        embed_metadata = config_manager.get("embed_metadata", True)
+        
+        self._emit_log("debug", f"[PostProcess] embed_thumbnail={embed_thumbnail}, embed_metadata={embed_metadata}")
+        
+        if embed_thumbnail or embed_metadata:
+            postprocessors = ydl_opts.setdefault("postprocessors", [])
+            
+            # 封面嵌入：只下载缩略图，不让 yt-dlp 嵌入（由我们的后处理器处理）
+            if embed_thumbnail:
+                ydl_opts["writethumbnail"] = True
+                # 转换缩略图格式为 jpg（兼容性最佳）
+                ydl_opts["convert_thumbnail"] = "jpg"
+                # 注意：不再添加 EmbedThumbnail 后处理器，由外部 thumbnail_embedder 处理
+            
+            # 元数据嵌入
+            if embed_metadata:
+                postprocessors.append({"key": "FFmpegMetadata"})
+            
+            self._emit_log("debug", f"[PostProcess] postprocessors={postprocessors}")
 
         return ydl_opts
 
@@ -525,28 +583,33 @@ class YoutubeService:
             msg = str(exc)
             lower = msg.lower()
 
-            # Auto fallback: cookiefile -> cookies-from-browser
-            # Wiki context: YouTube rotates cookies frequently; reading directly from browser
-            # can be fresher than a stale exported cookie file.
-            if ("not a bot" in lower or "sign in" in lower) and "cookiefile" in ydl_opts and "cookiesfrombrowser" not in ydl_opts:
-                browser = str(config_manager.get("cookie_browser") or "").strip() or None
-                if browser:
-                    try:
-                        retry_opts = dict(ydl_opts)
-                        retry_opts.pop("cookiefile", None)
-                        retry_opts["cookiesfrombrowser"] = (browser,)
-                        self._emit_log(
-                            "warning",
-                            f"检测到风控提示，自动改用浏览器 Cookies 重试: {browser}",
-                        )
-                        return _do_extract(retry_opts)
-                    except Exception as retry_exc:
-                        if isinstance(retry_exc, YtDlpCancelled):
-                            raise
-                        # Keep original error message, but append retry result for diagnosis.
-                        retry_msg = str(retry_exc)
-                        msg = msg + f"\n\n(已自动用 cookies-from-browser:{browser} 重试，但仍失败: {retry_msg})"
-                        lower = msg.lower()
+            # 注意: 已移除 cookies-from-browser fallback
+            # 所有 Cookie 统一通过 Cookie Sentinel 管理，使用 bin/cookies.txt
+            # 这样可以避免 DPAPI 文件锁和权限问题
+
+            if "not a bot" in lower or "sign in" in lower or "403" in lower:
+                # 尝试自愈：使用 Cookie Sentinel 刷新
+                try:
+                    from .cookie_sentinel import cookie_sentinel
+                    from .auth_service import auth_service, AuthSourceType
+                    
+                    current_source = auth_service.current_source
+                    # 仅当使用浏览器模式时才尝试自愈（FILE 模式无法自动刷新）
+                    if current_source not in (AuthSourceType.NONE, AuthSourceType.FILE):
+                        self._emit_log("warning", "检测到认证失败，尝试自动刷新 Cookies...")
+                        try:
+                            # 调用 Cookie Sentinel 刷新
+                            success = cookie_sentinel.refresh_from_auth_service()
+                            if success:
+                                self._emit_log("info", "Cookies 刷新成功，正在重试解析...")
+                                # 重新构建选项并重试
+                                return self.extract_info_sync(url, options, cancel_event=cancel_event)
+                        except Exception as refresh_err:
+                            self._emit_log("warning", f"自动刷新 Cookies 失败: {refresh_err}")
+                except ImportError:
+                    pass
+                except Exception as e:
+                    self._emit_log("warning", f"自动修复尝试失败: {e}")
 
             if "not a bot" in lower or "sign in" in lower:
                 proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
@@ -629,6 +692,25 @@ class YoutubeService:
                         cancel_event=cancel_event,
                     )
                     return cast(dict[str, Any], info)
+
+            
+            # --- Self-Healing for Dialog Extract ---
+            lower = msg.lower()
+            if "not a bot" in lower or "sign in" in lower or "403" in lower:
+                try:
+                    from .cookie_sentinel import cookie_sentinel
+                    from .auth_service import auth_service, AuthSourceType
+                    
+                    current_source = auth_service.current_source
+                    if current_source not in (AuthSourceType.NONE, AuthSourceType.FILE):
+                        self._emit_log("warning", "[Dialog] 检测到认证失败，尝试自动刷新 Cookies...")
+                        if cookie_sentinel.refresh_from_auth_service():
+                            self._emit_log("info", "[Dialog] Cookies 刷新成功，正在重试解析...")
+                            return self.extract_info_for_dialog_sync(url, options, cancel_event=cancel_event)
+                except Exception as e:
+                    self._emit_log("warning", f"[Dialog] 自动修复尝试失败: {e}")
+            # ---------------------------------------
+
             raise
 
     async def extract_info(self, url: str, options: YoutubeServiceOptions | None = None) -> dict[str, Any]:
@@ -716,8 +798,26 @@ class YoutubeService:
                         )
                     else:
                         raise
-                else:
-                    raise
+
+                
+                # --- Self-Healing for Playlist Flat ---
+                lower = msg.lower()
+                if "not a bot" in lower or "sign in" in lower or "403" in lower:
+                    try:
+                        from .cookie_sentinel import cookie_sentinel
+                        from .auth_service import auth_service, AuthSourceType
+                        
+                        current_source = auth_service.current_source
+                        if current_source not in (AuthSourceType.NONE, AuthSourceType.FILE):
+                            self._emit_log("warning", "[Playlist] 检测到认证失败，尝试自动刷新 Cookies...")
+                            if cookie_sentinel.refresh_from_auth_service():
+                                self._emit_log("info", "[Playlist] Cookies 刷新成功，正在重试解析...")
+                                return self.extract_playlist_flat(url, options, cancel_event=cancel_event)
+                    except Exception as e:
+                        self._emit_log("warning", f"[Playlist] 自动修复尝试失败: {e}")
+                # --------------------------------------
+
+                raise
 
             if not isinstance(info, dict):
                 raise RuntimeError("播放列表解析失败：返回结果为空")

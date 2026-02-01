@@ -24,12 +24,22 @@ class ConfigManager:
         # Backward-compat key (older versions used a switch + url)
         "proxy_enabled": False,
         "proxy_url": "127.0.0.1:7890",
-        "cookie_mode": "browser",  # browser / file
-        "cookie_browser": "firefox",  # chrome / edge / firefox
+        # Cookie mode:
+        # - auto: 自动同步模式 (启动时/报错时自动从浏览器提取)
+        # - browser: 运行时直接读取浏览器 (旧模式, 可能遇到文件锁)
+        # - file: 手动导入 Netscape 格式文件
+        "cookie_mode": "auto",  # auto / browser / file
+        "cookie_browser": "edge",  # chrome / edge / firefox
         "cookie_file": "",
+        # 自动同步相关配置
+        "cookie_auto_sync_enabled": True,  # 是否启用启动时自动同步
+        "cookie_last_sync_time": 0,  # 上次同步时间戳 (Unix timestamp)
+        "cookie_managed_path": "",  # 托管文件路径 (自动生成, 用户无需配置)
         # YouTube PO Token (optional). See yt-dlp wiki: PO-Token-Guide
         # Example value: "mweb.gvs+<TOKEN>" or "mweb.gvs+<TOKEN>,mweb.player+<TOKEN>"
         "youtube_po_token": "",
+        # POT Provider (bgutil-ytdlp-pot-provider) 自动 PO Token 服务
+        "pot_provider_enabled": True,  # 启用内置 POT 服务
         # yt-dlp YouTube EJS/JS runtime (yt-dlp issue #15012)
         # auto: prefer deno if available (default), else try node/bun/quickjs
         "js_runtime": "auto",  # auto / deno / node / bun / quickjs
@@ -78,6 +88,12 @@ class ConfigManager:
         "has_shown_welcome_guide": False,
         # Version when user last saw the welcome guide (for version-aware re-trigger)
         "welcome_guide_shown_for_version": "",
+        
+        # 封面嵌入设置
+        # embed_thumbnail: 是否启用封面嵌入功能（全局开关）
+        "embed_thumbnail": True,
+        # embed_metadata: 是否嵌入元数据（标题、艺术家等）
+        "embed_metadata": True,
     }
 
     def __new__(cls) -> "ConfigManager":

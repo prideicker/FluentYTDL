@@ -218,6 +218,11 @@ class DownloadItemCard(CardWidget):
             self.worker.output_path_ready.connect(self._on_output_path_ready)
         except Exception:
             pass
+        # Cookie 错误检测
+        try:
+            self.worker.cookie_error_detected.connect(self._on_cookie_error)
+        except Exception:
+            pass
         # Also forward to MainWindow if it provides a structured error dialog.
         try:
             self.worker.error.connect(self._forward_error_to_window)
@@ -232,6 +237,57 @@ class DownloadItemCard(CardWidget):
                 handler(err_data)
         except Exception:
             pass
+    
+    def _on_cookie_error(self, error_message: str) -> None:
+        """
+        处理 Cookie 错误
+        
+        弹出修复对话框，引导用户修复 Cookie
+        """
+        try:
+            from .cookie_repair_dialog import CookieRepairDialog
+            from ...core.cookie_sentinel import cookie_sentinel
+            
+            # 创建修复对话框
+            dialog = CookieRepairDialog(error_message, parent=self.window())
+            
+            # 连接自动修复信号
+            def on_auto_repair():
+                success, message = cookie_sentinel.force_refresh_with_uac()
+                dialog.show_repair_result(success, message)
+                
+                if success:
+                    # 修复成功，自动重试下载
+                    from PySide6.QtCore import QTimer
+                    QTimer.singleShot(2000, lambda: self._retry_download())
+            
+            dialog.repair_requested.connect(on_auto_repair)
+            
+            # 连接手动导入信号
+            def on_manual_import():
+                # 打开设置页面的验证选项卡
+                try:
+                    main_win = self.window()
+                    if hasattr(main_win, "switch_to_settings"):
+                        main_win.switch_to_settings()
+                        InfoBar.info(
+                            "请在设置页面导入 Cookie 文件",
+                            "导入完成后可重试下载",
+                            parent=main_win,
+                            position=InfoBarPosition.TOP,
+                            duration=5000,
+                        )
+                except Exception:
+                    pass
+            
+            dialog.manual_import_requested.connect(on_manual_import)
+            
+            # 显示对话框
+            dialog.exec()
+            
+        except Exception as e:
+            from ...utils.logger import logger
+            logger.error(f"显示 Cookie 修复对话框失败: {e}", exc_info=True)
 
     def update_progress(self, d: dict[str, Any]) -> None:
         if d.get("status") == "downloading":

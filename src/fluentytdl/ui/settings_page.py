@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
@@ -6,10 +6,11 @@ import shutil
 import subprocess
 import os
 import time
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout
+from PySide6.QtCore import Qt, Signal, QThread, QObject
+from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout, QApplication
 
 from qfluentwidgets import (
     ComboBox,
@@ -33,6 +34,57 @@ from ..core.yt_dlp_cli import resolve_yt_dlp_exe, run_version
 from ..utils.paths import find_bundled_executable, is_frozen
 from .components.smart_setting_card import SmartSettingCard
 from ..core.dependency_manager import dependency_manager
+
+
+# ============================================================================
+# Cookie 刷新 Worker（使用Qt线程，确保打包后正常工作）
+# ============================================================================
+
+class CookieRefreshWorker(QThread):
+    """Cookie刷新工作线程（Qt线程，打包后可靠）"""
+    finished = Signal(bool, str, bool)  # (成功标志, 消息, 是否需要管理员权限)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+    
+    def run(self):
+        """在Qt线程中执行Cookie刷新"""
+        from ..core.cookie_sentinel import cookie_sentinel
+        from ..core.auth_service import auth_service
+        from ..utils.logger import logger
+        
+        success = False
+        message = "未知错误"
+        
+        try:
+            # 直接刷新（调用前已检查权限，或已是管理员/非Edge/Chrome）
+            success, message = cookie_sentinel.force_refresh_with_uac()
+            
+            if not success:
+                # 获取详细状态
+                status = auth_service.last_status
+                if status and hasattr(status, 'message') and status.message:
+                    message = status.message
+                
+                # 友好的错误引导
+                browser_name = auth_service.current_source_display
+                if "未找到" in message or "not found" in message.lower():
+                    message = (
+                        f"无法从 {browser_name} 提取 Cookie\n\n"
+                        "可能的原因：\n"
+                        f"1. {browser_name} 未安装或未登录 YouTube\n"
+                        f"2. {browser_name} Cookie 数据库被锁定（请关闭浏览器）\n\n"
+                        "建议：完全关闭浏览器后重试"
+                    )
+                
+                logger.warning(f"[CookieRefreshWorker] 提取失败: {message}")
+        except Exception as e:
+            success = False
+            message = f"刷新异常: {str(e)}"
+            logger.error(f"[CookieRefreshWorker] 异常: {e}", exc_info=True)
+        
+        # 发射信号（线程安全，第三个参数保留但不再使用）
+        self.finished.emit(success, message, False)
 
 
 class ComponentSettingCard(SettingCard):
@@ -100,6 +152,9 @@ class ComponentSettingCard(SettingCard):
         exe_name = "yt-dlp.exe"
         if self.component_key == "ffmpeg": exe_name = "ffmpeg.exe"
         elif self.component_key == "deno": exe_name = "deno.exe"
+        elif self.component_key == "pot-provider": exe_name = "bgutil-pot-provider.exe"
+        elif self.component_key == "ytarchive": exe_name = "ytarchive.exe"
+        elif self.component_key == "atomicparsley": exe_name = "AtomicParsley.exe"
         
         file, _ = QFileDialog.getOpenFileName(
             self.window(),
@@ -342,6 +397,9 @@ class SettingsPage(ScrollArea):
         self.setWidgetResizable(True)
 
         self.scrollWidget.setObjectName("scrollWidget")
+        
+        # Cookie刷新worker引用（防止垃圾回收）
+        self._cookie_worker = None
 
         self.expandLayout.setSpacing(20)
         self.expandLayout.setContentsMargins(30, 20, 30, 20)
@@ -352,10 +410,17 @@ class SettingsPage(ScrollArea):
         self._init_core_group()
         self._init_advanced_group()
         self._init_automation_group()
+        self._init_postprocess_group()
         self._init_behavior_group()
         self._init_about_group()
 
         self._load_settings_to_ui()
+
+    def showEvent(self, event):
+        """页面显示时更新Cookie状态"""
+        super().showEvent(event)
+        # 每次显示设置页面时刷新Cookie状态
+        self._update_cookie_status()
 
     def _init_header(self) -> None:
         self.titleLabel = SubtitleLabel("设置", self.scrollWidget)
@@ -424,11 +489,12 @@ class SettingsPage(ScrollArea):
         )
         self.updateSourceCard.comboBox.currentIndexChanged.connect(self._on_update_source_changed)
 
+        # === Cookie Sentinel 配置 ===
         self.cookieModeCard = InlineComboBoxCard(
             FluentIcon.PEOPLE,
-            "Cookies 来源",
-            "选择 Cookies 注入方式",
-            ["从浏览器读取", "手动导入 Netscape 文件"],
+            "Cookie 验证方式",
+            "选择 Cookie 来源（Cookie 卫士会自动维护生命周期）",
+            ["🚀 自动从浏览器提取", "📄 手动导入 cookies.txt"],
             self.coreGroup,
         )
         self.cookieModeCard.comboBox.currentIndexChanged.connect(self._on_cookie_mode_changed)
@@ -436,20 +502,46 @@ class SettingsPage(ScrollArea):
         self.browserCard = InlineComboBoxCard(
             FluentIcon.GLOBE,
             "选择浏览器",
-            "用于 cookies-from-browser",
-            ["Google Chrome", "Microsoft Edge", "Firefox"],
+            "Chromium 内核需管理员权限，Firefox 内核无需管理员权限",
+            [
+                "Microsoft Edge", "Google Chrome (⚠️不稳定)", "Chromium",
+                "Brave", "Opera", "Opera GX", "Vivaldi", "Arc",
+                "Firefox", "LibreWolf"
+            ],
             self.coreGroup,
         )
         self.browserCard.comboBox.currentIndexChanged.connect(self._on_cookie_browser_changed)
 
+        # 手动刷新按钮
+        self.refreshCookieCard = PushSettingCard(
+            "立即刷新",
+            FluentIcon.SYNC,
+            "手动刷新 Cookie",
+            "从浏览器重新提取 Cookie（可能需要管理员权限）",
+            self.coreGroup,
+        )
+        self.refreshCookieCard.clicked.connect(self._on_refresh_cookie_clicked)
+
+        # Cookie 文件选择
         self.cookieFileCard = PushSettingCard(
             "选择文件",
             FluentIcon.DOCUMENT,
-            "Cookies 文件路径",
-            config_manager.get("cookie_file") or "未选择",
+            "Cookie 文件路径",
+            "未选择",
             self.coreGroup,
         )
         self.cookieFileCard.clicked.connect(self._select_cookie_file)
+        
+        # Cookie 状态显示（带打开位置按钮）
+        self.cookieStatusCard = PushSettingCard(
+            "打开位置",
+            FluentIcon.INFO,
+            "Cookie 文件",
+            "显示当前 Cookie 信息",
+            self.coreGroup,
+        )
+        self.cookieStatusCard.clicked.connect(self._open_cookie_location)
+        self._update_cookie_status()
 
         # New Component Cards
         self.ytDlpCard = ComponentSettingCard(
@@ -476,6 +568,24 @@ class SettingsPage(ScrollArea):
             "用于加速 yt-dlp 解析（点击检查更新）",
             self.coreGroup
         )
+        
+        # POT Provider (PO Token 服务)
+        self.potProviderCard = ComponentSettingCard(
+            "pot-provider",
+            FluentIcon.CERTIFICATE,
+            "POT Provider",
+            "用于绕过 YouTube 机器人检测（点击检查更新）",
+            self.coreGroup
+        )
+
+        # AtomicParsley (封面嵌入工具)
+        self.atomicParsleyCard = ComponentSettingCard(
+            "atomicparsley",
+            FluentIcon.PHOTO,
+            "AtomicParsley",
+            "用于 MP4/M4A 封面嵌入（启用封面嵌入功能需要此工具）",
+            self.coreGroup
+        )
 
         self.jsRuntimeCard = InlineComboBoxCard(
             FluentIcon.CODE,
@@ -490,16 +600,22 @@ class SettingsPage(ScrollArea):
         self.coreGroup.addSettingCard(self.updateSourceCard)
         self.coreGroup.addSettingCard(self.cookieModeCard)
         self.coreGroup.addSettingCard(self.browserCard)
+        self.coreGroup.addSettingCard(self.refreshCookieCard)
+        self.coreGroup.addSettingCard(self.cookieStatusCard)
         self.coreGroup.addSettingCard(self.cookieFileCard)
         self.coreGroup.addSettingCard(self.ytDlpCard)
         self.coreGroup.addSettingCard(self.ffmpegCard)
         self.coreGroup.addSettingCard(self.denoCard)
+        self.coreGroup.addSettingCard(self.potProviderCard)
+        self.coreGroup.addSettingCard(self.atomicParsleyCard)
         self.coreGroup.addSettingCard(self.jsRuntimeCard)
         self.expandLayout.addWidget(self.coreGroup)
 
         # Make Cookie dependent cards look like "children" of cookie mode card
         self._indent_setting_card(self.browserCard)
+        self._indent_setting_card(self.refreshCookieCard)
         self._indent_setting_card(self.cookieFileCard)
+        self._indent_setting_card(self.cookieStatusCard)
 
     def _init_advanced_group(self) -> None:
         self.advancedGroup = SettingCardGroup("高级", self.scrollWidget)
@@ -620,6 +736,32 @@ class SettingsPage(ScrollArea):
         self.behaviorGroup.addSettingCard(self.playlistSkipAuthcheckCard)
         self.expandLayout.addWidget(self.behaviorGroup)
 
+    def _init_postprocess_group(self) -> None:
+        """初始化后处理设置组（封面嵌入、元数据等）"""
+        self.postprocessGroup = SettingCardGroup("后处理", self.scrollWidget)
+
+        # 封面嵌入开关
+        self.embedThumbnailCard = InlineSwitchCard(
+            FluentIcon.PHOTO,
+            "嵌入封面图片",
+            "将视频缩略图嵌入到下载文件中作为封面（支持 MP4/MKV/MP3/M4A/FLAC/OGG/OPUS 等格式）",
+            parent=self.postprocessGroup,
+        )
+        self.embedThumbnailCard.checkedChanged.connect(self._on_embed_thumbnail_changed)
+
+        # 元数据嵌入开关
+        self.embedMetadataCard = InlineSwitchCard(
+            FluentIcon.TAG,
+            "嵌入元数据",
+            "将视频标题、作者、描述等信息嵌入到下载文件中（推荐开启）",
+            parent=self.postprocessGroup,
+        )
+        self.embedMetadataCard.checkedChanged.connect(self._on_embed_metadata_changed)
+
+        self.postprocessGroup.addSettingCard(self.embedThumbnailCard)
+        self.postprocessGroup.addSettingCard(self.embedMetadataCard)
+        self.expandLayout.addWidget(self.postprocessGroup)
+
     def _init_about_group(self) -> None:
         self.aboutGroup = SettingCardGroup("关于", self.scrollWidget)
         self.aboutCard = HyperlinkCard(
@@ -634,6 +776,9 @@ class SettingsPage(ScrollArea):
         self.expandLayout.addWidget(self.aboutGroup)
 
     def _load_settings_to_ui(self) -> None:
+        # Download paths
+        self.downloadFolderCard.setContent(str(config_manager.get("download_dir")))
+
         # Update Source
         src = str(config_manager.get("update_source") or "github")
         src_idx = 1 if src == "ghproxy" else 0
@@ -647,9 +792,7 @@ class SettingsPage(ScrollArea):
         self.checkUpdatesOnStartupCard.switchButton.setChecked(auto_check)
         self.checkUpdatesOnStartupCard.switchButton.blockSignals(False)
 
-        mode = str(config_manager.get("cookie_mode") or "browser")
-        self.browserCard.setVisible(mode == "browser")
-        self.cookieFileCard.setVisible(mode == "file")
+        mode = str(config_manager.get("cookie_mode") or "auto").strip().lower()
 
         # Proxy mode -> combobox index
         proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
@@ -660,17 +803,43 @@ class SettingsPage(ScrollArea):
         self._update_proxy_edit_visibility()
         self.proxyEditCard.lineEdit.setText(str(config_manager.get("proxy_url") or "127.0.0.1:7890"))
 
-        # Cookie mode -> combobox index
+        # Cookie 配置从 auth_service 加载
+        from ..core.auth_service import auth_service, AuthSourceType
+        
+        current_source = auth_service.current_source
+        
         self.cookieModeCard.comboBox.blockSignals(True)
-        self.cookieModeCard.comboBox.setCurrentIndex(0 if mode == "browser" else 1)
-        self.cookieModeCard.comboBox.blockSignals(False)
-
-        # Browser -> combobox index
-        browser = str(config_manager.get("cookie_browser") or "chrome")
-        browser_index_map = {"chrome": 0, "edge": 1, "firefox": 2}
         self.browserCard.comboBox.blockSignals(True)
-        self.browserCard.comboBox.setCurrentIndex(browser_index_map.get(browser, 0))
+        
+        # 设置 Cookie 模式
+        if current_source == AuthSourceType.FILE:
+            self.cookieModeCard.comboBox.setCurrentIndex(1)  # 手动文件
+            if auth_service._current_file_path:
+                self.cookieFileCard.setContent(auth_service._current_file_path)
+        else:
+            self.cookieModeCard.comboBox.setCurrentIndex(0)  # 自动提取
+            
+            # 设置浏览器（顺序与UI一致）
+            browser_map = {
+                AuthSourceType.EDGE: 0,
+                AuthSourceType.CHROME: 1,
+                AuthSourceType.CHROMIUM: 2,
+                AuthSourceType.BRAVE: 3,
+                AuthSourceType.OPERA: 4,
+                AuthSourceType.OPERA_GX: 5,
+                AuthSourceType.VIVALDI: 6,
+                AuthSourceType.ARC: 7,
+                AuthSourceType.FIREFOX: 8,
+                AuthSourceType.LIBREWOLF: 9,
+            }
+            browser_idx = browser_map.get(current_source, 0)
+            self.browserCard.comboBox.setCurrentIndex(browser_idx)
+        
+        self.cookieModeCard.comboBox.blockSignals(False)
         self.browserCard.comboBox.blockSignals(False)
+        
+        # 触发可见性更新
+        self._on_cookie_mode_changed(self.cookieModeCard.comboBox.currentIndex())
 
 
         self.poTokenCard.setValue(str(config_manager.get("youtube_po_token") or ""))
@@ -685,6 +854,7 @@ class SettingsPage(ScrollArea):
                 dependency_manager.check_update("yt-dlp")
                 dependency_manager.check_update("ffmpeg")
                 dependency_manager.check_update("deno")
+                dependency_manager.check_update("pot-provider")
                 config_manager.set("last_update_check", now)
         
         self.jsRuntimePathCard.setContent(self._js_runtime_status_text())
@@ -717,6 +887,18 @@ class SettingsPage(ScrollArea):
         self.playlistSkipAuthcheckCard.switchButton.blockSignals(True)
         self.playlistSkipAuthcheckCard.switchButton.setChecked(skip_authcheck)
         self.playlistSkipAuthcheckCard.switchButton.blockSignals(False)
+
+        # Postprocess: embed thumbnail
+        embed_thumbnail = bool(config_manager.get("embed_thumbnail", True))
+        self.embedThumbnailCard.switchButton.blockSignals(True)
+        self.embedThumbnailCard.switchButton.setChecked(embed_thumbnail)
+        self.embedThumbnailCard.switchButton.blockSignals(False)
+
+        # Postprocess: embed metadata
+        embed_metadata = bool(config_manager.get("embed_metadata", True))
+        self.embedMetadataCard.switchButton.blockSignals(True)
+        self.embedMetadataCard.switchButton.setChecked(embed_metadata)
+        self.embedMetadataCard.switchButton.blockSignals(False)
 
     def _on_update_source_changed(self, index: int) -> None:
         source = "ghproxy" if index == 1 else "github"
@@ -754,6 +936,26 @@ class SettingsPage(ScrollArea):
             parent=self,
         )
 
+    def _on_embed_thumbnail_changed(self, checked: bool) -> None:
+        """处理封面嵌入开关变更"""
+        config_manager.set("embed_thumbnail", bool(checked))
+        InfoBar.success(
+            "设置已更新",
+            "已开启封面嵌入（支持 MP4/MKV/MP3/M4A/FLAC/OGG/OPUS 等格式）" if checked else "已关闭封面嵌入",
+            duration=5000,
+            parent=self,
+        )
+
+    def _on_embed_metadata_changed(self, checked: bool) -> None:
+        """处理元数据嵌入开关变更"""
+        config_manager.set("embed_metadata", bool(checked))
+        InfoBar.success(
+            "设置已更新",
+            "已开启元数据嵌入（标题、作者、描述等）" if checked else "已关闭元数据嵌入",
+            duration=5000,
+            parent=self,
+        )
+
     def _on_proxy_mode_changed(self, index: int) -> None:
         modes = ["off", "system", "http", "socks5"]
         if 0 <= index < len(modes):
@@ -777,16 +979,365 @@ class SettingsPage(ScrollArea):
             InfoBar.info("已清空", "代理地址已清空。", duration=5000, parent=self)
 
     def _on_cookie_mode_changed(self, index: int) -> None:
-        mode = "browser" if index == 0 else "file"
-        config_manager.set("cookie_mode", mode)
-        self.browserCard.setVisible(mode == "browser")
-        self.cookieFileCard.setVisible(mode == "file")
+        """Cookie 模式切换：0=浏览器提取, 1=手动文件"""
+        from ..core.auth_service import auth_service, AuthSourceType
+        
+        if index == 0:
+            # 浏览器提取模式
+            browser_index = self.browserCard.comboBox.currentIndex()
+            browser_map = [
+                AuthSourceType.EDGE, AuthSourceType.CHROME, AuthSourceType.CHROMIUM,
+                AuthSourceType.BRAVE, AuthSourceType.OPERA, AuthSourceType.OPERA_GX,
+                AuthSourceType.VIVALDI, AuthSourceType.ARC,
+                AuthSourceType.FIREFOX, AuthSourceType.LIBREWOLF,
+            ]
+            source = browser_map[browser_index] if 0 <= browser_index < len(browser_map) else AuthSourceType.EDGE
+            auth_service.set_source(source, auto_refresh=True)
+            
+            self.browserCard.setVisible(True)
+            self.refreshCookieCard.setVisible(True)
+            self.cookieFileCard.setVisible(False)
+            
+            InfoBar.success(
+                "已切换到自动提取",
+                f"将从 {auth_service.current_source_display} 自动提取 Cookie",
+                duration=3000,
+                parent=self
+            )
+        else:
+            # 手动文件模式
+            auth_service.set_source(AuthSourceType.FILE, auto_refresh=False)
+            
+            self.browserCard.setVisible(False)
+            self.refreshCookieCard.setVisible(False)
+            self.cookieFileCard.setVisible(True)
+            
+            InfoBar.info(
+                "已切换到手动导入",
+                "请选择 cookies.txt 文件",
+                duration=3000,
+                parent=self
+            )
+        
+        self._update_cookie_status()
 
     def _on_cookie_browser_changed(self, index: int) -> None:
-        mapping = {0: "chrome", 1: "edge", 2: "firefox"}
-        browser = mapping.get(index, "chrome")
-        config_manager.set("cookie_browser", browser)
+        """浏览器选择变化 - 自动提取新浏览器的 Cookies"""
+        from ..core.auth_service import auth_service, AuthSourceType
+        from ..utils.admin_utils import is_admin
+        from qfluentwidgets import MessageBox
+        
+        # 顺序与UI一致
+        browser_map = [
+            (AuthSourceType.EDGE, "Edge"),
+            (AuthSourceType.CHROME, "Chrome"),
+            (AuthSourceType.CHROMIUM, "Chromium"),
+            (AuthSourceType.BRAVE, "Brave"),
+            (AuthSourceType.OPERA, "Opera"),
+            (AuthSourceType.OPERA_GX, "Opera GX"),
+            (AuthSourceType.VIVALDI, "Vivaldi"),
+            (AuthSourceType.ARC, "Arc"),
+            (AuthSourceType.FIREFOX, "Firefox"),
+            (AuthSourceType.LIBREWOLF, "LibreWolf"),
+        ]
+        
+        if 0 <= index < len(browser_map):
+            source, name = browser_map[index]
+            
+            # Chromium 内核浏览器 v130+ 需要管理员权限
+            from ..core.auth_service import ADMIN_REQUIRED_BROWSERS
+            if source in ADMIN_REQUIRED_BROWSERS and not is_admin():
+                box = MessageBox(
+                    f"{name} 需要管理员权限",
+                    f"{name} 使用了 App-Bound 加密保护，\n"
+                    f"需要以管理员身份运行程序才能提取 Cookie。\n\n"
+                    "点击「以管理员身份重启」后将自动完成提取。\n\n"
+                    "或者您可以：\n"
+                    "• 选择 Firefox/LibreWolf 浏览器（无需管理员权限）\n"
+                    "• 手动导出 Cookie 文件",
+                    self
+                )
+                box.yesButton.setText("以管理员身份重启")
+                box.cancelButton.setText("取消")
+                
+                if box.exec():
+                    # 先保存选择
+                    auth_service.set_source(source, auto_refresh=True)
+                    from ..utils.admin_utils import restart_as_admin
+                    restart_as_admin(f"提取 {name} Cookie")
+                return
+            
+            # Firefox/Brave 或已是管理员，正常切换
+            auth_service.set_source(source, auto_refresh=True)
+            
+            InfoBar.info(
+                "正在切换浏览器",
+                f"正在从 {name} 提取 Cookies，请稍候...",
+                duration=3000,
+                parent=self
+            )
+            
+            # 清理旧worker
+            if self._cookie_worker is not None:
+                self._cookie_worker.deleteLater()
+            
+            # 创建Qt工作线程
+            self._cookie_worker = CookieRefreshWorker(self)
+            
+            # 连接信号（自动在主线程执行）
+            def on_finished(success: bool, message: str, need_admin: bool = False):
+                if success:
+                    InfoBar.success(
+                        "切换成功", 
+                        f"已从 {name} 提取 Cookies", 
+                        duration=8000, 
+                        parent=self
+                    )
+                else:
+                    # 显示多行错误消息
+                    lines = message.split('\n')
+                    if len(lines) > 1:
+                        title = f"{name} - {lines[0]}"
+                        content = '\n'.join(lines[1:])
+                    else:
+                        title = f"{name} 提取失败"
+                        content = message
+                    
+                    # 如果需要管理员权限，显示带重启按钮的对话框
+                    if need_admin:
+                        from qfluentwidgets import MessageBox
+                        
+                        box = MessageBox(
+                            f"{name} 需要管理员权限",
+                            content,
+                            self
+                        )
+                        box.yesButton.setText("以管理员身份重启")
+                        box.cancelButton.setText("取消")
+                        
+                        if box.exec():
+                            from ..utils.admin_utils import restart_as_admin
+                            restart_as_admin(f"提取 {name} Cookie")
+                    else:
+                        InfoBar.error(
+                            title,
+                            content,
+                            duration=15000,
+                            parent=self
+                        )
+                
+                # 总是更新Cookie状态显示
+                try:
+                    self._update_cookie_status()
+                except Exception as e:
+                    from ..utils.logger import logger
+                    logger.error(f"更新Cookie状态显示失败: {e}")
+                
+                # 清理worker
+                self._cookie_worker = None
+            
+            self._cookie_worker.finished.connect(on_finished, Qt.QueuedConnection)
+            self._cookie_worker.start()
 
+    def _on_refresh_cookie_clicked(self):
+        """手动刷新 Cookie 按钮点击"""
+        from ..core.auth_service import auth_service, AuthSourceType
+        from ..utils.admin_utils import is_admin
+        from qfluentwidgets import MessageBox
+        
+        current_source = auth_service.current_source
+        
+        # 检查是否是 Chromium 内核浏览器且非管理员 - 直接提示重启
+        from ..core.auth_service import ADMIN_REQUIRED_BROWSERS
+        if current_source in ADMIN_REQUIRED_BROWSERS and not is_admin():
+            browser_name = auth_service.current_source_display
+            
+            box = MessageBox(
+                f"{browser_name} 需要管理员权限",
+                f"{browser_name} 使用了 App-Bound 加密保护，\n"
+                f"需要以管理员身份运行程序才能提取 Cookie。\n\n"
+                "点击「以管理员身份重启」后将自动完成提取。\n\n"
+                "或者您可以：\n"
+                "• 切换到 Firefox/LibreWolf 浏览器（无需管理员权限）\n"
+                "• 手动导出 Cookie 文件",
+                self
+            )
+            box.yesButton.setText("以管理员身份重启")
+            box.cancelButton.setText("取消")
+            
+            if box.exec():
+                from ..utils.admin_utils import restart_as_admin
+                restart_as_admin(f"提取 {browser_name} Cookie")
+            return
+        
+        # 非 Edge/Chrome 或已是管理员，正常刷新
+        self._do_cookie_refresh()
+    
+    def _do_cookie_refresh(self):
+        """实际执行Cookie刷新（已确认权限或非Edge/Chrome）"""
+        # 禁用按钮
+        self.refreshCookieCard.setEnabled(False)
+        self.refreshCookieCard.button.setText("刷新中...")
+        
+        # 显示进度提示
+        InfoBar.info(
+            "正在刷新 Cookie",
+            "请稍候...",
+            duration=3000,
+            parent=self
+        )
+        
+        # 清理旧worker
+        if self._cookie_worker is not None:
+            self._cookie_worker.deleteLater()
+        
+        # 创建Qt工作线程
+        self._cookie_worker = CookieRefreshWorker(self)
+        
+        # 连接信号（自动在主线程执行）
+        def on_finished(success: bool, message: str, need_admin: bool = False):
+            # 1. 总是重置按钮状态
+            self.refreshCookieCard.setEnabled(True)
+            self.refreshCookieCard.button.setText("立即刷新")
+            
+            # 2. 显示结果消息
+            if success:
+                InfoBar.success(
+                    "刷新成功", 
+                    message, 
+                    duration=8000, 
+                    parent=self
+                )
+            else:
+                # 显示多行错误消息
+                lines = message.split('\n')
+                if len(lines) > 1:
+                    title = lines[0]
+                    content = '\n'.join(lines[1:])
+                else:
+                    title = "Cookie 刷新失败"
+                    content = message
+                
+                InfoBar.error(
+                    title,
+                    content,
+                    duration=15000,
+                    parent=self
+                )
+            
+            # 3. 总是更新Cookie状态显示
+            try:
+                self._update_cookie_status()
+            except Exception as e:
+                from ..utils.logger import logger
+                logger.error(f"更新Cookie状态显示失败: {e}")
+            
+            # 清理worker
+            self._cookie_worker = None
+        
+        self._cookie_worker.finished.connect(on_finished, Qt.QueuedConnection)
+        self._cookie_worker.start()
+    
+    def _select_cookie_file(self):
+        """选择 Cookie 文件并导入到 bin/cookies.txt"""
+        from ..core.auth_service import auth_service, AuthSourceType
+        from ..core.cookie_sentinel import cookie_sentinel
+        import shutil
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 Cookies 文件",
+            "",
+            "Cookies 文件 (*.txt);;所有文件 (*.*)"
+        )
+        
+        if file_path:
+            # 先验证文件格式
+            status = auth_service.validate_file(file_path)
+            
+            if not status.valid:
+                InfoBar.warning(
+                    "文件格式有问题",
+                    status.message,
+                    duration=5000,
+                    parent=self
+                )
+                return
+            
+            # 复制到统一的 bin/cookies.txt
+            try:
+                target_path = cookie_sentinel.cookie_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(file_path, target_path)
+                
+                # 设置为文件模式（但实际使用统一路径）
+                auth_service.set_source(AuthSourceType.FILE, file_path=str(target_path), auto_refresh=False)
+                
+                self.cookieFileCard.setContent(f"已导入: {status.cookie_count} 个 Cookie")
+                InfoBar.success(
+                    "导入成功",
+                    f"已导入 {status.cookie_count} 个 Cookie 到 bin/cookies.txt",
+                    duration=3000,
+                    parent=self
+                )
+            except Exception as e:
+                InfoBar.error(
+                    "导入失败",
+                    f"复制文件时出错: {e}",
+                    duration=5000,
+                    parent=self
+                )
+                return
+            
+            self._update_cookie_status()
+    
+    def _open_cookie_location(self):
+        """打开 Cookie 文件所在位置"""
+        from ..core.cookie_sentinel import cookie_sentinel
+        import subprocess
+        import os
+        
+        cookie_path = cookie_sentinel.cookie_path
+        
+        if cookie_path.exists():
+            # Windows: 使用 explorer 选中文件
+            subprocess.run(["explorer", "/select,", str(cookie_path)])
+        else:
+            # 文件不存在，打开目录
+            folder = cookie_path.parent
+            if folder.exists():
+                os.startfile(str(folder))
+            else:
+                InfoBar.warning(
+                    "目录不存在",
+                    f"Cookie 目录尚未创建: {folder}",
+                    duration=3000,
+                    parent=self
+                )
+    
+    def _update_cookie_status(self):
+        """更新 Cookie 状态显示"""
+        try:
+            from ..core.cookie_sentinel import cookie_sentinel
+            from ..core.auth_service import auth_service
+            
+            info = cookie_sentinel.get_status_info()
+            cookie_path = cookie_sentinel.cookie_path
+            
+            if info['exists']:
+                age = info['age_minutes']
+                age_str = f"{int(age)}分钟前" if age is not None else "未知"
+                emoji = "⚠️" if info['is_stale'] else "✅"
+                
+                status_text = f"{emoji} {info['source']} | 更新于 {age_str} | {info['cookie_count']} 个 Cookie"
+            else:
+                status_text = f"❌ Cookie 文件不存在 ({cookie_path.name})"
+            
+            self.cookieStatusCard.contentLabel.setText(status_text)
+            
+        except Exception as e:
+            self.cookieStatusCard.contentLabel.setText(f"状态获取失败: {e}")
+    
     def _on_js_runtime_changed(self, index: int) -> None:
         mapping = {0: "auto", 1: "deno", 2: "node", 3: "bun", 4: "quickjs"}
         mode = mapping.get(index, "auto")
@@ -807,51 +1358,6 @@ class SettingsPage(ScrollArea):
         if folder:
             config_manager.set("download_dir", folder)
             self.downloadFolderCard.setContent(folder)
-
-    def _select_cookie_file(self) -> None:
-        file, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择 cookies.txt",
-            "",
-            "Text Files (*.txt);;All Files (*)",
-        )
-        if file:
-            if self._is_probably_json_cookie_file(file):
-                InfoBar.error(
-                    "Cookies 文件格式不支持",
-                    "检测到疑似 JSON 导出格式。yt-dlp 仅支持 Netscape HTTP Cookie File 格式（纯文本）。\n"
-                    "请使用 Get cookies.txt LOCALLY/cookies.txt 插件导出 Netscape 格式。",
-                    parent=self,
-                )
-                return
-
-            header_ok, newline_ok = self._quick_check_cookiefile_format(file)
-            if not header_ok:
-                InfoBar.warning(
-                    "Cookies 文件可能不符合规范",
-                    "yt-dlp FAQ 提示 cookies.txt 首行应为 “# Netscape HTTP Cookie File” 或 “# HTTP Cookie File”。\n"
-                    "若后续报错 (例如 HTTP 400/解析失败)，建议重新导出为标准 Netscape 格式。",
-                    duration=15000,
-                    parent=self,
-                )
-            if not newline_ok:
-                InfoBar.warning(
-                    "Cookies 文件换行可能不匹配 Windows",
-                    "检测到文件可能使用 LF(\n) 而非 CRLF(\r\n)。在 Windows 上这可能导致 HTTP 400。\n"
-                    "如遇到 HTTP 400，请用文本工具转换为 CRLF 后重试。",
-                    duration=15000,
-                    parent=self,
-                )
-
-            config_manager.set("cookie_file", file)
-            self.cookieFileCard.setContent(file)
-            InfoBar.info(
-                "提示：YouTube cookies 建议导出方式",
-                "YouTube 会在浏览器标签页中频繁轮换账号 cookies。\n"
-                "官方建议：用无痕/隐私窗口登录 YouTube → 同一标签页打开 https://www.youtube.com/robots.txt → 导出 youtube.com cookies → 立刻关闭无痕窗口。",
-                duration=15000,
-                parent=self,
-            )
 
     def _select_yt_dlp_path(self) -> None:
         file, _ = QFileDialog.getOpenFileName(

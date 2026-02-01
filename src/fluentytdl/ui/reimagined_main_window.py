@@ -38,6 +38,7 @@ from .components.download_item_widget import DownloadItemWidget
 from .components.clipboard_monitor import ClipboardMonitor
 from .parse_page import ParsePage
 from .settings_page import SettingsPage
+from .unified_task_list_page import UnifiedTaskListPage
 from .welcome_wizard import WelcomeWizardDialog
 from .help_window import HelpWindow
 from ..core.download_manager import download_manager
@@ -132,10 +133,21 @@ class TaskListPage(QWidget):
                     w.selectBox.setChecked(False)
 
 
+
 class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("FluentYTDL Pro")
+        
+        # 检查管理员模式
+        from ..utils.admin_utils import is_admin
+        self._is_admin = is_admin()
+        
+        # 设置窗口标题（管理员模式添加标识）
+        title = "FluentYTDL Pro"
+        if self._is_admin:
+            title += " (管理员)"
+        self.setWindowTitle(title)
+        
         self.resize(1150, 780)
         
         # 居中
@@ -144,10 +156,8 @@ class MainWindow(FluentWindow):
         self.move(w // 2 - self.width() // 2, h // 2 - self.height() // 2)
 
         # === 初始化页面 ===
-        self.downloading_page = TaskListPage("正在下载", FluentIcon.DOWNLOAD)
-        self.paused_page = TaskListPage("已暂停", FluentIcon.PAUSE)
-        self.completed_page = TaskListPage("已完成", FluentIcon.ACCEPT)
-        self.queued_page = TaskListPage("排队中", FluentIcon.HISTORY)
+        # 统一任务列表页面（替代原有的四个分页）
+        self.task_page = UnifiedTaskListPage(self)
         
         self.parse_page = ParsePage(self)
         self.settings_interface = SettingsPage(self)
@@ -172,17 +182,23 @@ class MainWindow(FluentWindow):
         # 信号连接
         self.parse_page.parse_requested.connect(self.show_selection_dialog)
         self.settings_interface.clipboardAutoDetectChanged.connect(self.set_clipboard_monitor_enabled)
+        
+        # 统一任务列表页面信号
+        self.task_page.card_remove_requested.connect(self.on_remove_card)
+        self.task_page.card_resume_requested.connect(self.on_resume_card)
 
         # === 标题栏扩展 ===
         self.init_title_bar()
 
         # === 首次启动检测 ===
         QTimer.singleShot(1000, self.check_first_run)
+        
+        # === 管理员模式：自动刷新 Cookie ===
+        if self._is_admin:
+            QTimer.singleShot(2000, self.on_admin_mode_cookie_refresh)
 
     def init_navigation(self):
-        # 1. 新建任务 (作为首要操作)
-        # FluentWindow 的 NavigationInterface 不直接支持“大按钮”，但我们可以添加一个 Action
-        # 或者将 ParsePage 放在最上面
+        # 1. 新建任务
         self.addSubInterface(
             self.parse_page,
             FluentIcon.ADD,
@@ -190,33 +206,11 @@ class MainWindow(FluentWindow):
             position=NavigationItemPosition.TOP
         )
         
-        self.navigationInterface.addSeparator()
-
+        # 2. 任务列表（统一页面，内部使用 Pivot 过滤）
         self.addSubInterface(
-            self.downloading_page,
+            self.task_page,
             FluentIcon.DOWNLOAD,
-            "正在下载",
-            position=NavigationItemPosition.TOP
-        )
-        
-        self.addSubInterface(
-            self.paused_page,
-            FluentIcon.PAUSE,
-            "已暂停",
-            position=NavigationItemPosition.TOP
-        )
-
-        self.addSubInterface(
-            self.queued_page,
-            FluentIcon.HISTORY, # 或者 TIME
-            "排队中",
-            position=NavigationItemPosition.TOP
-        )
-
-        self.addSubInterface(
-            self.completed_page,
-            FluentIcon.ACCEPT, # 或者 CHECKBOX
-            "已完成",
+            "任务列表",
             position=NavigationItemPosition.TOP
         )
 
@@ -228,106 +222,105 @@ class MainWindow(FluentWindow):
         )
 
     def init_page_actions(self):
-        # Helper to add batch actions
-        def add_batch_actions(page: TaskListPage, show_start=True, show_pause=True):
-            # Batch Toggle
-            batch_btn = PushButton(FluentIcon.EDIT, "批量操作", page)
-            batch_btn.setToolTip("进入批量操作模式")
-            
-            # Batch Actions (Hidden by default)
-            select_all_btn = PushButton(FluentIcon.MENU, "全选", page)
-            select_all_btn.setToolTip("全选")
-            select_all_btn.hide()
-            
-            start_sel_btn = PushButton(FluentIcon.PLAY, "开始选中", page)
-            start_sel_btn.setToolTip("开始选中任务")
-            start_sel_btn.hide()
-            
-            pause_sel_btn = PushButton(FluentIcon.PAUSE, "暂停选中", page)
-            pause_sel_btn.setToolTip("暂停选中任务")
-            pause_sel_btn.hide()
-            
-            del_sel_btn = PushButton(FluentIcon.DELETE, "删除选中", page)
-            del_sel_btn.setToolTip("删除选中任务")
-            del_sel_btn.hide()
-            
-            # Logic
-            def toggle_batch():
-                is_batch = getattr(page, "_is_batch_mode", False)
-                # Toggle state
-                new_state = not is_batch
-                page._is_batch_mode = new_state
-                page.set_selection_mode(new_state)
-                
-                # Toggle visibility
-                select_all_btn.setVisible(new_state)
-                del_sel_btn.setVisible(new_state)
-                if show_start:
-                    start_sel_btn.setVisible(new_state)
-                if show_pause:
-                    pause_sel_btn.setVisible(new_state)
-                
-                # Update icon/tooltip
-                if new_state:
-                    batch_btn.setIcon(FluentIcon.CANCEL)
-                    batch_btn.setText("退出批量")
-                    batch_btn.setToolTip("退出批量模式")
-                else:
-                    batch_btn.setIcon(FluentIcon.EDIT)
-                    batch_btn.setText("批量操作")
-                    batch_btn.setToolTip("进入批量操作模式")
-
-            batch_btn.clicked.connect(toggle_batch)
-            select_all_btn.clicked.connect(page.select_all)
-            
-            # Connect actions
-            start_sel_btn.clicked.connect(lambda: self.on_batch_start(page))
-            pause_sel_btn.clicked.connect(lambda: self.on_batch_pause(page))
-            del_sel_btn.clicked.connect(lambda: self.on_batch_delete(page))
-            
-            # Add to layout
-            page.action_layout.setSpacing(8)
-            page.action_layout.addSpacing(10)
-            page.action_layout.addWidget(batch_btn)
-            page.action_layout.addWidget(select_all_btn)
-            if show_start:
-                page.action_layout.addWidget(start_sel_btn)
-            if show_pause:
-                page.action_layout.addWidget(pause_sel_btn)
-            page.action_layout.addWidget(del_sel_btn)
-
-        # Downloading Page Actions
-        start_all = PushButton(FluentIcon.PLAY, "全部开始", self)
-        start_all.setToolTip("开始所有任务")
+        """为统一任务页面设置操作按钮"""
+        page = self.task_page
+        
+        # 新建任务 (Primary Action - 位于任务列表内操作)
+        new_task_btn = PrimaryPushButton(FluentIcon.ADD, "新建任务", self)
+        new_task_btn.setToolTip("创建下载任务")
+        new_task_btn.clicked.connect(lambda: self.switchTo(self.parse_page))
+        
+        # 全部开始/暂停按钮 (Secondary Actions)
+        start_all = TransparentToolButton(FluentIcon.PLAY, self)
+        start_all.setToolTip("全部开始")
         start_all.clicked.connect(self.on_start_all)
         
-        pause_all = PushButton(FluentIcon.PAUSE, "全部暂停", self)
-        pause_all.setToolTip("暂停所有任务")
+        pause_all = TransparentToolButton(FluentIcon.PAUSE, self)
+        pause_all.setToolTip("全部暂停")
         pause_all.clicked.connect(self.on_pause_all)
         
-        self.downloading_page.action_layout.setSpacing(8)
-        self.downloading_page.action_layout.addWidget(start_all)
-        self.downloading_page.action_layout.addWidget(pause_all)
-        
-        add_batch_actions(self.downloading_page)
-
-        # Paused Page Actions
-        add_batch_actions(self.paused_page, show_pause=False)
-
-        # Completed Page Actions
-        clear_completed = PushButton(FluentIcon.DELETE, "清空记录", self)
-        clear_completed.setToolTip("清空所有已完成记录")
-        clear_completed.clicked.connect(self.on_clear_completed)
-        
-        open_dir = PushButton(FluentIcon.FOLDER, "打开目录", self)
-        open_dir.setToolTip("打开默认下载目录")
+        # 打开目录
+        open_dir = TransparentToolButton(FluentIcon.FOLDER, self)
+        open_dir.setToolTip("打开下载目录")
         open_dir.clicked.connect(self.on_open_download_dir)
         
-        self.completed_page.action_layout.setSpacing(8)
-        self.completed_page.action_layout.addWidget(clear_completed)
-        self.completed_page.action_layout.addWidget(open_dir)
+        # 清空已完成
+        clear_completed = TransparentToolButton(FluentIcon.DELETE, self)
+        clear_completed.setToolTip("清空已完成记录")
+        clear_completed.clicked.connect(self.on_clear_completed)
         
-        add_batch_actions(self.completed_page, show_start=False, show_pause=False)
+        # 批量操作按钮
+        batch_btn = PushButton(FluentIcon.CHECKBOX, "批量操作", page)
+        batch_btn.setToolTip("进入批量操作模式")
+        
+        select_all_btn = PushButton(FluentIcon.ACCEPT, "全选", page)
+        select_all_btn.setToolTip("全选")
+        select_all_btn.hide()
+        
+        start_sel_btn = PushButton(FluentIcon.PLAY, "开始选中", page)
+        start_sel_btn.setToolTip("开始选中任务")
+        start_sel_btn.hide()
+        
+        pause_sel_btn = PushButton(FluentIcon.PAUSE, "暂停选中", page)
+        pause_sel_btn.setToolTip("暂停选中任务")
+        pause_sel_btn.hide()
+        
+        del_sel_btn = PushButton(FluentIcon.DELETE, "删除选中", page)
+        del_sel_btn.setToolTip("删除选中任务")
+        del_sel_btn.hide()
+        
+        def toggle_batch():
+            is_batch = getattr(page, "_is_batch_mode", False)
+            new_state = not is_batch
+            page._is_batch_mode = new_state
+            page.set_selection_mode(new_state)
+            
+            select_all_btn.setVisible(new_state)
+            del_sel_btn.setVisible(new_state)
+            start_sel_btn.setVisible(new_state)
+            pause_sel_btn.setVisible(new_state)
+            
+            if new_state:
+                batch_btn.setIcon(FluentIcon.CANCEL)
+                batch_btn.setText("退出批量")
+                batch_btn.setToolTip("退出批量模式")
+            else:
+                batch_btn.setIcon(FluentIcon.CHECKBOX)
+                batch_btn.setText("批量操作")
+                batch_btn.setToolTip("进入批量操作模式")
+
+        batch_btn.clicked.connect(toggle_batch)
+        select_all_btn.clicked.connect(page.select_all)
+        start_sel_btn.clicked.connect(lambda: self.on_batch_start(page))
+        pause_sel_btn.clicked.connect(lambda: self.on_batch_pause(page))
+        del_sel_btn.clicked.connect(lambda: self.on_batch_delete(page))
+        
+        # 添加到布局 (分组)
+        page.action_layout.setSpacing(0)
+        
+        # 1. 核心操作
+        page.action_layout.addWidget(new_task_btn)
+        
+        # 分隔符
+        page.action_layout.addSpacing(16)
+        
+        # 2. 全局控制
+        page.action_layout.addWidget(start_all)
+        page.action_layout.addWidget(pause_all)
+        page.action_layout.addWidget(open_dir)
+        page.action_layout.addWidget(clear_completed)
+        
+        # 分隔
+        page.action_layout.addSpacing(16)
+        
+        # 3. 批量操作 (靠右)
+        page.action_layout.addWidget(batch_btn)
+        
+        page.action_layout.addSpacing(8)
+        page.action_layout.addWidget(select_all_btn)
+        page.action_layout.addWidget(start_sel_btn)
+        page.action_layout.addWidget(pause_sel_btn)
+        page.action_layout.addWidget(del_sel_btn)
 
 
     def init_status_bar(self):
@@ -429,62 +422,51 @@ class MainWindow(FluentWindow):
         self._selection_dialog = dlg
         if dlg.exec():
             tasks = dlg.get_selected_tasks()
-            self.add_tasks(tasks)
+            logger.info(f"[DEBUG] get_selected_tasks returned {len(tasks)} tasks: {tasks}")
+            if tasks:
+                self.add_tasks(tasks)
+            else:
+                logger.warning("[DEBUG] No tasks returned from dialog!")
         self._selection_dialog = None
 
     def add_tasks(self, tasks):
-        # 添加任务逻辑
+        """添加下载任务到统一任务列表"""
+        logger.info(f"[DEBUG] add_tasks called with {len(tasks)} tasks")
         default_dir = config_manager.get("download_dir")
         
-        for t_title, t_url, t_opts, t_thumb in tasks:
+        for i, (t_title, t_url, t_opts, t_thumb) in enumerate(tasks):
+            logger.info(f"[DEBUG] Processing task {i+1}: {t_title[:30]}...")
             # Inject default download directory if not specified
             if default_dir and "paths" not in t_opts:
-                # Only inject if outtmpl is not absolute (simple check)
                 outtmpl = t_opts.get("outtmpl")
                 if not (isinstance(outtmpl, str) and os.path.isabs(outtmpl)):
                     t_opts["paths"] = {"home": str(default_dir)}
 
+            logger.info(f"[DEBUG] Creating worker for URL: {t_url}")
             worker = download_manager.create_worker(t_url, t_opts)
+            logger.info(f"[DEBUG] Worker created: {worker}")
+            
             card = DownloadItemWidget(worker, t_title, t_opts)
             if t_thumb:
                 card.load_thumbnail(str(t_thumb))
             
-            # 连接信号
-            card.remove_requested.connect(self.on_remove_card)
-            card.resume_requested.connect(self.on_resume_card)
-            card.state_changed.connect(lambda s, c=card: self.on_card_state_changed(c, s))
+            logger.info(f"[DEBUG] Adding card to task_page")
+            # 添加到统一任务列表（信号由 UnifiedTaskListPage 内部连接）
+            self.task_page.add_card(card)
+            logger.info(f"[DEBUG] Card added, task_page count: {self.task_page.count()}")
             
             # 初始状态
             started = download_manager.start_worker(worker)
+            logger.info(f"[DEBUG] Worker started: {started}")
             if started:
                 card.set_state("running")
-                self.downloading_page.add_card(card)
             else:
                 card.set_state("queued")
-                self.queued_page.add_card(card)
             
-            # 切换到下载页
-            self.switchTo(self.downloading_page)
-
-    def on_card_state_changed(self, card: DownloadItemWidget, state: str):
-        # 核心逻辑：根据状态移动卡片
-        # 先从当前父级移除
-        card.setParent(None)
-        
-        if state == "completed":
-            self.completed_page.add_card(card)
-        elif state == "queued":
-            self.queued_page.add_card(card)
-        elif state == "paused":
-            self.paused_page.add_card(card)
-        else:
-            # running, error -> Downloading Page (or Error Page if we had one)
-            # For now, keep error in Downloading or Paused? 
-            # Usually Error is treated as Paused/Stopped.
-            if state == "error":
-                self.paused_page.add_card(card)
-            else:
-                self.downloading_page.add_card(card)
+            # 切换到任务列表页
+            logger.info(f"[DEBUG] Switching to task_page")
+            self.switchTo(self.task_page)
+            logger.info(f"[DEBUG] Task {i+1} processing complete")
 
     def on_remove_card(self, card: DownloadItemWidget):
         try:
@@ -505,11 +487,15 @@ class MainWindow(FluentWindow):
                     elif hasattr(card.worker, "cancel"):
                         card.worker.cancel()
                     
-                    # If it's still running, force terminate to release file locks
+                    # Force kill process tree
+                    if hasattr(card.worker, "force_kill"):
+                        card.worker.force_kill()
+                    
+                    # If it's still running, force terminate QThread
                     if hasattr(card.worker, "isRunning") and card.worker.isRunning():
                         if hasattr(card.worker, "terminate"):
                             card.worker.terminate()
-                        card.worker.wait(500)
+                        card.worker.wait(200)
                 except Exception as e:
                     logger.error(f"Error stopping worker: {e}")
 
@@ -530,7 +516,7 @@ class MainWindow(FluentWindow):
             # 4.a KeepFiles
             if _is_keep(policy):
                 logger.info("Policy matched: KeepFiles. Removing card only.")
-                card.deleteLater()
+                self.task_page.remove_card(card)
                 return
 
             # Collect paths for Delete or Ask
@@ -555,7 +541,7 @@ class MainWindow(FluentWindow):
                     self._delete_files_best_effort(valid_paths, success_title="已删除相关文件")
                 else:
                     logger.info("No files found to delete.")
-                card.deleteLater()
+                self.task_page.remove_card(card)
                 return
 
             # Fallback: AlwaysAsk (or unknown policy)
@@ -604,16 +590,57 @@ class MainWindow(FluentWindow):
             if final_paths:
                 self._delete_files_best_effort(final_paths, success_title="已删除选中文件")
 
-            card.deleteLater()
+            self.task_page.remove_card(card)
             logger.info("Card removed successfully.")
 
         except Exception as e:
             logger.exception(f"Critical error in on_remove_card: {e}")
             # Last resort: try to remove the card anyway so UI isn't stuck
             try:
-                card.deleteLater()
+                self.task_page.remove_card(card)
             except:
                 pass
+
+    def _delete_files_best_effort(self, paths: list[str], success_title: str = "已删除文件"):
+        """Try to delete a list of files/dirs, reporting results via InfoBar."""
+        import time
+        success_count = 0
+        errors = []
+        for path in paths:
+            # Retry loop for file locks
+            deleted = False
+            last_error = None
+            for _ in range(3):
+                try:
+                    if os.path.isfile(path):
+                        os.remove(path)
+                        deleted = True
+                        break
+                    elif os.path.isdir(path):
+                        pass
+                    else:
+                        # Path doesn't exist?
+                        deleted = True # Treat as success
+                        break
+                except Exception as e:
+                    last_error = e
+                    time.sleep(0.5)
+            
+            if deleted:
+                if os.path.basename(path) not in [".", ".."]: # Filter trivial
+                   success_count += 1
+            elif last_error:
+                errors.append(f"{os.path.basename(path)}: {last_error}")
+        
+        if errors:
+            InfoBar.warning(
+                "部分文件删除失败",
+                "\n".join(errors[:3]) + ("\n..." if len(errors)>3 else ""),
+                duration=5000,
+                parent=self
+            )
+        elif success_count > 0:
+            InfoBar.success(success_title, f"成功清理了 {success_count} 个文件。", duration=3000, parent=self)
 
     # --- Helper Methods Copied from Old MainWindow ---
     def _collect_existing_cache_paths(self, cards: Iterable[DownloadItemWidget]) -> list[str]:
@@ -851,5 +878,127 @@ class MainWindow(FluentWindow):
             # Record the full version when guide was shown
             config_manager.set("welcome_guide_shown_for_version", __version__)
             config_manager.set("has_shown_welcome_guide", True)
+        
+        # 检查Cookie状态（延迟5秒，让启动时的静默刷新完成）
+        QTimer.singleShot(5000, self.check_cookie_status)
+    
+    def on_admin_mode_cookie_refresh(self):
+        """管理员模式启动后自动刷新Cookie"""
+        from ..core.cookie_sentinel import cookie_sentinel
+        from ..core.auth_service import auth_service, AuthSourceType
+        from ..utils.logger import logger
+        
+        # 只在配置了浏览器来源时刷新
+        if auth_service.current_source == AuthSourceType.NONE:
+            logger.info("[AdminMode] 未配置Cookie来源，跳过自动刷新")
+            return
+        
+        if auth_service.current_source == AuthSourceType.FILE:
+            logger.info("[AdminMode] 手动文件模式，跳过自动刷新")
+            return
+        
+        browser_name = auth_service.current_source_display
+        logger.info(f"[AdminMode] 以管理员身份自动刷新Cookie: {browser_name}")
+        
+        # 显示提示
+        from qfluentwidgets import InfoBar
+        InfoBar.info(
+            "管理员模式",
+            f"正在以管理员权限提取 {browser_name} Cookie...",
+            duration=3000,
+            parent=self
+        )
+        
+        # 执行刷新
+        try:
+            success, message = cookie_sentinel.force_refresh_with_uac()
+            
+            if success:
+                InfoBar.success(
+                    "Cookie提取成功",
+                    f"已从 {browser_name} 提取 Cookie（管理员权限）",
+                    duration=5000,
+                    parent=self
+                )
+                # 自动跳转到设置页显示结果
+                QTimer.singleShot(1000, lambda: self.switchTo(self.settings_interface))
+            else:
+                InfoBar.warning(
+                    "Cookie提取失败",
+                    message,
+                    duration=8000,
+                    parent=self
+                )
+        except Exception as e:
+            logger.error(f"[AdminMode] Cookie刷新异常: {e}", exc_info=True)
+            InfoBar.error(
+                "Cookie提取异常",
+                str(e),
+                duration=5000,
+                parent=self
+            )
+    
+    def check_cookie_status(self):
+        """检查Cookie提取状态，如果失败则提示用户"""
+        try:
+            from ..core.cookie_sentinel import cookie_sentinel
+            from ..core.auth_service import auth_service, AuthSourceType
+            from ..utils.admin_utils import is_admin
+            
+            # 只在配置了浏览器来源时检查
+            if auth_service.current_source == AuthSourceType.NONE:
+                return
+            
+            if auth_service.current_source == AuthSourceType.FILE:
+                return  # 手动文件不需要检查
+            
+            current_source = auth_service.current_source
+            browser_name = auth_service.current_source_display
+            
+            # 检查是否是 Chromium 内核浏览器且非管理员 - 弹出对话框
+            from ..core.auth_service import ADMIN_REQUIRED_BROWSERS
+            if current_source in ADMIN_REQUIRED_BROWSERS and not is_admin():
+                # Cookie不存在或过期时才提示
+                if not cookie_sentinel.exists or cookie_sentinel.is_stale:
+                    from qfluentwidgets import MessageBox
+                    
+                    box = MessageBox(
+                        f"{browser_name} 需要管理员权限",
+                        f"检测到您使用 {browser_name} 作为 Cookie 来源。\n\n"
+                        f"Chromium 内核浏览器使用了加密保护，\n"
+                        f"需要以管理员身份运行程序才能提取 Cookie。\n\n"
+                        "是否以管理员身份重启程序？\n\n"
+                        "提示：您也可以切换到 Firefox/LibreWolf 浏览器，\n"
+                        "或手动导入 Cookie 文件。",
+                        self
+                    )
+                    box.yesButton.setText("以管理员身份重启")
+                    box.cancelButton.setText("稍后再说")
+                    
+                    if box.exec():
+                        from ..utils.admin_utils import restart_as_admin
+                        restart_as_admin(f"提取 {browser_name} Cookie")
+                    
+                    logger.warning(f"[MainWindow] {browser_name} 需要管理员权限提取Cookie")
+                return
+            
+            # 检查Cookie文件是否存在且不太旧
+            if not cookie_sentinel.exists or cookie_sentinel.is_stale:
+                # Cookie不存在或过期，给出提示
+                InfoBar.warning(
+                    "Cookie提取提示",
+                    f"尚未从{browser_name}提取到Cookie，部分视频可能无法下载。\n"
+                    f"建议前往【设置】页面点击【立即刷新】手动提取Cookie。",
+                    duration=8000,
+                    parent=self,
+                    position=InfoBarPosition.TOP
+                )
+                logger.warning(f"[MainWindow] Cookie状态检查：未找到有效Cookie（来源：{browser_name}）")
+            else:
+                # Cookie正常
+                logger.info(f"[MainWindow] Cookie状态检查：正常（{auth_service.last_status.cookie_count}个Cookie）")
+                
+        except Exception as e:
+            logger.error(f"[MainWindow] Cookie状态检查失败: {e}")
 
 

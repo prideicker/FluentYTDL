@@ -69,15 +69,16 @@ class DownloadItemWidget(CardWidget):
         # 1. 左侧缩略图 (16:9) -> 128x72
         self.iconLabel = QLabel(self)
         self.iconLabel.setFixedSize(128, 72)
+        # 优化：增加边框和圆角
         self.iconLabel.setStyleSheet(
-            "background-color: rgba(0, 0, 0, 0.05); border-radius: 6px; border: 1px solid rgba(0,0,0,0.05);"
+            "background-color: rgba(0, 0, 0, 0.03); border-radius: 6px; border: 1px solid rgba(0,0,0,0.08);"
         )
         self.iconLabel.setScaledContents(True)
         self.hLayout.addWidget(self.iconLabel)
 
         # 2. 中间信息区 (Title, Progress, Meta)
         self.infoLayout = QVBoxLayout()
-        self.infoLayout.setSpacing(4)
+        self.infoLayout.setSpacing(6) # 增加间距
         self.infoLayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # 标题 (粗体)
@@ -85,14 +86,19 @@ class DownloadItemWidget(CardWidget):
         self.titleLabel.setWordWrap(False)
         # 截断处理在布局中自动发生，但可以通过 ElideMode 优化，这里暂且依赖 Layout
 
-        # 进度条 (细长)
+        # 进度条 (加粗到 6px)
         self.progressBar = ProgressBar(self)
         self.progressBar.setValue(0)
-        self.progressBar.setFixedHeight(4)
+        self.progressBar.setFixedHeight(6)
 
-        # 元数据 (灰色小字)
+        # 元数据 (灰色小字 + 等宽字体)
         self.metaLabel = CaptionLabel("等待开始...", self)
         self.metaLabel.setTextColor(QColor(120, 120, 120), QColor(150, 150, 150))
+        # 使用等宽字体防止数字跳动
+        font = self.metaLabel.font()
+        font.setFamily("Consolas") # Windows default monospace fallback
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        self.metaLabel.setFont(font)
 
         self.infoLayout.addWidget(self.titleLabel)
         self.infoLayout.addWidget(self.progressBar)
@@ -208,6 +214,23 @@ class DownloadItemWidget(CardWidget):
             # Track files
             worker.output_path_ready.connect(self._record_path)
             worker.progress.connect(self._check_filename_in_progress)
+            
+            # 封面嵌入警告
+            worker.thumbnail_embed_warning.connect(self._on_thumbnail_embed_warning)
+        except Exception:
+            pass
+    
+    def _on_thumbnail_embed_warning(self, warning: str) -> None:
+        """处理封面嵌入警告"""
+        try:
+            parent_window = self.window()
+            InfoBar.warning(
+                "封面嵌入提示",
+                warning,
+                duration=8000,
+                position=InfoBarPosition.TOP,
+                parent=parent_window,
+            )
         except Exception:
             pass
 
