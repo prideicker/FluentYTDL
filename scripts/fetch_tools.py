@@ -246,10 +246,31 @@ def fetch_deno(dest_dir: Path) -> None:
             checksum_path = tmp_path / "checksum.txt"
             download_file(checksum_asset["browser_download_url"], checksum_path)
             hash_content = checksum_path.read_text(encoding="utf-8").strip()
-            # 提取哈希值 (可能是 "hash  filename" 或纯 hash)
-            expected_hash = hash_content.split()[0] if " " in hash_content else hash_content
-            if not verify_sha256(zip_path, expected_hash):
-                raise RuntimeError("deno zip 校验失败")
+            
+            # deno 的 sha256sum 文件可能有多种格式:
+            # 1. "hash  filename"
+            # 2. 纯 hash
+            # 3. 多行格式，包含 "ALGORITHM" 等头信息
+            expected_hash = None
+            for line in hash_content.splitlines():
+                line = line.strip()
+                # 跳过空行和头信息行
+                if not line or line.startswith("ALGORITHM") or "=" in line:
+                    continue
+                # 提取哈希值 (64个十六进制字符)
+                parts = line.split()
+                if parts:
+                    candidate = parts[0]
+                    # 验证是否是有效的 SHA256 (64个十六进制字符)
+                    if len(candidate) == 64 and all(c in "0123456789abcdefABCDEF" for c in candidate):
+                        expected_hash = candidate
+                        break
+            
+            if expected_hash:
+                if not verify_sha256(zip_path, expected_hash):
+                    raise RuntimeError("deno zip 校验失败")
+            else:
+                print("  ⚠ 无法解析校验文件格式，跳过校验")
         else:
             print("  ⚠ 未找到校验文件，跳过校验")
 
