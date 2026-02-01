@@ -181,7 +181,9 @@ class Builder:
     """FluentYTDL 构建器"""
 
     def __init__(self, version: str | None = None):
-        self.version = version or self._get_version()
+        raw_version = version or self._get_version()
+        # 确保版本号不带 'v' 前缀（统一格式）
+        self.version = raw_version.lstrip("v")
         self.arch = "win64" if sys.maxsize > 2**32 else "win32"
 
     def _get_version(self) -> str:
