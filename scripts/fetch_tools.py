@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -24,6 +25,19 @@ import zipfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+# 修复 Windows 控制台 GBK/CP1252 编码问题
+# 确保可以正确输出 UTF-8 字符（包括中文和 emoji）
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore
+    except Exception:
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET_DIR = ROOT / "assets" / "bin"
