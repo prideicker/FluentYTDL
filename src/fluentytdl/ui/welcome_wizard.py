@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QVBoxLayout, QWidget
-
-from qfluentwidgets import MessageBoxBase, PrimaryPushButton
+from qfluentwidgets import MessageBoxBase
 
 from .help_window import WelcomeGuideWidget
 from ..core.config_manager import config_manager

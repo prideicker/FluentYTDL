@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QScrollArea,
-    QSizePolicy,
 )
 
 from qfluentwidgets import (
@@ -26,15 +25,12 @@ from qfluentwidgets import (
     CaptionLabel,
     CheckBox,
     ComboBox,
-    FluentIcon,
     SwitchButton,
 )
 
 from ...core.subtitle_manager import (
-    extract_subtitle_tracks,
     get_subtitle_languages,
     build_subtitle_opts,
-    SUBTITLE_FORMATS,
 )
 
 

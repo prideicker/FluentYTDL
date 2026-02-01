@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import http.cookiejar
 import os
-import random
 import shutil
 import threading
 from dataclasses import dataclass, field
@@ -13,7 +12,7 @@ from typing import Any, Callable, cast
 from fluentytdl.utils.logger import get_logger
 from fluentytdl.utils.paths import find_bundled_executable, is_frozen, locate_runtime_tool
 from .config_manager import config_manager
-from .yt_dlp_cli import YtDlpCancelled, resolve_yt_dlp_exe, run_dump_single_json, run_version
+from .yt_dlp_cli import YtDlpCancelled, run_dump_single_json, run_version
 
 
 LogCallback = Callable[[str, str], None]
@@ -224,7 +223,7 @@ class YoutubeService:
                     else:
                         self._emit_log(
                             "warning",
-                            f"Cookie Sentinel 文件存在但未发现 YouTube 相关 Cookie",
+                            "Cookie Sentinel 文件存在但未发现 YouTube 相关 Cookie",
                         )
                 else:
                     self._emit_log(
@@ -280,7 +279,7 @@ class YoutubeService:
                         pot_token_source = "provider"
                         self._emit_log("info", f"🔐 POT Provider 已启用 (端口 {pot_manager.active_port})")
             except Exception as e:
-                logger.debug(f"POT Provider 不可用: {e}")
+                self._emit_log("debug", f"POT Provider 不可用: {e}")
 
         # 2. 回退到手动 PO Token
         if not pot_token_source:

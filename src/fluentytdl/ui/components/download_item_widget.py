@@ -4,12 +4,11 @@ from typing import Any
 import os
 import subprocess
 
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget, QFrame
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from qfluentwidgets import (
-    BodyLabel,
     CaptionLabel,
     CardWidget,
     FluentIcon,
@@ -22,7 +21,7 @@ from qfluentwidgets import (
 
 from ...core.workers import DownloadWorker
 from ...utils.image_loader import ImageLoader
-from .download_card import _format_bytes, _format_time, _infer_stream_label, _strip_ansi
+from .download_card import _format_bytes, _format_time, _strip_ansi
 
 
 class DownloadItemWidget(CardWidget):
@@ -304,7 +303,7 @@ class DownloadItemWidget(CardWidget):
             
         self.metaLabel.setText(clean_msg)
 
-        lower = clean_msg.lower()
+        clean_msg.lower()
         if "排队" in clean_msg or "等待" in clean_msg:
             self.set_state("queued")
         if "暂停" in clean_msg:

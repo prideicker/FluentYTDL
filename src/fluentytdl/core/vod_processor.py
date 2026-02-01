@@ -10,16 +10,13 @@ FluentYTDL HLS/VOD 处理模块 (M8)
 
 from __future__ import annotations
 
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QObject, Signal, QThread
 
 from .config_manager import config_manager
-from .yt_dlp_cli import resolve_yt_dlp_exe
 from ..utils.logger import logger
 
 
@@ -133,7 +130,7 @@ def get_vod_options(info: dict) -> dict:
     opts = {}
     
     # 检测是否为直播回放
-    is_live = info.get("is_live", False)
+    info.get("is_live", False)
     was_live = info.get("live_status") == "was_live"
     
     if was_live:

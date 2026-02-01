@@ -10,7 +10,6 @@ FluentYTDL 账户管理 UI 组件
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (

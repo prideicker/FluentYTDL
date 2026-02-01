@@ -10,15 +10,12 @@ FluentYTDL 身份验证卡片组件
 
 from __future__ import annotations
 
-from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Signal, QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QVBoxLayout,
-    QWidget,
 )
 
 from qfluentwidgets import (
@@ -26,7 +23,6 @@ from qfluentwidgets import (
     CaptionLabel,
     ComboBox,
     FluentIcon,
-    HyperlinkButton,
     IconWidget,
     InfoBar,
     InfoBarPosition,
@@ -38,13 +34,10 @@ from qfluentwidgets import (
 )
 
 from ...core.auth_service import (
-    AuthService,
     AuthSourceType,
     AuthStatus,
-    BROWSER_SOURCES,
     auth_service,
 )
-from ...utils.logger import logger
 
 
 class AuthenticationCard(CardWidget):

@@ -5,7 +5,6 @@
 import sys
 import os
 import ctypes
-from pathlib import Path
 
 
 def is_admin() -> bool:

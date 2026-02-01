@@ -10,20 +10,16 @@ FluentYTDL 频道管理页面
 
 from __future__ import annotations
 
-from typing import Any
 
-from PySide6.QtCore import Qt, Signal, QSize, QUrl
+from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
-    QListView,
-    QAbstractItemView,
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
@@ -35,7 +31,6 @@ from qfluentwidgets import (
     FluentIcon,
     IconWidget,
     InfoBar,
-    InfoBarPosition,
     LineEdit,
     PrimaryPushButton,
     ProgressRing,
@@ -46,7 +41,6 @@ from qfluentwidgets import (
 
 from ..core.channel_service import (
     ChannelInfo,
-    ChannelService,
     VideoItem,
     VideoListResult,
     channel_service,

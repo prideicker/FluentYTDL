@@ -10,10 +10,10 @@ import threading
 from PySide6.QtCore import QThread, Signal
 
 from ..core.youtube_service import YoutubeServiceOptions, youtube_service
-from ..core.yt_dlp_cli import YtDlpCancelled, prepare_yt_dlp_env, resolve_yt_dlp_exe, ydl_opts_to_cli_args
+from ..core.yt_dlp_cli import YtDlpCancelled, prepare_yt_dlp_env, ydl_opts_to_cli_args
 from ..core.config_manager import config_manager
 from ..processing.thumbnail_embed import can_embed_thumbnail, get_unsupported_formats_warning
-from ..processing.thumbnail_embedder import thumbnail_embedder, EmbedResult
+from ..processing.thumbnail_embedder import thumbnail_embedder
 from ..utils.paths import locate_runtime_tool
 from ..utils.logger import logger
 from ..utils.translator import translate_error
@@ -420,7 +420,7 @@ class DownloadWorker(QThread):
                     eta_s = parts[5] if len(parts) > 5 else ""
                     vcodec = parts[6] if len(parts) > 6 else ""
                     acodec = parts[7] if len(parts) > 7 else ""
-                    ext = parts[8] if len(parts) > 8 else ""
+                    parts[8] if len(parts) > 8 else ""
                     filename = parts[9] if len(parts) > 9 else ""
 
                     # Capture filename for cache deletion (and UI "open folder")

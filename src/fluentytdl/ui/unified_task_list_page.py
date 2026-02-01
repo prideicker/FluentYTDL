@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 )
 
 from qfluentwidgets import (
-    Pivot,
     BodyLabel,
     SubtitleLabel,
     FluentIcon,

@@ -4,10 +4,9 @@ Segment manager for handling recorded segments.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 from PySide6.QtCore import QObject, Signal
 

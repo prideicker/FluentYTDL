@@ -13,8 +13,6 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
-from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, QThread
 

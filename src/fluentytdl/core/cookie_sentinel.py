@@ -15,13 +15,11 @@ FluentYTDL Cookie Sentinel (Cookie 卫士)
 from __future__ import annotations
 
 import threading
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 from ..utils.logger import logger
-from .auth_service import auth_service, AuthSourceType, BROWSER_SOURCES
+from .auth_service import auth_service, AuthSourceType
 
 
 class CookieSentinel:
@@ -144,9 +142,9 @@ class CookieSentinel:
                     # 手动导入文件，直接复制
                     success = self._copy_from_auth_service()
                     if success:
-                        logger.info(f"[CookieSentinel] 已复制手动导入的Cookie文件")
+                        logger.info("[CookieSentinel] 已复制手动导入的Cookie文件")
                     else:
-                        logger.warning(f"[CookieSentinel] 手动导入的Cookie文件不存在或无效")
+                        logger.warning("[CookieSentinel] 手动导入的Cookie文件不存在或无效")
                     return
                 
                 # 浏览器来源：尝试提取
@@ -163,7 +161,7 @@ class CookieSentinel:
                         f"{auth_service.last_status.message}"
                     )
                     logger.info(
-                        f"[CookieSentinel] 用户可在设置页点击'手动刷新'重试"
+                        "[CookieSentinel] 用户可在设置页点击'手动刷新'重试"
                     )
                 
             except Exception as e:
@@ -208,7 +206,6 @@ class CookieSentinel:
             success = self._update_from_browser(silent=False, force=True)
             
             if success:
-                age = self.age_minutes
                 msg = f"✅ Cookie 已更新（{auth_service.current_source_display}）"
                 if auth_service.last_status.cookie_count > 0:
                     msg += f"\n提取了 {auth_service.last_status.cookie_count} 个 Cookie"

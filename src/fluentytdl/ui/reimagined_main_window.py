@@ -4,7 +4,7 @@ import os
 import time
 from typing import Iterable
 
-from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QPixmap, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
-    QLabel,
     QFrame,
     QCheckBox,
 )
@@ -24,7 +23,6 @@ from qfluentwidgets import (
     FluentIcon,
     NavigationItemPosition,
     SubtitleLabel,
-    CaptionLabel,
     TransparentToolButton,
     PrimaryPushButton,
     PushButton,
@@ -398,7 +396,8 @@ class MainWindow(FluentWindow):
                 try:
                     mon.youtube_url_detected.disconnect(self.on_youtube_url_detected)
                     mon.deleteLater()
-                except: pass
+                except Exception:
+                    pass
                 self.clipboard_monitor = None
             return
         if getattr(self, "clipboard_monitor", None) is None:
@@ -450,7 +449,7 @@ class MainWindow(FluentWindow):
             if t_thumb:
                 card.load_thumbnail(str(t_thumb))
             
-            logger.info(f"[DEBUG] Adding card to task_page")
+            logger.info("[DEBUG] Adding card to task_page")
             # 添加到统一任务列表（信号由 UnifiedTaskListPage 内部连接）
             self.task_page.add_card(card)
             logger.info(f"[DEBUG] Card added, task_page count: {self.task_page.count()}")
@@ -464,7 +463,7 @@ class MainWindow(FluentWindow):
                 card.set_state("queued")
             
             # 切换到任务列表页
-            logger.info(f"[DEBUG] Switching to task_page")
+            logger.info("[DEBUG] Switching to task_page")
             self.switchTo(self.task_page)
             logger.info(f"[DEBUG] Task {i+1} processing complete")
 
@@ -598,7 +597,7 @@ class MainWindow(FluentWindow):
             # Last resort: try to remove the card anyway so UI isn't stuck
             try:
                 self.task_page.remove_card(card)
-            except:
+            except Exception:
                 pass
 
     def _delete_files_best_effort(self, paths: list[str], success_title: str = "已删除文件"):
@@ -670,18 +669,15 @@ class MainWindow(FluentWindow):
                     # Better strategy: If we have output_path, use its basename (without ext) to find parts.
                     
                     # If output_path is known, we can look for output_path + ".part"
-                    if output_path:
-                        base_name = os.path.basename(output_path)
-                        # Common patterns: filename.mp4.part, filename.f137.mp4.part
-                        # We can scan the dir for files starting with the stem of the output filename?
-                        pass
-                    
+                    # Common patterns: filename.mp4.part, filename.f137.mp4.part
+                    # We can scan the dir for files starting with the stem of the output filename?
                     # Fallback: If dest_paths is empty, we might have missed it.
                     # But without a reliable ID/Filename, scanning is dangerous.
                     pass
 
                 for p in dest_paths:
-                    if not p: continue
+                    if not p:
+                        continue
                     
                     # If p is a cache file itself
                     if p.endswith(".part") or p.endswith(".ytdl"):

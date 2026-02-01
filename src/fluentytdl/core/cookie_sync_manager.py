@@ -160,7 +160,7 @@ class CookieSyncManager:
                 )
                 
                 stderr = (result.stderr or "").strip()
-                stdout = (result.stdout or "").strip()
+                (result.stdout or "").strip()
                 
                 if result.returncode != 0:
                     # 分析错误类型

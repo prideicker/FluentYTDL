@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 import zipfile
-import platform
 import re
 import requests
 import tempfile
 from pathlib import Path
-from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
 
 from .config_manager import config_manager
-from ..utils.paths import frozen_app_dir, frozen_internal_dir, is_frozen
+from ..utils.paths import frozen_app_dir, is_frozen
 from ..utils.logger import logger
 
 

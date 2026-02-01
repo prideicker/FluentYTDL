@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -27,7 +27,6 @@ from qfluentwidgets import (
 )
 
 from ...core.section_download import (
-    parse_time_input,
     parse_time_range,
     build_section_opts,
     TimeRange,

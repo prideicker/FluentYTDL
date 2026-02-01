@@ -62,7 +62,6 @@ class POTManager:
         """创建 Windows Job Object，确保子进程随父进程终止"""
         try:
             import win32job
-            import win32api
             
             self._job_handle = win32job.CreateJobObject(None, "FluentYTDL_POT_Job")
             info = win32job.QueryInformationJobObject(

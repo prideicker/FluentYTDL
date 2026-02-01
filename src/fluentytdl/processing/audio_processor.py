@@ -242,10 +242,6 @@ class AudioProcessor:
             target_tp = config_manager.get("audio_target_tp", -1)
             target_lra = config_manager.get("audio_target_lra", 11)
             
-            pp_normalize: dict[str, Any] = {
-                "key": "FFmpegPostProcessor",
-                # yt-dlp 会自动处理这个，我们使用 PP_ARGS
-            }
             # 注意: yt-dlp 的 FFmpegPostProcessor 不直接支持 loudnorm
             # 我们需要使用 postprocessor_args
             ydl_opts["postprocessor_args"] = {

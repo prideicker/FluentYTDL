@@ -240,7 +240,6 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     # Postprocessors handling
     postprocessors = ydl_opts.get("postprocessors")
     if isinstance(postprocessors, list):
-        has_extract_audio = False
         has_embed_metadata = False
         
         for pp in postprocessors:
@@ -253,7 +252,6 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
                 codec = str(pp.get("preferredcodec") or "mp3").strip() or "mp3"
                 quality = str(pp.get("preferredquality") or "192").strip() or "192"
                 args += ["--extract-audio", "--audio-format", codec, "--audio-quality", f"{quality}K"]
-                has_extract_audio = True
             
             # 封面嵌入 - 注意：现在由外置工具处理，yt-dlp 只负责下载封面
             # EmbedThumbnail 后处理器已移除，此处保留代码仅供参考

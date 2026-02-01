@@ -318,7 +318,7 @@ class DownloadItemCard(CardWidget):
         if "合并" in clean_msg or "处理" in clean_msg:
             self.progressBar.setValue(99)
 
-        lower = clean_msg.lower()
+        clean_msg.lower()
         if "排队" in clean_msg or "等待" in clean_msg:
             self.set_state("queued")
         if "暂停" in clean_msg:

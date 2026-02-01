@@ -1,24 +1,21 @@
 from __future__ import annotations
 
-from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QUrl
-from PySide6.QtGui import QDesktopServices, QColor
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, 
-    QStackedWidget, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget
 )
 
 from qfluentwidgets import (
-    FluentWindow, SubtitleLabel, NavigationInterface, NavigationItemPosition,
-    FluentIcon, CardWidget, StrongBodyLabel, BodyLabel, PrimaryPushButton,
-    ImageLabel, Theme, isDarkTheme, SmoothScrollDelegate, ScrollArea,
+    FluentWindow, SubtitleLabel, NavigationItemPosition,
+    FluentIcon, CardWidget, BodyLabel, PrimaryPushButton,
+    ImageLabel, ScrollArea,
     SettingCardGroup, SettingCard
 )
 
-import markdown
 
-from ..utils.paths import doc_path, resource_path
+from ..utils.paths import resource_path
 
 # CSS for Markdown styling - Card-Based UI (Fluent Settings Style)
 # Optimized for readability with color hierarchy and DataGrid-style tables

@@ -22,9 +22,7 @@ from typing import Callable, Optional
 from ..utils.logger import logger
 from ..utils.paths import frozen_app_dir, is_frozen
 from .thumbnail_embed import (
-    ThumbnailEmbedSupport,
     get_thumbnail_support,
-    can_embed_thumbnail,
 )
 
 

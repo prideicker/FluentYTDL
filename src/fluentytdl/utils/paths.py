@@ -213,7 +213,7 @@ def locate_runtime_tool(*relative_candidates: str) -> Path:
 
     # not found
     raise FileNotFoundError(
-        f"工具未找到: {relative_candidates}. 请将相应可执行文件放入 '{local_bin}'，或将其加入系统 PATH，或在设置中指定路径。"
+        f"工具未找到: {relative_candidates}. 请将相应可执行文件放入 'bin' 目录，或将其加入系统 PATH，或在设置中指定路径。"
     )
 
 

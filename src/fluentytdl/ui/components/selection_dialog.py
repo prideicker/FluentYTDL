@@ -6,11 +6,10 @@ from functools import partial
 from typing import Any
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -21,14 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
     QButtonGroup,
     QFrame,
-    QStackedWidget,
 )
 
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     ComboBox,
-    FluentIcon,
     ImageLabel,
     IndeterminateProgressRing,
     MessageBox,
@@ -36,16 +33,12 @@ from qfluentwidgets import (
     PushButton,
     PrimaryPushButton,
     SubtitleLabel,
-    TransparentToolButton,
-    SegmentedWidget,
     RadioButton,
 )
 
-from ...utils.logger import logger
 
 from ...core.workers import EntryDetailWorker, InfoExtractWorker
 from ...core.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
-from ...ui.components.badges import QualityCellWidget
 from ...utils.image_loader import ImageLoader
 from .format_selector import VideoFormatSelectorWidget
 

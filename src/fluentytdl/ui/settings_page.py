@@ -6,11 +6,10 @@ import shutil
 import subprocess
 import os
 import time
-import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QThread, QObject
-from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout, QApplication
+from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout
 
 from qfluentwidgets import (
     ComboBox,
@@ -150,11 +149,16 @@ class ComponentSettingCard(SettingCard):
     def _on_import_clicked(self):
         # Filter based on component type
         exe_name = "yt-dlp.exe"
-        if self.component_key == "ffmpeg": exe_name = "ffmpeg.exe"
-        elif self.component_key == "deno": exe_name = "deno.exe"
-        elif self.component_key == "pot-provider": exe_name = "bgutil-pot-provider.exe"
-        elif self.component_key == "ytarchive": exe_name = "ytarchive.exe"
-        elif self.component_key == "atomicparsley": exe_name = "AtomicParsley.exe"
+        if self.component_key == "ffmpeg":
+            exe_name = "ffmpeg.exe"
+        elif self.component_key == "deno":
+            exe_name = "deno.exe"
+        elif self.component_key == "pot-provider":
+            exe_name = "bgutil-pot-provider.exe"
+        elif self.component_key == "ytarchive":
+            exe_name = "ytarchive.exe"
+        elif self.component_key == "atomicparsley":
+            exe_name = "AtomicParsley.exe"
         
         file, _ = QFileDialog.getOpenFileName(
             self.window(),
@@ -163,11 +167,13 @@ class ComponentSettingCard(SettingCard):
             f"Executables ({exe_name});;All Files (*)"
         )
         
-        if not file: return
+        if not file:
+            return
         
         try:
             src = Path(file)
-            if not src.exists(): return
+            if not src.exists():
+                return
             
             target_dir = dependency_manager.get_target_dir(self.component_key)
             target_path = target_dir / exe_name
@@ -197,12 +203,14 @@ class ComponentSettingCard(SettingCard):
             InfoBar.error("错误", str(e), parent=self.window())
 
     def _on_check_started(self, key):
-        if key != self.component_key: return
+        if key != self.component_key:
+            return
         self.actionButton.setText("正在检查...")
         self.actionButton.setEnabled(False)
 
     def _on_check_finished(self, key, result):
-        if key != self.component_key: return
+        if key != self.component_key:
+            return
         self.actionButton.setEnabled(True)
         
         curr = result.get('current', 'unknown')
@@ -234,22 +242,26 @@ class ComponentSettingCard(SettingCard):
                 )
 
     def _on_download_started(self, key):
-        if key != self.component_key: return
+        if key != self.component_key:
+            return
         self.progressBar.setVisible(True)
         self.progressBar.setValue(0)
         self.actionButton.setEnabled(False)
         self.actionButton.setText("正在下载...")
 
     def _on_download_progress(self, key, percent):
-        if key != self.component_key: return
+        if key != self.component_key:
+            return
         self.progressBar.setValue(percent)
 
     def _on_download_finished(self, key):
-        if key != self.component_key: return
+        if key != self.component_key:
+            return
         self.actionButton.setText("正在安装...")
 
     def _on_install_finished(self, key):
-        if key != self.component_key: return
+        if key != self.component_key:
+            return
         self.progressBar.setVisible(False)
         self.actionButton.setEnabled(True)
         self.actionButton.setText("检查更新")
@@ -265,7 +277,8 @@ class ComponentSettingCard(SettingCard):
         )
 
     def _on_error(self, key, msg):
-        if key != self.component_key: return
+        if key != self.component_key:
+            return
         self.progressBar.setVisible(False)
         self.actionButton.setEnabled(True)
         self.actionButton.setText("检查更新")  # Reset
@@ -792,8 +805,6 @@ class SettingsPage(ScrollArea):
         self.checkUpdatesOnStartupCard.switchButton.setChecked(auto_check)
         self.checkUpdatesOnStartupCard.switchButton.blockSignals(False)
 
-        mode = str(config_manager.get("cookie_mode") or "auto").strip().lower()
-
         # Proxy mode -> combobox index
         proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
         proxy_index_map = {"off": 0, "system": 1, "http": 2, "socks5": 3}
@@ -1141,7 +1152,7 @@ class SettingsPage(ScrollArea):
 
     def _on_refresh_cookie_clicked(self):
         """手动刷新 Cookie 按钮点击"""
-        from ..core.auth_service import auth_service, AuthSourceType
+        from ..core.auth_service import auth_service
         from ..utils.admin_utils import is_admin
         from qfluentwidgets import MessageBox
         
@@ -1319,7 +1330,6 @@ class SettingsPage(ScrollArea):
         """更新 Cookie 状态显示"""
         try:
             from ..core.cookie_sentinel import cookie_sentinel
-            from ..core.auth_service import auth_service
             
             info = cookie_sentinel.get_status_info()
             cookie_path = cookie_sentinel.cookie_path

@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..utils.logger import logger
 
 
 # 常见字幕语言代码映射

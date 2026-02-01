@@ -13,7 +13,6 @@ import json
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from ..core.config_manager import config_manager
 from ..utils.logger import logger
