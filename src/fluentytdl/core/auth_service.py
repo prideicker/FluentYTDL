@@ -225,17 +225,28 @@ class AuthService:
         """
         设置验证源
         
+        当来源变化时，会通知 CookieSentinel 清理旧的 Cookie 文件，
+        确保不会复用来自不同浏览器的旧 Cookie。
+        
         Args:
             source: 验证源类型
             file_path: 当 FILE 类型需要
             auto_refresh: 是否自动刷新
         """
+        old_source = self._current_source
+        
         self._current_source = source
         self._current_file_path = file_path if source == AuthSourceType.FILE else None
         self._auto_refresh = auto_refresh
         self._save_config()
         
         logger.info(f"验证源已设置: {self.current_source_display}")
+        
+        # 注意：不再立即清理旧 Cookie 文件
+        # 延迟到实际提取成功后再清理，避免提取失败时丢失旧 Cookie
+        if old_source != source:
+            logger.info(f"验证源变化: {old_source.value} -> {source.value}")
+            logger.info("将在下次成功提取后更新 Cookie 文件")
     
     def get_cookie_file_for_ytdlp(
         self,

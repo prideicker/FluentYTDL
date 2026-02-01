@@ -1337,9 +1337,30 @@ class SettingsPage(ScrollArea):
             if info['exists']:
                 age = info['age_minutes']
                 age_str = f"{int(age)}分钟前" if age is not None else "未知"
-                emoji = "⚠️" if info['is_stale'] else "✅"
                 
-                status_text = f"{emoji} {info['source']} | 更新于 {age_str} | {info['cookie_count']} 个 Cookie"
+                # 显示实际来源，而不是配置来源
+                actual_display = info.get('actual_source_display') or info['source']
+                
+                # 回退警告或来源不匹配警告
+                if info.get('using_fallback') or info.get('source_mismatch'):
+                    emoji = "⚠️"
+                    # 显示实际来源并标注配置来源
+                    if info.get('source_mismatch') and info.get('actual_source_display'):
+                        source_text = f"{actual_display}（配置: {info['source']}）"
+                    else:
+                        source_text = actual_display
+                elif info['is_stale']:
+                    emoji = "⚠️"
+                    source_text = actual_display
+                else:
+                    emoji = "✅"
+                    source_text = actual_display
+                
+                status_text = f"{emoji} {source_text} | 更新于 {age_str} | {info['cookie_count']} 个 Cookie"
+                
+                # 如果有回退警告，添加提示
+                if info.get('fallback_warning'):
+                    status_text += f"\n{info['fallback_warning']}"
             else:
                 status_text = f"❌ Cookie 文件不存在 ({cookie_path.name})"
             
