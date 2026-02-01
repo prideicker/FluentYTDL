@@ -1,10 +1,27 @@
 ---
-name: Feature Request
-about: Suggest an idea for this project
+name: ✨ 功能请求
+about: 为这个项目提出一个想法
+title: "[Feature] "
+labels: enhancement
+assignees: ''
 ---
 
-**Is your feature request related to a problem? Please describe.**
+## 问题背景
+<!-- 你的功能请求是否与某个问题相关？请描述。 -->
+<!-- 例如：每次我需要 ... 的时候总是很麻烦 -->
 
-**Describe the solution you'd like**
 
-**Additional context**
+## 解决方案
+<!-- 描述你希望实现的功能 -->
+
+
+## 替代方案
+<!-- 描述你考虑过的替代方案 -->
+
+
+## 补充信息
+<!-- 添加任何关于功能请求的其他上下文或截图 -->
+
+
+## 实现建议（可选）
+<!-- 如果你有技术实现的想法，可以在这里描述 -->

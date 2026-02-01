@@ -1,24 +1,43 @@
 ---
-name: Bug Report
-about: Create a report to help us improve
+name: 🐛 Bug 报告
+about: 报告一个问题帮助我们改进
+title: "[Bug] "
+labels: bug
+assignees: ''
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## 问题描述
+<!-- 清晰简洁地描述这个 Bug -->
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '...'
-3. See error
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+## 复现步骤
+1. 打开 '...'
+2. 点击 '...'
+3. 输入 '...'
+4. 看到错误
 
-**Environment (please complete the following information):**
-- OS: Windows / macOS / Linux
-- Python version:
-- FluentYTDL version:
+## 期望行为
+<!-- 描述你期望发生什么 -->
 
-**Logs / Traceback**
-Paste relevant logs or traceback.
+
+## 实际行为
+<!-- 描述实际发生了什么 -->
+
+
+## 环境信息
+- **操作系统**: Windows 11 / Windows 10 / ...
+- **FluentYTDL 版本**: v1.0.x
+- **安装方式**: [ ] Setup 安装包 / [ ] Full 便携版 / [ ] Portable 轻量版
+
+## 错误日志
+<!-- 如有错误日志，请粘贴在下方代码块中 -->
+```
+粘贴日志内容...
+```
+
+## 截图
+<!-- 如果适用，添加截图帮助解释问题 -->
+
+
+## 补充信息
+<!-- 任何其他相关信息 -->

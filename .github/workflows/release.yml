@@ -1,11 +1,14 @@
 # ==============================================================================
-#  FluentYTDL - 多版本发布流程 (Multi-Build Release Workflow) - v3
+#  FluentYTDL - GitHub Actions 自动发布工作流 v4
 # ==============================================================================
-# 触发条件: 当一个 'v' 开头的标签 (例如 v1.0.0, v0.2.1)被推送到仓库时
+# 触发条件:
+#   - 推送 v* 标签时自动构建发布 (例如 v1.0.18)
+#   - 手动触发 workflow_dispatch
+#
 # 生成版本:
-# 1. portable   - onedir + full (带工具的便携目录版)
-# 2. shell      - onefile + shell (轻量单文件，无外部工具)
-# 3. full       - onefile + full (单文件 + 外部工具)
+#   1. setup.exe    - Windows 安装包 (Inno Setup)
+#   2. full.7z      - 完整便携版 (含外部工具)
+#   3. portable.exe - 轻量便携版 (单文件，不含外部工具)
 # ==============================================================================
 
 name: Build and Release
@@ -14,58 +17,198 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (不带 v 前缀，例如 1.0.18)'
+        required: false
+        default: ''
+      targets:
+        description: '构建目标'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - setup
+          - full
+          - portable
 
 permissions:
   contents: write
+
+env:
+  PYTHON_VERSION: '3.12'
 
 jobs:
   build-release:
     runs-on: windows-latest
     
     steps:
-      - name: "[1/8] Checkout Code"
+      # ========================================
+      # 1. 环境准备
+      # ========================================
+      - name: "📥 检出代码"
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史用于版本信息
 
-      - name: "[2/8] Setup Python with Dependency Cache"
+      - name: "🐍 设置 Python ${{ env.PYTHON_VERSION }}"
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
-      - name: "[3/8] Install Dependencies"
+      - name: "📦 安装项目依赖"
         shell: pwsh
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip wheel setuptools
           pip install ".[dev]"
+          pip install py7zr  # 用于创建 7z 压缩包
 
-      - name: "[4/8] Prepare Tools (ffmpeg & yt-dlp)"
+      # ========================================
+      # 2. 下载外部工具
+      # ========================================
+      - name: "🔧 下载外部工具 (yt-dlp, ffmpeg, deno, atomicparsley)"
         shell: pwsh
-        run: .\scripts\fetch_tools.ps1
+        run: python scripts/fetch_tools.py --force
 
-      - name: "[5/8] Build Portable Version (onedir + full)"
+      # ========================================
+      # 3. 安装 Inno Setup
+      # ========================================
+      - name: "📦 安装 Inno Setup"
         shell: pwsh
-        run: .\scripts\package.ps1 -Mode onedir -Flavor full
-        env:
-          PACKAGE_VERSION: ${{ github.ref_name }}
+        run: |
+          # 下载 Inno Setup 6 静默安装
+          $innoUrl = "https://jrsoftware.org/download.php/is.exe"
+          $innoInstaller = "$env:RUNNER_TEMP\innosetup.exe"
+          
+          Write-Host "下载 Inno Setup..."
+          Invoke-WebRequest -Uri $innoUrl -OutFile $innoInstaller -UseBasicParsing
+          
+          Write-Host "安装 Inno Setup..."
+          Start-Process -FilePath $innoInstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          
+          # 验证安装
+          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $isccPath) {
+            Write-Host "✓ Inno Setup 安装成功"
+          } else {
+            Write-Host "❌ Inno Setup 安装失败"
+            exit 1
+          }
 
-      - name: "[6/8] Build Shell Version (onefile + shell)"
+      # ========================================
+      # 4. 确定版本号
+      # ========================================
+      - name: "🔢 确定版本号"
+        id: version
         shell: pwsh
-        run: .\scripts\package.ps1 -Mode onefile -Flavor shell
-        env:
-          PACKAGE_VERSION: ${{ github.ref_name }}
+        run: |
+          # 优先级: 手动输入 > Git 标签 > pyproject.toml
+          $version = ""
+          
+          # 1. 检查手动输入
+          if ("${{ github.event.inputs.version }}" -ne "") {
+            $version = "${{ github.event.inputs.version }}"
+            Write-Host "使用手动输入版本: $version"
+          }
+          # 2. 检查 Git 标签
+          elseif ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+            Write-Host "使用 Git 标签版本: $version"
+          }
+          # 3. 从 pyproject.toml 读取
+          else {
+            $content = Get-Content pyproject.toml -Raw
+            if ($content -match 'version\s*=\s*"([^"]+)"') {
+              $version = $matches[1]
+              Write-Host "使用 pyproject.toml 版本: $version"
+            } else {
+              $version = "0.0.0"
+              Write-Host "使用默认版本: $version"
+            }
+          }
+          
+          Write-Host "最终版本号: $version"
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "PACKAGE_VERSION=v$version" >> $env:GITHUB_ENV
 
-      - name: "[7/8] Build Full Single-File Version (onefile + full)"
+      # ========================================
+      # 5. 构建
+      # ========================================
+      - name: "🔨 构建所有目标"
+        if: github.event.inputs.targets == 'all' || github.event.inputs.targets == ''
         shell: pwsh
-        run: .\scripts\package.ps1 -Mode onefile -Flavor full
-        env:
-          PACKAGE_VERSION: ${{ github.ref_name }}
+        run: python scripts/build.py --target all --version "v${{ steps.version.outputs.VERSION }}"
 
-      - name: "[8/8] Create GitHub Release"
+      - name: "🔨 构建 Setup"
+        if: github.event.inputs.targets == 'setup'
+        shell: pwsh
+        run: python scripts/build.py --target setup --version "v${{ steps.version.outputs.VERSION }}"
+
+      - name: "🔨 构建 Full"
+        if: github.event.inputs.targets == 'full'
+        shell: pwsh
+        run: python scripts/build.py --target full --version "v${{ steps.version.outputs.VERSION }}"
+
+      - name: "🔨 构建 Portable"
+        if: github.event.inputs.targets == 'portable'
+        shell: pwsh
+        run: python scripts/build.py --target portable --version "v${{ steps.version.outputs.VERSION }}"
+
+      # ========================================
+      # 6. 列出构建产物
+      # ========================================
+      - name: "📋 列出构建产物"
+        shell: pwsh
+        run: |
+          Write-Host "=== 构建产物 ===" -ForegroundColor Cyan
+          Get-ChildItem -Path release -Recurse | ForEach-Object {
+            $size = if ($_.PSIsContainer) { "" } else { "{0:N2} MB" -f ($_.Length / 1MB) }
+            Write-Host "  $($_.Name) $size"
+          }
+
+      # ========================================
+      # 7. 上传 Artifacts (用于调试)
+      # ========================================
+      - name: "📤 上传构建产物"
+        uses: actions/upload-artifact@v4
+        with:
+          name: FluentYTDL-v${{ steps.version.outputs.VERSION }}-builds
+          path: release/*
+          retention-days: 30
+          if-no-files-found: error
+
+      # ========================================
+      # 8. 创建 GitHub Release
+      # ========================================
+      - name: "🚀 创建 GitHub Release"
         uses: softprops/action-gh-release@v2
         if: success() && startsWith(github.ref, 'refs/tags/')
         with:
-          files: release/*.zip
+          name: FluentYTDL v${{ steps.version.outputs.VERSION }}
+          tag_name: ${{ github.ref_name }}
           draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
           generate_release_notes: true
+          files: |
+            release/*.exe
+            release/*.7z
+            release/SHA256SUMS.txt
+          body: |
+            ## 📦 下载
+            
+            | 版本 | 说明 | 适用场景 |
+            |------|------|----------|
+            | `*-setup.exe` | Windows 安装包 | 推荐普通用户使用 |
+            | `*-full.7z` | 便携完整版 | 无需安装，解压即用 |
+            | `*-portable.exe` | 轻量便携版 | 单文件，需自备 yt-dlp/ffmpeg |
+            
+            ## ✅ 校验
+            下载后请使用 `SHA256SUMS.txt` 校验文件完整性。
+            
+            ---
+            自动构建于 ${{ github.sha }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

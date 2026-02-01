@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 文档
+    url: https://github.com/user/FluentYTDL/wiki
+    about: 查看项目文档和使用指南
+  - name: 💬 讨论
+    url: https://github.com/user/FluentYTDL/discussions
+    about: 提问或参与社区讨论
