@@ -91,30 +91,68 @@ class SimplePresetWidget(QWidget):
         
         # Define presets
         self.presets = [
+            # === 推荐选项 ===
             (
                 "best_mp4", 
-                "最佳画质 (MP4)", 
+                "🎬 最佳画质 (MP4)", 
                 "推荐。自动选择最佳画质并封装为 MP4，兼容性最好。", 
                 "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
                 {"merge_output_format": "mp4"}
             ),
             (
                 "best_raw", 
-                "最佳画质 (原盘)", 
+                "🎯 最佳画质 (原盘)", 
                 "追求极致画质。通常为 WebM/MKV 格式，适合本地播放。", 
                 "bestvideo+bestaudio/best",
                 {}
             ),
+            # === 分辨率限制 ===
             (
-                "1080p", 
-                "1080p 高清 (MP4)", 
-                "限制最高分辨率为 1080p，平衡画质与体积。", 
-                "bv*[height<=1080][ext=mp4]+ba/b[height<=1080] / bv*[height<=1080]+ba/b[height<=1080]",
+                "2160p", 
+                "📺 2160p 4K (MP4)", 
+                "限制最高分辨率为 4K，超高清画质。", 
+                "bv*[height<=2160][ext=mp4]+ba[ext=m4a]/b[height<=2160][ext=mp4] / bv*[height<=2160]+ba/b[height<=2160]",
                 {"merge_output_format": "mp4"}
             ),
             (
+                "1440p", 
+                "📺 1440p 2K (MP4)", 
+                "限制最高分辨率为 2K，高清画质。", 
+                "bv*[height<=1440][ext=mp4]+ba[ext=m4a]/b[height<=1440][ext=mp4] / bv*[height<=1440]+ba/b[height<=1440]",
+                {"merge_output_format": "mp4"}
+            ),
+            (
+                "1080p", 
+                "📺 1080p 高清 (MP4)", 
+                "限制最高分辨率为 1080p，平衡画质与体积。", 
+                "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4] / bv*[height<=1080]+ba/b[height<=1080]",
+                {"merge_output_format": "mp4"}
+            ),
+            (
+                "720p", 
+                "📺 720p 标清 (MP4)", 
+                "限制最高分辨率为 720p，适合移动设备。", 
+                "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4] / bv*[height<=720]+ba/b[height<=720]",
+                {"merge_output_format": "mp4"}
+            ),
+            (
+                "480p", 
+                "📺 480p (MP4)", 
+                "限制最高分辨率为 480p，节省空间。", 
+                "bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4] / bv*[height<=480]+ba/b[height<=480]",
+                {"merge_output_format": "mp4"}
+            ),
+            (
+                "360p", 
+                "📺 360p (MP4)", 
+                "限制最高分辨率为 360p，最小体积。", 
+                "bv*[height<=360][ext=mp4]+ba[ext=m4a]/b[height<=360][ext=mp4] / bv*[height<=360]+ba/b[height<=360]",
+                {"merge_output_format": "mp4"}
+            ),
+            # === 纯音频 ===
+            (
                 "audio_mp3", 
-                "纯音频 (MP3 - 320k)", 
+                "🎵 纯音频 (MP3 - 320k)", 
                 "仅下载音频并转码为 MP3。", 
                 "bestaudio/best",
                 {"extract_audio": True, "audio_format": "mp3", "audio_quality": "320K"}

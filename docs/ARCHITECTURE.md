@@ -253,10 +253,21 @@ flowchart TD
 ```mermaid
 flowchart TB
     subgraph Simple["简易模式 (SimplePresetWidget)"]
-        P1[🎬 最佳画质 MP4<br/>bv*ext=mp4+ba/b]
-        P2[🎯 最佳画质 原盘<br/>bestvideo+bestaudio]
-        P3[📺 1080p 高清<br/>bv*height≤1080]
-        P4[🎵 纯音频 MP3<br/>bestaudio → MP3 320k]
+        direction TB
+        subgraph Recommend["推荐"]
+            P1[🎬 最佳画质 MP4]
+            P2[🎯 最佳画质 原盘]
+        end
+        subgraph Resolution["分辨率限制"]
+            P3[📺 2160p 4K]
+            P4[📺 1440p 2K]
+            P5[📺 1080p 高清]
+            P6[📺 720p 标清]
+            P7[📺 480p / 360p]
+        end
+        subgraph Audio["音频"]
+            P8[🎵 纯音频 MP3]
+        end
     end
     
     subgraph Advanced["专业模式 (Advanced)"]
@@ -275,10 +286,15 @@ flowchart TB
 
 | 预设 ID | 名称 | yt-dlp format 字符串 | 额外参数 |
 |---------|------|---------------------|----------|
-| `best_mp4` | 最佳画质 (MP4) | `bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b` | `merge_output_format: mp4` |
-| `best_raw` | 最佳画质 (原盘) | `bestvideo+bestaudio/best` | - |
-| `1080p` | 1080p 高清 (MP4) | `bv*[height<=1080][ext=mp4]+ba/b[height<=1080]` | `merge_output_format: mp4` |
-| `audio_mp3` | 纯音频 (MP3) | `bestaudio/best` | `extract_audio: true, audio_format: mp3, audio_quality: 320K` |
+| `best_mp4` | 🎬 最佳画质 (MP4) | `bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b` | `merge_output_format: mp4` |
+| `best_raw` | 🎯 最佳画质 (原盘) | `bestvideo+bestaudio/best` | - |
+| `2160p` | 📺 2160p 4K (MP4) | `bv*[height<=2160][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
+| `1440p` | 📺 1440p 2K (MP4) | `bv*[height<=1440][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
+| `1080p` | 📺 1080p 高清 (MP4) | `bv*[height<=1080][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
+| `720p` | 📺 720p 标清 (MP4) | `bv*[height<=720][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
+| `480p` | 📺 480p (MP4) | `bv*[height<=480][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
+| `360p` | 📺 360p (MP4) | `bv*[height<=360][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
+| `audio_mp3` | 🎵 纯音频 (MP3) | `bestaudio/best` | `extract_audio: true, audio_format: mp3` |
 
 **专业模式**：
 
