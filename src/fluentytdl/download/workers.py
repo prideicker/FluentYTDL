@@ -208,15 +208,7 @@ class DownloadWorker(QThread):
             from ..core.config_manager import config_manager as cfg_mgr
             if cfg_mgr.get("enable_resume", True):
                 merged["continuedl"] = True  # 继续下载部分文件
-                
-                # 如果使用 aria2c，确保也启用断点续传
-                if cfg_mgr.get("use_aria2c", False):
-                    if "external_downloader_args" not in merged:
-                        merged["external_downloader_args"] = {}
-                    aria2c_args = merged["external_downloader_args"].get("aria2c", [])
-                    if isinstance(aria2c_args, list) and "-c" not in aria2c_args:
-                        aria2c_args.append("-c")
-                        merged["external_downloader_args"]["aria2c"] = aria2c_args
+
 
             try:
                 yt_dlp_exe = locate_runtime_tool(

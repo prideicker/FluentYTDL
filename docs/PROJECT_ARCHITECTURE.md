@@ -15,7 +15,6 @@ FluentYTDL 是一个基于 Python + PySide6 的桌面视频下载客户端，采
 | UI 框架 | PySide6 + QFluentWidgets |
 | 下载核心 | yt-dlp (CLI 调用) |
 | 媒体处理 | FFmpeg |
-| 加速下载 | aria2c (可选) |
 | JavaScript 运行时 | Deno/Node.js (用于 YouTube 签名解析) |
 | 身份验证 | rookiepy (浏览器 Cookie 提取) |
 
@@ -229,7 +228,6 @@ FluentYTDL/
 | `cookie_manager.py` | Cookie 文件读写 |
 | `process_manager.py` | 进程管理 |
 | `resume_manager.py` | 断点续传管理 |
-| `aria2c_manager.py` | aria2c 加速下载 |
 | `archive_manager.py` | 下载归档管理 |
 | `channel_service.py` | 频道订阅服务 |
 | `notification_manager.py` | 系统通知 |
@@ -265,7 +263,6 @@ FluentYTDL/
 **进度解析：**
 - 支持 yt-dlp 原生进度
 - 支持 FFmpeg 合并进度
-- 支持 aria2c 进度
 
 ---
 

@@ -83,12 +83,12 @@ def _prepend_path(env: dict[str, str], *dirs: str) -> None:
 
 
 def prepare_yt_dlp_env(extra_paths: list[str] | None = None) -> dict[str, str]:
-    """Prepare environment so yt-dlp.exe can find bundled ffmpeg, JS runtime, and aria2c.
+    """Prepare environment so yt-dlp.exe can find bundled ffmpeg and JS runtime.
 
     We intentionally prefer PATH injection over less-portable flags.
     
     Args:
-        extra_paths: Additional paths to prepend to PATH (e.g., aria2c directory)
+        extra_paths: Additional paths to prepend to PATH
     """
 
     env = dict(os.environ)
@@ -119,26 +119,14 @@ def prepare_yt_dlp_env(extra_paths: list[str] | None = None) -> dict[str, str]:
             if bundled_deno is not None:
                 _prepend_path(env, str(bundled_deno.resolve().parent))
 
-    # aria2c (when using external downloader)
-    aria2c_path = str(config_manager.get("aria2c_path") or "").strip() or None
-    if aria2c_path and Path(aria2c_path).exists():
-        _prepend_path(env, str(Path(aria2c_path).resolve().parent))
-    else:
-        try:
-            p = locate_runtime_tool("aria2c.exe", "aria2c/aria2c.exe")
-            _prepend_path(env, str(Path(p).resolve().parent))
-        except FileNotFoundError:
-            bundled_aria2c = find_bundled_executable("aria2c.exe", "aria2c/aria2c.exe")
-            if bundled_aria2c is not None:
-                _prepend_path(env, str(bundled_aria2c.resolve().parent))
-
-    # Extra paths (e.g., from aria2c_manager)
+    # Extra paths
     if extra_paths:
         for p in extra_paths:
             if p and Path(p).exists():
                 _prepend_path(env, p)
 
     return env
+
 
 
 def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
@@ -169,7 +157,7 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
         if isinstance(v, (int, float)):
             args += [flag, str(int(v))]
     
-    # 外部下载器 (aria2c)
+    # 外部下载器
     external_downloader = ydl_opts.get("external_downloader")
     if isinstance(external_downloader, str) and external_downloader:
         args += ["--downloader", external_downloader]
@@ -182,6 +170,7 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
                 args += ["--downloader-args", f"{dl_name}:{' '.join(dl_args)}"]
             elif isinstance(dl_args, str):
                 args += ["--downloader-args", f"{dl_name}:{dl_args}"]
+
     
     # 下载限速
     ratelimit = ydl_opts.get("ratelimit")

@@ -264,17 +264,9 @@ class ResumeManager:
             # yt-dlp 默认支持断点续传，但我们明确设置一些参数
             opts["continuedl"] = True  # 继续下载部分下载的文件
             opts["nooverwrites"] = False  # 允许继续写入
-            
-            # 如果使用 aria2c，确保也启用断点续传
-            if config_manager.get("use_aria2c", False):
-                if "external_downloader_args" not in opts:
-                    opts["external_downloader_args"] = {}
-                aria2c_args = opts["external_downloader_args"].get("aria2c", [])
-                if isinstance(aria2c_args, list) and "-c" not in aria2c_args:
-                    aria2c_args.append("-c")
-                    opts["external_downloader_args"]["aria2c"] = aria2c_args
         
         return opts
+
 
 
 # 全局单例

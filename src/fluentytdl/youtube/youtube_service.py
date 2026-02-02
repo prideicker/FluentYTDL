@@ -318,17 +318,7 @@ class YoutubeService:
         rate_limit = str(config_manager.get("rate_limit") or "").strip()
         if rate_limit:
             ydl_opts["ratelimit"] = rate_limit
-        
-        # aria2c 外部下载器集成
-        if config_manager.get("use_aria2c", False):
-            try:
-                from .aria2c_manager import aria2c_manager
-                aria2c_opts = aria2c_manager.get_yt_dlp_options()
-                if aria2c_opts:
-                    ydl_opts.update(aria2c_opts)
-                    self._emit_log("info", "🚀 已启用 aria2c 多线程加速下载")
-            except Exception as e:
-                self._emit_log("warning", f"aria2c 集成失败，回退内置下载器: {e}")
+
 
         # === 后处理：封面嵌入 & 元数据嵌入 ===
         embed_thumbnail = config_manager.get("embed_thumbnail", True)

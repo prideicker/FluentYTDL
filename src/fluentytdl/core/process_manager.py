@@ -2,7 +2,7 @@
 FluentYTDL 进程管理模块
 
 解决 GUI 下载器常见的僵尸进程问题:
-- aria2c.exe、ffmpeg.exe 残留
+- ffmpeg.exe、yt-dlp.exe 残留
 - 主程序退出后子进程仍在运行
 - 文件锁定导致无法删除
 """
@@ -28,12 +28,12 @@ except ImportError:
 
 # 需要监控的子进程名称
 TARGET_PROCESS_NAMES = frozenset({
-    "aria2c.exe",
     "ffmpeg.exe", 
     "ffprobe.exe",
     "yt-dlp.exe",
     "deno.exe",
 })
+
 
 
 class ProcessManager:

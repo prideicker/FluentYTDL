@@ -31,6 +31,7 @@ from qfluentwidgets import (
 from ..core.config_manager import config_manager
 from ..core.yt_dlp_cli import resolve_yt_dlp_exe, run_version
 from ..utils.paths import find_bundled_executable, is_frozen
+from ..utils.logger import LOG_DIR
 from .components.smart_setting_card import SmartSettingCard
 from ..core.dependency_manager import dependency_manager
 
@@ -425,6 +426,7 @@ class SettingsPage(ScrollArea):
         self._init_automation_group()
         self._init_postprocess_group()
         self._init_behavior_group()
+        self._init_log_group()
         self._init_about_group()
 
         self._load_settings_to_ui()
@@ -787,6 +789,83 @@ class SettingsPage(ScrollArea):
         )
         self.aboutGroup.addSettingCard(self.aboutCard)
         self.expandLayout.addWidget(self.aboutGroup)
+
+    def _init_log_group(self) -> None:
+        """初始化日志管理组"""
+        self.logGroup = SettingCardGroup("日志管理", self.scrollWidget)
+
+        # 日志管理卡片
+        self.logCard = SettingCard(
+            FluentIcon.DOCUMENT,
+            "运行日志",
+            f"日志目录: {LOG_DIR}",
+            self.logGroup,
+        )
+        
+        # 添加按钮到卡片
+        self.viewLogBtn = PushButton("查看日志", self.logCard)
+        self.viewLogBtn.clicked.connect(self._on_view_log_clicked)
+        
+        self.openLogDirBtn = ToolButton(FluentIcon.FOLDER, self.logCard)
+        self.openLogDirBtn.setToolTip("打开日志目录")
+        self.openLogDirBtn.clicked.connect(self._on_open_log_dir)
+        
+        self.cleanLogBtn = ToolButton(FluentIcon.DELETE, self.logCard)
+        self.cleanLogBtn.setToolTip("清理所有日志")
+        self.cleanLogBtn.clicked.connect(self._on_clean_log_clicked)
+        
+        self.logCard.hBoxLayout.addWidget(self.viewLogBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.logCard.hBoxLayout.addSpacing(8)
+        self.logCard.hBoxLayout.addWidget(self.openLogDirBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.logCard.hBoxLayout.addSpacing(8)
+        self.logCard.hBoxLayout.addWidget(self.cleanLogBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.logCard.hBoxLayout.addSpacing(16)
+        
+        self.logGroup.addSettingCard(self.logCard)
+        self.expandLayout.addWidget(self.logGroup)
+
+    def _on_view_log_clicked(self):
+        """打开日志查看器"""
+        from .components.log_viewer_dialog import LogViewerDialog
+        dialog = LogViewerDialog(self.window())
+        dialog.exec()
+
+    def _on_open_log_dir(self):
+        """打开日志目录"""
+        try:
+            if os.path.exists(LOG_DIR):
+                os.startfile(LOG_DIR)
+            else:
+                InfoBar.warning("目录不存在", f"{LOG_DIR} 尚未创建", parent=self.window())
+        except Exception as e:
+            InfoBar.error("错误", str(e), parent=self.window())
+
+    def _on_clean_log_clicked(self):
+        """清理所有日志"""
+        from qfluentwidgets import MessageBox
+        box = MessageBox(
+            "确认清理",
+            f"确定要删除所有日志文件吗？\n\n日志目录: {LOG_DIR}",
+            self.window()
+        )
+        if box.exec():
+            try:
+                if os.path.exists(LOG_DIR):
+                    import shutil
+                    for f in os.listdir(LOG_DIR):
+                        fp = os.path.join(LOG_DIR, f)
+                        try:
+                            if os.path.isfile(fp):
+                                os.remove(fp)
+                            elif os.path.isdir(fp):
+                                shutil.rmtree(fp)
+                        except Exception:
+                            pass
+                    InfoBar.success("清理完成", "已删除所有日志文件", parent=self.window())
+                else:
+                    InfoBar.info("无需清理", "日志目录不存在", parent=self.window())
+            except Exception as e:
+                InfoBar.error("清理失败", str(e), parent=self.window())
 
     def _load_settings_to_ui(self) -> None:
         # Download paths
