@@ -210,6 +210,199 @@ flowchart TD
 
 ---
 
+##### 解析策略：单视频 vs 播放列表
+
+应用采用智能的解析策略，针对不同场景优化性能和用户体验：
+
+```mermaid
+flowchart TD
+    Start[用户粘贴 URL] --> Detect{URL 类型检测}
+    
+    Detect -->|单视频| Single[完整解析]
+    Detect -->|播放列表| Flat[快速扁平解析]
+    
+    subgraph SingleFlow["单视频解析"]
+        Single --> Formats[提取全部 formats]
+        Formats --> UI1[显示格式选择器]
+    end
+    
+    subgraph PlaylistFlow["播放列表解析"]
+        Flat --> List[仅获取视频列表<br/>标题/缩略图/时长]
+        List --> UI2[显示列表界面]
+        UI2 --> Idle{用户空闲?}
+        Idle -->|是| Deep[后台深度解析]
+        Idle -->|否| Wait[等待用户操作]
+        Deep --> Update[更新可用格式]
+    end
+```
+
+**设计原理**：
+
+| 场景 | 策略 | 原因 |
+|------|------|------|
+| **单视频** | 完整解析 (`extract_info_sync`) | 用户需要选择格式，必须获取完整 formats |
+| **播放列表初始** | 快速扁平解析 (`extract_playlist_flat`) | 100 个视频完整解析需 ~5 分钟，不可接受 |
+| **播放列表详情** | 延迟逐项解析 (`EntryDetailWorker`) | 用户浏览时后台逐个补全格式信息 |
+
+---
+
+##### 格式选择器：简易模式 vs 专业模式
+
+格式选择器 (`VideoFormatSelectorWidget`) 支持两种模式，通过 `SegmentedWidget` 切换：
+
+```mermaid
+flowchart TB
+    subgraph Simple["简易模式 (SimplePresetWidget)"]
+        P1[🎬 最佳画质 MP4<br/>bv*ext=mp4+ba/b]
+        P2[🎯 最佳画质 原盘<br/>bestvideo+bestaudio]
+        P3[📺 1080p 高清<br/>bv*height≤1080]
+        P4[🎵 纯音频 MP3<br/>bestaudio → MP3 320k]
+    end
+    
+    subgraph Advanced["专业模式 (Advanced)"]
+        M1[音视频 可组装<br/>分别选择 V+A 流]
+        M2[音视频 整合流<br/>选择已封装的流]
+        M3[仅视频<br/>无音轨]
+        M4[仅音频<br/>无视频]
+    end
+    
+    User[用户] --> Toggle{模式切换}
+    Toggle -->|简易| Simple
+    Toggle -->|专业| Advanced
+```
+
+**简易模式预设**：
+
+| 预设 ID | 名称 | yt-dlp format 字符串 | 额外参数 |
+|---------|------|---------------------|----------|
+| `best_mp4` | 最佳画质 (MP4) | `bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b` | `merge_output_format: mp4` |
+| `best_raw` | 最佳画质 (原盘) | `bestvideo+bestaudio/best` | - |
+| `1080p` | 1080p 高清 (MP4) | `bv*[height<=1080][ext=mp4]+ba/b[height<=1080]` | `merge_output_format: mp4` |
+| `audio_mp3` | 纯音频 (MP3) | `bestaudio/best` | `extract_audio: true, audio_format: mp3, audio_quality: 320K` |
+
+**专业模式**：
+
+```mermaid
+flowchart LR
+    subgraph Display["专业模式显示逻辑"]
+        Mode[下载模式<br/>ComboBox] --> Filter{过滤格式}
+        
+        Filter -->|可组装| ShowVA[显示分离的<br/>video + audio 流]
+        Filter -->|整合流| ShowMuxed[显示已封装的<br/>muxed 流]
+        Filter -->|仅视频| ShowV[仅显示 video 流]
+        Filter -->|仅音频| ShowA[仅显示 audio 流]
+    end
+```
+
+**格式组装逻辑**：
+
+```python
+# 专业模式：用户选择视频流 + 音频流
+if video_id and audio_id:
+    format_str = f"{video_id}+{audio_id}"
+    # 智能选择封装容器
+    if vext == "webm" and aext == "webm":
+        container = "webm"
+    elif vext in {"mp4", "m4v"} and aext in {"m4a", "aac"}:
+        container = "mp4"
+    else:
+        container = "mkv"  # 万能容器
+```
+
+---
+
+##### 播放列表批量选择
+
+播放列表界面提供批量操作和预设套用：
+
+```mermaid
+flowchart TB
+    subgraph Toolbar["批量操作工具栏"]
+        SelectAll[全选]
+        Unselect[取消]
+        Invert[反选]
+        Type[类型: 音视频/仅视频/仅音频]
+        Preset[预设: 最高质量/2160p/1080p/...]
+        Apply[重新套用预设]
+    end
+    
+    subgraph List["视频列表"]
+        Row1[☑ 视频 1 | 最佳画质 ▼]
+        Row2[☑ 视频 2 | 1080p ▼]
+        Row3[☐ 视频 3 | 待加载...]
+    end
+    
+    Apply --> Row1
+    Apply --> Row2
+    Apply --> Row3
+    
+    Row1 -->|点击| Quality[打开格式选择对话框]
+```
+
+**预设列表**：
+
+| 索引 | 预设名称 | 说明 |
+|------|----------|------|
+| 0 | 最高质量(自动) | `bestvideo+bestaudio` |
+| 1 | 2160p(严格) | 限制最大高度 2160 |
+| 2 | 1440p(严格) | 限制最大高度 1440 |
+| 3 | 1080p(严格) | 限制最大高度 1080 |
+| 4 | 720p(严格) | 限制最大高度 720 |
+| 5 | 480p(严格) | 限制最大高度 480 |
+| 6 | 360p(严格) | 限制最大高度 360 |
+
+---
+
+##### 延迟深度解析 (EntryDetailWorker)
+
+播放列表采用"先显示后补全"策略，用户空闲时后台逐项深度解析：
+
+```mermaid
+sequenceDiagram
+    participant UI as SelectionDialog
+    participant Timer as IdleTimer (2s)
+    participant Queue as DetailQueue
+    participant Worker as EntryDetailWorker
+    participant YT as yt-dlp
+    
+    UI->>UI: 扁平解析完成，显示列表
+    UI->>Timer: 启动空闲检测
+    
+    loop 用户空闲时
+        Timer->>Timer: 2 秒无交互
+        Timer->>Queue: 取出下一个待解析行
+        Queue-->>Timer: row: 3
+        
+        Timer->>Worker: 启动深度解析 (row, url)
+        Worker->>YT: extract_info(url, formats=True)
+        YT-->>Worker: {formats: [...], ...}
+        Worker-->>UI: finished(row, info)
+        
+        UI->>UI: 更新行 3 的格式下拉框
+    end
+```
+
+**空闲检测逻辑**：
+
+```python
+# 每次用户交互时更新时间戳
+def _record_interaction(self):
+    self._last_interaction = time.monotonic()
+
+# 定时器每 2 秒检查一次
+def _on_idle_tick(self):
+    if time.monotonic() - self._last_interaction > 2.0:
+        self._fetch_next_detail()
+```
+
+**设计优势**：
+1. **快速响应**：播放列表立即显示，无需等待所有视频解析
+2. **节省资源**：只在用户空闲时解析，不阻塞 UI
+3. **按需加载**：用户点击某行时优先解析该行
+
+
+---
+
 ##### JS 运行时配置 (YouTube 签名解析)
 
 YouTube 使用混淆的 JavaScript 生成视频签名，需要外部 JS 运行时解析：
