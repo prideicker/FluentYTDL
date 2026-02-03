@@ -216,23 +216,23 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start[用户粘贴 URL] --> Detect{URL 类型检测}
+    Start["用户粘贴 URL"] --> Detect{"URL 类型检测"}
     
-    Detect -->|单视频| Single[完整解析]
-    Detect -->|播放列表| Flat[快速扁平解析]
+    Detect -->|单视频| Single["完整解析"]
+    Detect -->|播放列表| Flat["快速扁平解析"]
     
     subgraph SingleFlow["单视频解析"]
-        Single --> Formats[提取全部 formats]
-        Formats --> UI1[显示格式选择器]
+        Single --> Formats["提取全部 formats"]
+        Formats --> UI1["显示格式选择器"]
     end
     
     subgraph PlaylistFlow["播放列表解析"]
-        Flat --> List[仅获取视频列表<br/>标题/缩略图/时长]
-        List --> UI2[显示列表界面]
-        UI2 --> Idle{用户空闲?}
-        Idle -->|是| Deep[后台深度解析]
-        Idle -->|否| Wait[等待用户操作]
-        Deep --> Update[更新可用格式]
+        Flat --> List["仅获取视频列表"]
+        List --> UI2["显示列表界面"]
+        UI2 --> Idle{"用户空闲?"}
+        Idle -->|是| Deep["后台深度解析"]
+        Idle -->|否| Wait["等待用户操作"]
+        Deep --> Update["更新可用格式"]
     end
 ```
 
@@ -260,24 +260,24 @@ flowchart TB
         end
         subgraph Resolution["分辨率限制"]
             P3[📺 2160p 4K]
-            P4[📺 1440p 2K]
-            P5[📺 1080p 高清]
-            P6[📺 720p 标清]
-            P7[📺 480p / 360p]
+            P4["1440p 2K"]
+            P5["1080p 高清"]
+            P6["720p 标清"]
+            P7["480p / 360p"]
         end
         subgraph Audio["音频"]
-            P8[🎵 纯音频 MP3]
+            P8["纯音频 MP3"]
         end
     end
     
     subgraph Advanced["专业模式 (Advanced)"]
-        M1[音视频 可组装<br/>分别选择 V+A 流]
-        M2[音视频 整合流<br/>选择已封装的流]
-        M3[仅视频<br/>无音轨]
-        M4[仅音频<br/>无视频]
+        M1["音视频 可组装"]
+        M2["音视频 整合流"]
+        M3["仅视频"]
+        M4["仅音频"]
     end
     
-    User[用户] --> Toggle{模式切换}
+    User["用户"] --> Toggle{"模式切换"}
     Toggle -->|简易| Simple
     Toggle -->|专业| Advanced
 ```
@@ -301,12 +301,12 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph Display["专业模式显示逻辑"]
-        Mode[下载模式<br/>ComboBox] --> Filter{过滤格式}
+        Mode["下载模式"] --> Filter{"过滤格式"}
         
-        Filter -->|可组装| ShowVA[显示分离的<br/>video + audio 流]
-        Filter -->|整合流| ShowMuxed[显示已封装的<br/>muxed 流]
-        Filter -->|仅视频| ShowV[仅显示 video 流]
-        Filter -->|仅音频| ShowA[仅显示 audio 流]
+        Filter -->|可组装| ShowVA["显示分离的 V+A 流"]
+        Filter -->|整合流| ShowMuxed["显示已封装的 muxed 流"]
+        Filter -->|仅视频| ShowV["仅显示 video 流"]
+        Filter -->|仅音频| ShowA["仅显示 audio 流"]
     end
 ```
 
@@ -334,25 +334,25 @@ if video_id and audio_id:
 ```mermaid
 flowchart TB
     subgraph Toolbar["批量操作工具栏"]
-        SelectAll[全选]
-        Unselect[取消]
-        Invert[反选]
-        Type[类型: 音视频/仅视频/仅音频]
-        Preset[预设: 最高质量/2160p/1080p/...]
-        Apply[重新套用预设]
+        SelectAll["全选"]
+        Unselect["取消"]
+        Invert["反选"]
+        Type["类型选择"]
+        Preset["预设选择"]
+        Apply["重新套用预设"]
     end
     
     subgraph List["视频列表"]
-        Row1[☑ 视频 1 | 最佳画质 ▼]
-        Row2[☑ 视频 2 | 1080p ▼]
-        Row3[☐ 视频 3 | 待加载...]
+        Row1["视频 1 - 最佳画质"]
+        Row2["视频 2 - 1080p"]
+        Row3["视频 3 - 待加载"]
     end
     
     Apply --> Row1
     Apply --> Row2
     Apply --> Row3
     
-    Row1 -->|点击| Quality[打开格式选择对话框]
+    Row1 -->|点击| Quality["打开格式选择对话框"]
 ```
 
 **预设列表**：
@@ -426,14 +426,14 @@ YouTube 使用混淆的 JavaScript 生成视频签名，需要外部 JS 运行�
 ```mermaid
 flowchart LR
     subgraph Detection["运行时检测顺序"]
-        D1[1. Deno<br/>推荐] --> D2[2. Node.js<br/>备选]
-        D2 --> D3[3. 无运行时<br/>降级]
+        D1["1. Deno 推荐"] --> D2["2. Node.js 备选"]
+        D2 --> D3["3. 无运行时 降级"]
     end
     
     subgraph Locations["查找位置"]
-        L1[bin/deno/deno.exe]
-        L2[系统 PATH]
-        L3[用户自定义路径]
+        L1["bin/deno/deno.exe"]
+        L2["系统 PATH"]
+        L3["用户自定义路径"]
     end
     
     Detection --> Locations
@@ -585,19 +585,19 @@ PROGRESS_PATTERN = re.compile(
 ```mermaid
 flowchart TB
     subgraph Input["输入"]
-        VF[视频文件<br/>xxx.mp4]
-        TF[封面文件<br/>xxx.jpg]
+        VF["视频文件 xxx.mp4"]
+        TF["封面文件 xxx.jpg"]
     end
     
     subgraph Pipeline["后处理管线"]
-        SB[SponsorBlock<br/>跳过广告]
-        TE[ThumbnailEmbed<br/>封面嵌入]
-        ME[MetadataEmbed<br/>元数据写入]
-        CL[Cleanup<br/>清理临时文件]
+        SB["SponsorBlock 跳过广告"]
+        TE["ThumbnailEmbed 封面嵌入"]
+        ME["MetadataEmbed 元数据写入"]
+        CL["Cleanup 清理临时文件"]
     end
     
     subgraph Output["输出"]
-        OF[最终文件<br/>xxx.mp4]
+        OF["最终文件 xxx.mp4"]
     end
     
     VF --> SB
@@ -981,20 +981,20 @@ Cookie 配置存储在 `%TEMP%/fluentytdl_auth/auth_config.json`：
 ```mermaid
 flowchart TD
     subgraph Sources["日志来源"]
-        App[应用代码<br/>logger.info/error]
-        Worker[Worker 线程<br/>logger.debug]
-        Exception[未捕获异常<br/>sys.excepthook]
+        App["应用代码"]
+        Worker["Worker 线程"]
+        Exception["未捕获异常"]
     end
     
     subgraph Loguru["loguru 核心"]
-        Format[格式化器<br/>时间/级别/位置]
-        Filter[级别过滤]
+        Format["格式化器"]
+        Filter["级别过滤"]
     end
     
-    subgraph Sinks["输出目标 (Sinks)"]
-        Console[控制台 Sink<br/>INFO 及以上<br/>彩色输出]
-        File[文件 Sink<br/>DEBUG 及以上<br/>7天轮转]
-        Signal[Qt Signal Sink<br/>实时转发到 UI]
+    subgraph Sinks["输出目标 Sinks"]
+        Console["控制台 Sink INFO及以上"]
+        File["文件 Sink DEBUG及以上 7天轮转"]
+        Signal["Qt Signal Sink 实时转发到 UI"]
     end
     
     Sources --> Loguru
@@ -1169,14 +1169,14 @@ ZeroDivisionError: division by zero
 ```mermaid
 flowchart TB
     subgraph Tools["嵌入工具"]
-        AP[AtomicParsley<br/>MP4/M4A]
-        FF[FFmpeg<br/>MKV/WEBM]
-        MG[mutagen<br/>MP3/FLAC/OGG]
+        AP["AtomicParsley MP4/M4A"]
+        FF["FFmpeg MKV/WEBM"]
+        MG["mutagen MP3/FLAC/OGG"]
     end
     
     subgraph Formats["支持格式"]
-        Video[MP4, MKV, WEBM, MOV]
-        Audio[MP3, M4A, FLAC, OGG, OPUS]
+        Video["MP4, MKV, WEBM, MOV"]
+        Audio["MP3, M4A, FLAC, OGG, OPUS"]
     end
     
     Video --> AP
@@ -1214,17 +1214,17 @@ flowchart TB
 ```mermaid
 graph TB
     subgraph MainProcess["主进程"]
-        GUI[GUI 主线程<br/>事件循环]
-        W1[Worker 1<br/>下载线程]
-        W2[Worker 2<br/>下载线程]
-        W3[Worker 3<br/>下载线程]
+        GUI["GUI 主线程 事件循环"]
+        W1["Worker 1 下载线程"]
+        W2["Worker 2 下载线程"]
+        W3["Worker 3 下载线程"]
     end
     
     subgraph SubProcesses["子进程"]
-        YTDLP1[yt-dlp 1]
-        YTDLP2[yt-dlp 2]
-        FFMPEG[ffmpeg]
-        POT[pot-provider<br/>后台服务]
+        YTDLP1["yt-dlp 1"]
+        YTDLP2["yt-dlp 2"]
+        FFMPEG["ffmpeg"]
+        POT["pot-provider 后台服务"]
     end
     
     GUI --> W1
