@@ -1369,19 +1369,19 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    Start[用户点击更新] --> Download[DownloaderWorker.start]
+    Start["用户点击更新"] --> Download["DownloaderWorker.start"]
     
-    Download --> Progress{下载进度}
-    Progress -->|更新| UI[progress_signal: 45%]
-    Progress -->|完成| Handle{文件类型}
+    Download --> Progress{"下载进度"}
+    Progress -->|更新| UI["progress_signal: 45%"]
+    Progress -->|完成| Handle{"文件类型"}
     
-    Handle -->|.exe| Copy[直接复制到 bin/]
-    Handle -->|.zip| Unzip[解压到 bin/{component}/]
+    Handle -->|.exe| Copy["直接复制到 bin/"]
+    Handle -->|.zip| Unzip["解压到 bin/component/"]
     
-    Copy --> Success[finished_signal.emit]
+    Copy --> Success["finished_signal.emit"]
     Unzip --> Success
     
-    Success --> Refresh[刷新本地版本]
+    Success --> Refresh["刷新本地版本"]
 ```
 
 ---
