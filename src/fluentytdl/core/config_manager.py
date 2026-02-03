@@ -94,6 +94,15 @@ class ConfigManager:
         "embed_thumbnail": True,
         # embed_metadata: 是否嵌入元数据（标题、艺术家等）
         "embed_metadata": True,
+        
+        # SponsorBlock 设置
+        # sponsorblock_enabled: 是否启用 SponsorBlock 广告跳过功能
+        "sponsorblock_enabled": False,  # 默认关闭（避免意外修改视频）
+        # sponsorblock_categories: 要处理的类别列表
+        # 可选类别: sponsor, selfpromo, interaction, intro, outro, preview, music_offtopic, poi_highlight, filler
+        "sponsorblock_categories": ["sponsor", "selfpromo", "interaction"],
+        # sponsorblock_action: 处理动作 - remove: 移除片段, mark: 仅标记为章节
+        "sponsorblock_action": "remove",
     }
 
     def __new__(cls) -> "ConfigManager":

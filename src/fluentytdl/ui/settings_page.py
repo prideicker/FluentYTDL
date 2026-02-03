@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout
 
 from qfluentwidgets import (
+    CheckBox,
     ComboBox,
     FluentIcon,
     HyperlinkCard,
@@ -775,6 +776,41 @@ class SettingsPage(ScrollArea):
 
         self.postprocessGroup.addSettingCard(self.embedThumbnailCard)
         self.postprocessGroup.addSettingCard(self.embedMetadataCard)
+        
+        # === SponsorBlock 广告跳过 ===
+        # 主开关
+        self.sponsorBlockCard = InlineSwitchCard(
+            FluentIcon.CANCEL,
+            "SponsorBlock 广告跳过",
+            "自动跳过视频中的赞助广告、自我推广等片段（基于社区标注）",
+            parent=self.postprocessGroup,
+        )
+        self.sponsorBlockCard.checkedChanged.connect(self._on_sponsorblock_changed)
+        
+        # 类别选择（点击按钮打开对话框）
+        self.sponsorBlockCategoriesCard = SettingCard(
+            FluentIcon.SETTING,
+            "跳过类别设置",
+            self._get_sponsorblock_categories_text(),
+            parent=self.postprocessGroup,
+        )
+        
+        # 添加选择按钮
+        self._sponsorBlockCategoriesBtn = PushButton("选择类别")
+        self._sponsorBlockCategoriesBtn.clicked.connect(self._show_sponsorblock_categories_dialog)
+        self.sponsorBlockCategoriesCard.hBoxLayout.addWidget(self._sponsorBlockCategoriesBtn)
+        self.sponsorBlockCategoriesCard.hBoxLayout.addSpacing(16)
+        
+        # 类别复选框容器（用于对话框）
+        self._sponsorblock_checkboxes: dict[str, CheckBox] = {}
+        
+        # 添加到组
+        self.postprocessGroup.addSettingCard(self.sponsorBlockCard)
+        self.postprocessGroup.addSettingCard(self.sponsorBlockCategoriesCard)
+        
+        # 缩进类别卡片
+        self._indent_setting_card(self.sponsorBlockCategoriesCard)
+        
         self.expandLayout.addWidget(self.postprocessGroup)
 
     def _init_about_group(self) -> None:
@@ -990,6 +1026,16 @@ class SettingsPage(ScrollArea):
         self.embedMetadataCard.switchButton.setChecked(embed_metadata)
         self.embedMetadataCard.switchButton.blockSignals(False)
 
+        # SponsorBlock: enabled switch
+        sponsorblock_enabled = bool(config_manager.get("sponsorblock_enabled", False))
+        self.sponsorBlockCard.switchButton.blockSignals(True)
+        self.sponsorBlockCard.switchButton.setChecked(sponsorblock_enabled)
+        self.sponsorBlockCard.switchButton.blockSignals(False)
+        
+        # SponsorBlock: 更新类别卡片描述和可见性
+        self.sponsorBlockCategoriesCard.setContent(self._get_sponsorblock_categories_text())
+        self._update_sponsorblock_categories_visibility(sponsorblock_enabled)
+
     def _on_update_source_changed(self, index: int) -> None:
         source = "ghproxy" if index == 1 else "github"
         config_manager.set("update_source", source)
@@ -1045,6 +1091,142 @@ class SettingsPage(ScrollArea):
             duration=5000,
             parent=self,
         )
+
+    def _on_sponsorblock_changed(self, checked: bool) -> None:
+        """处理 SponsorBlock 开关变更"""
+        config_manager.set("sponsorblock_enabled", bool(checked))
+        self._update_sponsorblock_categories_visibility(checked)
+        
+        if checked:
+            categories = config_manager.get("sponsorblock_categories", [])
+            if categories:
+                cat_names = {
+                    "sponsor": "赞助广告",
+                    "selfpromo": "自我推广",
+                    "interaction": "互动提醒",
+                    "intro": "片头",
+                    "outro": "片尾",
+                    "preview": "预告",
+                    "filler": "填充内容",
+                    "music_offtopic": "非音乐部分",
+                }
+                cat_display = ", ".join(cat_names.get(c, c) for c in categories[:3])
+                if len(categories) > 3:
+                    cat_display += f" 等 {len(categories)} 项"
+                InfoBar.success(
+                    "SponsorBlock 已启用",
+                    f"将跳过: {cat_display}",
+                    duration=5000,
+                    parent=self,
+                )
+            else:
+                InfoBar.warning(
+                    "SponsorBlock 已启用",
+                    "请在下方选择要跳过的类别",
+                    duration=5000,
+                    parent=self,
+                )
+        else:
+            InfoBar.info(
+                "SponsorBlock 已关闭",
+                "视频将保留原始内容",
+                duration=3000,
+                parent=self,
+            )
+    
+    def _update_sponsorblock_categories_visibility(self, visible: bool) -> None:
+        """更新 SponsorBlock 类别卡片的可见性"""
+        self.sponsorBlockCategoriesCard.setVisible(visible)
+    
+    def _get_sponsorblock_categories_text(self) -> str:
+        """获取当前选中的 SponsorBlock 类别的描述文本"""
+        categories = config_manager.get("sponsorblock_categories", ["sponsor", "selfpromo", "interaction"])
+        cat_names = {
+            "sponsor": "赞助广告",
+            "selfpromo": "自我推广", 
+            "interaction": "互动提醒",
+            "intro": "片头",
+            "outro": "片尾",
+            "preview": "预告",
+            "filler": "填充内容",
+            "music_offtopic": "非音乐部分",
+        }
+        if not categories:
+            return "未选择任何类别"
+        names = [cat_names.get(c, c) for c in categories]
+        if len(names) <= 3:
+            return "已选择: " + ", ".join(names)
+        return f"已选择 {len(names)} 个类别: " + ", ".join(names[:2]) + " 等"
+    
+    def _show_sponsorblock_categories_dialog(self) -> None:
+        """显示 SponsorBlock 类别选择对话框"""
+        from qfluentwidgets import MessageBox
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+        
+        # 类别定义
+        sponsorblock_categories = [
+            ("sponsor", "赞助广告", "视频中的付费推广内容"),
+            ("selfpromo", "自我推广", "频道推广、社交媒体链接等"),
+            ("interaction", "互动提醒", "订阅、点赞、评论提醒"),
+            ("intro", "片头", "视频开头的固定片头"),
+            ("outro", "片尾", "视频结尾的固定片尾"),
+            ("preview", "预告", "视频中的预告片段"),
+            ("filler", "填充内容", "与主题无关的闲聊内容"),
+            ("music_offtopic", "非音乐部分", "音乐视频中的非音乐内容"),
+        ]
+        
+        # 获取当前选中的类别
+        current_categories = set(config_manager.get("sponsorblock_categories", []))
+        
+        # 创建对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle("选择要跳过的片段类型")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # 创建复选框
+        checkboxes: dict[str, CheckBox] = {}
+        for cat_id, cat_name, cat_desc in sponsorblock_categories:
+            checkbox = CheckBox(f"{cat_name} - {cat_desc}", dialog)
+            checkbox.setChecked(cat_id in current_categories)
+            layout.addWidget(checkbox)
+            checkboxes[cat_id] = checkbox
+        
+        # 添加按钮
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            dialog
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        # 显示对话框
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 保存选中的类别
+            selected = [cat_id for cat_id, cb in checkboxes.items() if cb.isChecked()]
+            config_manager.set("sponsorblock_categories", selected)
+            
+            # 更新卡片描述
+            self.sponsorBlockCategoriesCard.setContent(self._get_sponsorblock_categories_text())
+            
+            if selected:
+                InfoBar.success(
+                    "类别已更新",
+                    f"已选择 {len(selected)} 个类别",
+                    duration=3000,
+                    parent=self,
+                )
+            else:
+                InfoBar.warning(
+                    "未选择类别",
+                    "请至少选择一个要跳过的类别",
+                    duration=5000,
+                    parent=self,
+                )
 
     def _on_proxy_mode_changed(self, index: int) -> None:
         modes = ["off", "system", "http", "socks5"]

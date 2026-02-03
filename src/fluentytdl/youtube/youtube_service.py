@@ -338,6 +338,21 @@ class YoutubeService:
             if embed_metadata:
                 postprocessors.append({"key": "FFmpegMetadata"})
 
+        # === SponsorBlock 广告跳过 ===
+        sponsorblock_enabled = config_manager.get("sponsorblock_enabled", False)
+        if sponsorblock_enabled:
+            categories = config_manager.get("sponsorblock_categories", ["sponsor", "selfpromo", "interaction"])
+            action = config_manager.get("sponsorblock_action", "remove")
+            
+            if categories:  # 确保有选中的类别
+                if action == "mark":
+                    ydl_opts["sponsorblock_mark"] = categories
+                    self._emit_log("info", f"🚫 SponsorBlock 已启用: 将标记以下类别为章节: {', '.join(categories)}")
+                else:
+                    # 默认为 remove
+                    ydl_opts["sponsorblock_remove"] = categories
+                    self._emit_log("info", f"🚫 SponsorBlock 已启用: 将移除以下类别: {', '.join(categories)}")
+
         return ydl_opts
 
     def _maybe_configure_youtube_js_runtime(self, ydl_opts: dict[str, Any]) -> None:
