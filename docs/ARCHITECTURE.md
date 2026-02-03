@@ -738,16 +738,16 @@ Cookie 认证系统是解锁会员内容、年龄限制视频的核心。由两�
 
 ```mermaid
 flowchart TB
-    subgraph Problem["❌ 直接使用 yt-dlp --cookies-from-browser 的问题"]
-        P1[浏览器运行时<br/>数据库被锁定]
-        P2[每次下载都重新提取<br/>性能低下]
-        P3[无法追踪来源<br/>混用不同浏览器]
+    subgraph Problem["直接使用 yt-dlp cookies-from-browser 的问题"]
+        P1["浏览器运行时数据库被锁定"]
+        P2["每次下载都重新提取性能低下"]
+        P3["无法追踪来源混用不同浏览器"]
     end
     
-    subgraph Solution["✅ AuthService + CookieSentinel 方案"]
-        S1[独立提取到文件<br/>避免锁定]
-        S2[缓存机制<br/>5分钟有效]
-        S3[元数据追踪<br/>来源可溯]
+    subgraph Solution["AuthService + CookieSentinel 方案"]
+        S1["独立提取到文件避免锁定"]
+        S2["缓存机制5分钟有效"]
+        S3["元数据追踪来源可溯"]
     end
     
     Problem -->|重构| Solution
