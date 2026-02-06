@@ -74,20 +74,13 @@ jobs:
         run: python scripts/fetch_tools.py --force
 
       # ========================================
-      # 3. 安装 Inno Setup
+      # 3. 安装 Inno Setup (使用 Chocolatey)
       # ========================================
       - name: "📦 安装 Inno Setup"
         shell: pwsh
         run: |
-          # 下载 Inno Setup 6 静默安装
-          $innoUrl = "https://jrsoftware.org/download.php/is.exe"
-          $innoInstaller = "$env:RUNNER_TEMP\innosetup.exe"
-          
-          Write-Host "下载 Inno Setup..."
-          Invoke-WebRequest -Uri $innoUrl -OutFile $innoInstaller -UseBasicParsing
-          
-          Write-Host "安装 Inno Setup..."
-          Start-Process -FilePath $innoInstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          Write-Host "使用 Chocolatey 安装 Inno Setup..."
+          choco install innosetup -y --no-progress
           
           # 验证安装
           $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
