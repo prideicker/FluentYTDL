@@ -19,7 +19,7 @@ from qfluentwidgets import (
     StrongBodyLabel,
 )
 
-from ...core.workers import DownloadWorker
+from ...download.workers import DownloadWorker
 from ...utils.image_loader import ImageLoader
 from .download_card import _format_bytes, _format_time, _strip_ansi
 
@@ -320,6 +320,8 @@ class DownloadItemWidget(CardWidget):
             parent=self.window(),
             position=InfoBarPosition.TOP_RIGHT,
         )
+        # === 写入历史记录 ===
+        self._write_history()
 
     def on_error(self, err_data: dict) -> None:
         self.set_state("error")
@@ -422,11 +424,53 @@ class DownloadItemWidget(CardWidget):
             self.resume_requested.emit(self)
         
     def load_thumbnail(self, path: str) -> None:
+        self._thumbnail_url = path
         self.image_loader.load(path)
 
     def _on_thumb_loaded(self, pixmap) -> None:
         if pixmap and not pixmap.isNull():
             self.iconLabel.setPixmap(pixmap)
+
+    def _write_history(self) -> None:
+        """下载完成后写入历史记录"""
+        try:
+            from ...storage.history_service import history_service, extract_video_id
+
+            output = self._output_path or getattr(self.worker, "output_path", None) or ""
+            # 找到最终合并后的文件
+            if not output:
+                for p in getattr(self.worker, "dest_paths", set()):
+                    if p and os.path.isfile(p):
+                        output = p
+                        break
+
+            if not output:
+                return
+
+            # 推断格式备注
+            fmt = self.opts.get("format", "")
+            fmt_note = ""
+            if "1080" in fmt:
+                fmt_note = "1080p"
+            elif "720" in fmt:
+                fmt_note = "720p"
+            elif "480" in fmt:
+                fmt_note = "480p"
+            ext = os.path.splitext(output)[1].lstrip(".").upper()
+            if ext:
+                fmt_note = f"{fmt_note} {ext}".strip()
+
+            history_service.add(
+                url=self.url,
+                title=self.title_text,
+                output_path=output,
+                video_id=extract_video_id(self.url),
+                thumbnail_url=getattr(self, "_thumbnail_url", ""),
+                format_note=fmt_note,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"写入历史记录失败: {e}")
 
     def on_delete_clicked(self) -> None:
         self.remove_requested.emit(self)

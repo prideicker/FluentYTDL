@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""
+Git Pre-commit Hook - 版本一致性检查
+
+在提交前自动检查版本号是否一致
+"""
+
+import sys
+from pathlib import Path
+
+# 添加 scripts 目录到路径
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+
+try:
+    from version_manager import VersionManager
+    
+    manager = VersionManager()
+    
+    # 如果版本号不一致，阻止提交
+    if not manager.check_consistency():
+        print("\n❌ 提交已阻止：版本号不一致")
+        print("\n修复方法:")
+        print("  1. 运行: python scripts/version_manager.py check")
+        print("  2. 运行: python scripts/version_manager.py set <版本号>")
+        print("  3. 重新提交")
+        sys.exit(1)
+    
+    print("✅ 版本号检查通过\n")
+    sys.exit(0)
+
+except ImportError:
+    # 如果找不到版本管理器，跳过检查
+    print("⚠️  跳过版本检查（未找到 version_manager.py）")
+    sys.exit(0)
+except Exception as e:
+    print(f"⚠️  版本检查失败: {e}")
+    print("   继续提交...")
+    sys.exit(0)

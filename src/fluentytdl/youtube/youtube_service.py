@@ -202,7 +202,7 @@ class YoutubeService:
         else:
             # 2. 通过 Cookie Sentinel 获取统一的 bin/cookies.txt
             try:
-                from ..core.cookie_sentinel import cookie_sentinel
+                from ..auth.cookie_sentinel import cookie_sentinel
                 
                 sentinel_cookie_file = cookie_sentinel.get_cookie_file_path()
                 
@@ -261,29 +261,70 @@ class YoutubeService:
         else:
             self._emit_log("info", "🚀 Cookies 模式激活：使用 Web 默认客户端获取更完整的格式列表")
 
-        # --- Optional: YouTube PO Token ---
+        # --- POT Provider 服务集成 ---
+        # POT (Proof of Origin Token) Provider 提供动态 PO Token 生成服务
+        # 类似 Cookie Sentinel 的策略：检测服务状态，自动注入 extractor_args
+        pot_injected = False
+        if config_manager.get("pot_provider_enabled", True):
+            try:
+                from .pot_manager import pot_manager
+                
+                if pot_manager.is_running():
+                    pot_extractor_args = pot_manager.get_extractor_args()
+                    if pot_extractor_args:
+                        # pot_extractor_args 格式: "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416"
+                        # 需要解析并注入到 extractor_args
+                        extractor_args = cast(dict[str, Any], ydl_opts.setdefault("extractor_args", {}))
+                        
+                        # 解析 "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416"
+                        if ":" in pot_extractor_args:
+                            ie_key, args_str = pot_extractor_args.split(":", 1)
+                            pot_args: dict[str, Any] = extractor_args.setdefault(ie_key, {})
+                            
+                            # 解析 "base_url=http://127.0.0.1:4416"
+                            for part in args_str.split(";"):
+                                if "=" in part:
+                                    k, v = part.split("=", 1)
+                                    pot_args[k] = [v]
+                            
+                            pot_injected = True
+                            self._emit_log(
+                                "info",
+                                f"🛡️ POT Provider 已激活: 端口 {pot_manager.active_port} (自动绕过机器人检测)",
+                            )
+                else:
+                    self._emit_log(
+                        "warning",
+                        "⚠️ POT Provider 服务未运行，本次下载将不使用 PO Token（可能触发限速）",
+                    )
+            except Exception as e:
+                self._emit_log("debug", f"POT Provider 检测失败: {e}")
+
+        # --- Optional: 手动 YouTube PO Token (备用方案) ---
+        # 如果 POT Provider 未启用或未运行，用户可以手动配置静态 PO Token
         # Context: YouTube is rolling out PO Token enforcement. yt-dlp recommends using
         # the `mweb` client together with a PO Token when default clients fail.
-        po_token = str(config_manager.get("youtube_po_token") or "").strip()
-        if po_token:
-            extractor_args = cast(dict[str, Any], ydl_opts.setdefault("extractor_args", {}))
-            youtube_args = cast(dict[str, Any], extractor_args.setdefault("youtube", {}))
+        if not pot_injected:
+            po_token = str(config_manager.get("youtube_po_token") or "").strip()
+            if po_token:
+                extractor_args = cast(dict[str, Any], ydl_opts.setdefault("extractor_args", {}))
+                youtube_args = cast(dict[str, Any], extractor_args.setdefault("youtube", {}))
 
-            # PO Token for mweb.gvs is typically session-bound; cookies are usually required.
-            if not has_valid_cookie:
-                self._emit_log(
-                    "warning",
-                    "已配置 PO Token，但当前未加载有效 Cookies。mweb.gvs PO Token 通常需要配合 cookies 使用。",
-                )
+                # PO Token for mweb.gvs is typically session-bound; cookies are usually required.
+                if not has_valid_cookie:
+                    self._emit_log(
+                        "warning",
+                        "已配置 PO Token，但当前未加载有效 Cookies。mweb.gvs PO Token 通常需要配合 cookies 使用。",
+                    )
 
-            # Prefer adding mweb as a fallback client when token is present.
-            # Use a single comma-separated value to match yt-dlp syntax.
-            youtube_args["player_client"] = ["default,mweb"]
-            youtube_args["po_token"] = [po_token]
-            # Remove aggressive skips that are intended for no-cookie mobile simulation.
-            # With PO Token, we want the most browser-like, complete extraction.
-            youtube_args.pop("player_skip", None)
-            self._emit_log("info", "🔐 已注入 YouTube PO Token：将优先尝试 mweb 客户端")
+                # Prefer adding mweb as a fallback client when token is present.
+                # Use a single comma-separated value to match yt-dlp syntax.
+                youtube_args["player_client"] = ["default,mweb"]
+                youtube_args["po_token"] = [po_token]
+                # Remove aggressive skips that are intended for no-cookie mobile simulation.
+                # With PO Token, we want the most browser-like, complete extraction.
+                youtube_args.pop("player_skip", None)
+                self._emit_log("info", "🔐 已注入手动 PO Token：将优先尝试 mweb 客户端")
 
         # FFmpeg location
         ffmpeg_path = str(config_manager.get("ffmpeg_path") or "").strip()

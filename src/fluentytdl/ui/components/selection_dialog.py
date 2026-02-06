@@ -37,8 +37,8 @@ from qfluentwidgets import (
 )
 
 
-from ...core.workers import EntryDetailWorker, InfoExtractWorker
-from ...core.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
+from ...download.workers import EntryDetailWorker, InfoExtractWorker
+from ...youtube.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
 from ...utils.image_loader import ImageLoader
 from .format_selector import VideoFormatSelectorWidget
 

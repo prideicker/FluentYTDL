@@ -35,11 +35,12 @@ from qfluentwidgets import (
 from .components.download_item_widget import DownloadItemWidget
 from .components.clipboard_monitor import ClipboardMonitor
 from .parse_page import ParsePage
+from .pages.history_page import HistoryPage
 from .settings_page import SettingsPage
 from .unified_task_list_page import UnifiedTaskListPage
 from .welcome_wizard import WelcomeWizardDialog
 from .help_window import HelpWindow
-from ..core.download_manager import download_manager
+from ..download.download_manager import download_manager
 from ..core.config_manager import config_manager
 from ..utils.logger import logger
 from ..utils.paths import resource_path
@@ -156,6 +157,7 @@ class MainWindow(FluentWindow):
         # === 初始化页面 ===
         # 统一任务列表页面（替代原有的四个分页）
         self.task_page = UnifiedTaskListPage(self)
+        self.history_page = HistoryPage(self)
         
         self.parse_page = ParsePage(self)
         self.settings_interface = SettingsPage(self)
@@ -185,6 +187,10 @@ class MainWindow(FluentWindow):
         self.task_page.card_remove_requested.connect(self.on_remove_card)
         self.task_page.card_resume_requested.connect(self.on_resume_card)
 
+        # 历史记录实时更新
+        from ..storage.history_service import on_history_added
+        on_history_added(self._on_history_record_added)
+
         # === 标题栏扩展 ===
         self.init_title_bar()
 
@@ -209,6 +215,14 @@ class MainWindow(FluentWindow):
             self.task_page,
             FluentIcon.DOWNLOAD,
             "任务列表",
+            position=NavigationItemPosition.TOP
+        )
+
+        # 3. 下载历史
+        self.addSubInterface(
+            self.history_page,
+            FluentIcon.HISTORY,
+            "下载历史",
             position=NavigationItemPosition.TOP
         )
 
@@ -828,6 +842,13 @@ class MainWindow(FluentWindow):
         if os.path.exists(path):
             os.startfile(path)
 
+    def _on_history_record_added(self, record) -> None:
+        """历史记录新增时实时更新历史页面"""
+        try:
+            self.history_page.add_record(record)
+        except Exception:
+            pass
+
     def init_title_bar(self):
         # 在标题栏添加帮助按钮
         # Parent MUST be titleBar to ensure correct z-order and event handling
@@ -880,8 +901,8 @@ class MainWindow(FluentWindow):
     
     def on_admin_mode_cookie_refresh(self):
         """管理员模式启动后自动刷新Cookie"""
-        from ..core.cookie_sentinel import cookie_sentinel
-        from ..core.auth_service import auth_service, AuthSourceType
+        from ..auth.cookie_sentinel import cookie_sentinel
+        from ..auth.auth_service import auth_service, AuthSourceType
         from ..utils.logger import logger
         
         # 只在配置了浏览器来源时刷新
@@ -937,8 +958,8 @@ class MainWindow(FluentWindow):
     def check_cookie_status(self):
         """检查Cookie提取状态，如果失败则提示用户"""
         try:
-            from ..core.cookie_sentinel import cookie_sentinel
-            from ..core.auth_service import auth_service, AuthSourceType
+            from ..auth.cookie_sentinel import cookie_sentinel
+            from ..auth.auth_service import auth_service, AuthSourceType
             from ..utils.admin_utils import is_admin
             
             # 只在配置了浏览器来源时检查
@@ -952,7 +973,7 @@ class MainWindow(FluentWindow):
             browser_name = auth_service.current_source_display
             
             # 检查是否是 Chromium 内核浏览器且非管理员 - 弹出对话框
-            from ..core.auth_service import ADMIN_REQUIRED_BROWSERS
+            from ..auth.auth_service import ADMIN_REQUIRED_BROWSERS
             if current_source in ADMIN_REQUIRED_BROWSERS and not is_admin():
                 # Cookie不存在或过期时才提示
                 if not cookie_sentinel.exists or cookie_sentinel.is_stale:

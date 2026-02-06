@@ -30,7 +30,7 @@ from qfluentwidgets import (
 )
 
 from ..core.config_manager import config_manager
-from ..core.yt_dlp_cli import resolve_yt_dlp_exe, run_version
+from ..youtube.yt_dlp_cli import resolve_yt_dlp_exe, run_version
 from ..utils.paths import find_bundled_executable, is_frozen
 from ..utils.logger import LOG_DIR
 from .components.smart_setting_card import SmartSettingCard
@@ -50,8 +50,8 @@ class CookieRefreshWorker(QThread):
     
     def run(self):
         """在Qt线程中执行Cookie刷新"""
-        from ..core.cookie_sentinel import cookie_sentinel
-        from ..core.auth_service import auth_service
+        from ..auth.cookie_sentinel import cookie_sentinel
+        from ..auth.auth_service import auth_service
         from ..utils.logger import logger
         
         success = False
@@ -930,7 +930,7 @@ class SettingsPage(ScrollArea):
         self.proxyEditCard.lineEdit.setText(str(config_manager.get("proxy_url") or "127.0.0.1:7890"))
 
         # Cookie 配置从 auth_service 加载
-        from ..core.auth_service import auth_service, AuthSourceType
+        from ..auth.auth_service import auth_service, AuthSourceType
         
         current_source = auth_service.current_source
         
@@ -1252,7 +1252,7 @@ class SettingsPage(ScrollArea):
 
     def _on_cookie_mode_changed(self, index: int) -> None:
         """Cookie 模式切换：0=浏览器提取, 1=手动文件"""
-        from ..core.auth_service import auth_service, AuthSourceType
+        from ..auth.auth_service import auth_service, AuthSourceType
         
         if index == 0:
             # 浏览器提取模式
@@ -1295,7 +1295,7 @@ class SettingsPage(ScrollArea):
 
     def _on_cookie_browser_changed(self, index: int) -> None:
         """浏览器选择变化 - 自动提取新浏览器的 Cookies"""
-        from ..core.auth_service import auth_service, AuthSourceType
+        from ..auth.auth_service import auth_service, AuthSourceType
         from ..utils.admin_utils import is_admin
         from qfluentwidgets import MessageBox
         
@@ -1317,7 +1317,7 @@ class SettingsPage(ScrollArea):
             source, name = browser_map[index]
             
             # Chromium 内核浏览器 v130+ 需要管理员权限
-            from ..core.auth_service import ADMIN_REQUIRED_BROWSERS
+            from ..auth.auth_service import ADMIN_REQUIRED_BROWSERS
             if source in ADMIN_REQUIRED_BROWSERS and not is_admin():
                 box = MessageBox(
                     f"{name} 需要管理员权限",
@@ -1413,14 +1413,14 @@ class SettingsPage(ScrollArea):
 
     def _on_refresh_cookie_clicked(self):
         """手动刷新 Cookie 按钮点击"""
-        from ..core.auth_service import auth_service
+        from ..auth.auth_service import auth_service
         from ..utils.admin_utils import is_admin
         from qfluentwidgets import MessageBox
         
         current_source = auth_service.current_source
         
         # 检查是否是 Chromium 内核浏览器且非管理员 - 直接提示重启
-        from ..core.auth_service import ADMIN_REQUIRED_BROWSERS
+        from ..auth.auth_service import ADMIN_REQUIRED_BROWSERS
         if current_source in ADMIN_REQUIRED_BROWSERS and not is_admin():
             browser_name = auth_service.current_source_display
             
@@ -1512,8 +1512,8 @@ class SettingsPage(ScrollArea):
     
     def _select_cookie_file(self):
         """选择 Cookie 文件并导入到 bin/cookies.txt"""
-        from ..core.auth_service import auth_service, AuthSourceType
-        from ..core.cookie_sentinel import cookie_sentinel
+        from ..auth.auth_service import auth_service, AuthSourceType
+        from ..auth.cookie_sentinel import cookie_sentinel
         import shutil
         
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1565,7 +1565,7 @@ class SettingsPage(ScrollArea):
     
     def _open_cookie_location(self):
         """打开 Cookie 文件所在位置"""
-        from ..core.cookie_sentinel import cookie_sentinel
+        from ..auth.cookie_sentinel import cookie_sentinel
         import subprocess
         import os
         
@@ -1590,7 +1590,7 @@ class SettingsPage(ScrollArea):
     def _update_cookie_status(self):
         """更新 Cookie 状态显示"""
         try:
-            from ..core.cookie_sentinel import cookie_sentinel
+            from ..auth.cookie_sentinel import cookie_sentinel
             
             info = cookie_sentinel.get_status_info()
             cookie_path = cookie_sentinel.cookie_path

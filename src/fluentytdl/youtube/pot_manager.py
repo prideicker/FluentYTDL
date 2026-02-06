@@ -22,7 +22,7 @@ from typing import Optional
 
 from loguru import logger
 
-from fluentytdl.utils.paths import find_bundled_executable, frozen_app_dir
+from ..utils.paths import find_bundled_executable, frozen_app_dir
 
 
 class POTManager:
@@ -232,8 +232,21 @@ class POTManager:
     def stop_server(self):
         """停止 POT 服务"""
         with self._lock:
+            # 防止重复停止（如果进程已经不存在了）
+            if not self._is_running and self._process is None:
+                logger.debug("POT Manager: 服务未运行，跳过停止操作")
+                return
+            
             if self._process:
                 try:
+                    # 检查进程是否已经终止
+                    if self._process.poll() is not None:
+                        logger.debug("POT Manager: 进程已终止，跳过停止操作")
+                        self._process = None
+                        self._is_running = False
+                        self._active_port = 0
+                        return
+                    
                     self._process.terminate()
                     self._process.wait(timeout=2)
                 except Exception:

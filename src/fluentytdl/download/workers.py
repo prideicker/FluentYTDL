@@ -9,8 +9,8 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-from ..core.youtube_service import YoutubeServiceOptions, youtube_service
-from ..core.yt_dlp_cli import YtDlpCancelled, prepare_yt_dlp_env, ydl_opts_to_cli_args
+from ..youtube.youtube_service import YoutubeServiceOptions, youtube_service
+from ..youtube.yt_dlp_cli import YtDlpCancelled, prepare_yt_dlp_env, ydl_opts_to_cli_args
 from ..core.config_manager import config_manager
 from ..processing.thumbnail_embed import can_embed_thumbnail, get_unsupported_formats_warning
 from ..processing.thumbnail_embedder import thumbnail_embedder
@@ -116,8 +116,10 @@ class DownloadWorker(QThread):
         self.download_dir: str | None = None
         # Best-effort: all destination paths seen in yt-dlp output.
         # This is important for paused/cancelled tasks where final output_path may be unknown.
-        self.dest_paths: set[str] = set()
-
+        self.dest_paths: set[str] = set()        # 格式选择状态追踪（防止格式自动降级到音频）
+        self._original_format: str | None = None
+        self._ssl_error_count = 0
+        self._format_warning_shown = False  # 防止重复警告
     _re_progress_full = re.compile(
         r"^\[download\]\s+(?P<pct>\d+(?:\.\d+)?)%\s+of\s+~?(?P<total>[\d\.]+)(?P<tunit>[KMGTPE]i?B)\s+at\s+(?P<speed>[\d\.]+)(?P<sunit>[KMGTPE]i?B)/s\s+ETA\s+(?P<eta>\d{1,2}:\d{2}(?::\d{2})?)",
         re.IGNORECASE,
@@ -175,6 +177,11 @@ class DownloadWorker(QThread):
             base_opts = youtube_service.build_ydl_options()
             merged = dict(base_opts)
             merged.update(self.opts)
+            
+            # 保存原始格式选择（用于错误恢复）
+            self._original_format = merged.get("format")
+            if self._original_format:
+                logger.info("原始格式选择已保存: {}", self._original_format)
             
             # DEBUG: 记录音频处理相关选项
             logger.debug("DownloadWorker options - postprocessors: {}", merged.get("postprocessors"))
@@ -453,6 +460,22 @@ class DownloadWorker(QThread):
                             except Exception:
                                 eta = None
 
+                    # === 格式验证：检测是否降级到纯音频 ===
+                    # 注意：对于 bv*+ba 格式，yt-dlp 会分别下载视频和音频流，
+                    # 在音频流下载阶段看到 vcodec=none 是正常的，不应该警告
+                    if not self._format_warning_shown and self._original_format and total > 0:
+                        pct = (downloaded / total) * 100.0
+                        # 只有当原始选择包含视频格式（bv），但当前是纯音频且进度超过50%时才警告
+                        if ("bv" in self._original_format.lower() and 
+                            vcodec in ("", "NA", "none") and 
+                            acodec not in ("", "NA", "none") and 
+                            pct > 50.0):
+                            logger.warning("[FormatDownload] 🔴 格式降级警告！")
+                            logger.warning("[FormatDownload] 原始选择: {}", self._original_format)
+                            logger.warning("[FormatDownload] 当前下载: vcodec={}, acodec={}", vcodec, acodec)
+                            self.status_msg.emit("⚠️ 检测到格式降级：原始选择了视频，但现在仅下载音频！请检查网络或重新选择格式")
+                            self._format_warning_shown = True  # 只警告一次
+
                     self.progress.emit(
                         {
                             "status": "downloading",
@@ -570,9 +593,25 @@ class DownloadWorker(QThread):
         if rc and rc != 0:
             error_text = "\n".join(tail)
             
+            # === SSL错误和格式降级检测 ===
+            has_ssl_error = "EOF occurred in violation of protocol" in error_text or "_ssl.c" in error_text
+            has_format_fallback = "[download] ERROR:" in error_text and ("Requested format" in error_text or "format" in error_text.lower())
+            
+            if has_ssl_error:
+                self._ssl_error_count += 1
+                logger.warning("检测到SSL错误 (第 {} 次): {}", self._ssl_error_count, error_text[-200:])
+                
+                # SSL错误通常是网络抖动导致，建议用户重试，不要修改格式
+                self.status_msg.emit("⚠️ 检测到网络SSL错误，建议检查网络连接后重试")
+                
+            if has_format_fallback:
+                logger.warning("检测到格式降级！原始格式: {}", self._original_format)
+                # 发出警告但不中断，让用户看到真实的降级原因
+                self.status_msg.emit("⚠️ 原始格式不可用，yt-dlp正在选择备选格式")
+            
             # Cookie 错误检测：在抛出异常前检查是否为 Cookie 问题
             try:
-                from ..core.cookie_sentinel import cookie_sentinel
+                from ..auth.cookie_sentinel import cookie_sentinel
                 if cookie_sentinel.detect_cookie_error(error_text):
                     # 发送 Cookie 错误信号（供 UI 拦截）
                     self.cookie_error_detected.emit(error_text)
@@ -597,6 +636,52 @@ class DownloadWorker(QThread):
                 proc.terminate()
             except Exception:
                 pass
+    
+    def _validate_format_selection(self, format_str: str | None) -> str | None:
+        """
+        验证格式选择，防止自动降级到纯音频
+        
+        yt-dlp 的格式选择器会在优先选项失败时自动降级，但这可能导致从
+        视频+音频降级到纯音频。此方法检测并警告这种情况。
+        
+        Args:
+            format_str: yt-dlp format 参数字符串
+            
+        Returns:
+            原始格式字符串或经过验证的格式字符串
+        """
+        if not format_str or not isinstance(format_str, str):
+            return format_str
+        
+        # 检测纯音频格式的指示器
+        audio_only_keywords = [
+            "bestaudio",  # 纯最佳音频
+            "ba",         # 音频流简写（如果没有视频部分）
+            "aac",        # 音频编码
+            "mp3",        # 音频格式
+            "opus",       # 音频编码
+            "vorbis",     # 音频编码
+        ]
+        
+        # 检测视频格式的指示器  
+        video_keywords = ["bv", "video", "mp4", "webm", "mkv", "h264", "h265", "av01", "vp9"]
+        
+        fmt_lower = format_str.lower()
+        
+        # 如果格式包含视频指示符，说明包含视频流，是安全的
+        if any(kw in fmt_lower for kw in video_keywords):
+            logger.debug("[FormatValidator] 格式包含视频流: {}", format_str)
+            return format_str
+        
+        # 如果格式只有音频指示符且没有视频指示符，这是问题
+        if any(kw in fmt_lower for kw in audio_only_keywords):
+            logger.warning("[FormatValidator] ⚠️ 检测到纯音频格式! 原始格式: {}", self._original_format)
+            logger.warning("[FormatValidator] 当前格式: {}", format_str)
+            self.status_msg.emit("⚠️ 警告：下载格式已降级为纯音频！如果需要视频，请重新选择格式后重试")
+            return format_str
+        
+        logger.debug("[FormatValidator] 格式验证完成: {}", format_str)
+        return format_str
     
     def _embed_thumbnail_postprocess(self, opts: dict[str, Any]) -> None:
         """使用外置工具执行封面嵌入后处理"""

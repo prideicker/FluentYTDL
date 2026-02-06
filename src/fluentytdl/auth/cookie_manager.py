@@ -1,7 +1,7 @@
 """
 FluentYTDL Cookie 管理模块
 
-解决 Chrome Cookie 文件锁问题，支持：
+解决 Chrome Cookie 文件锁问题，支持:
 - 浏览器运行时提取 Cookie (使用 rookiepy)
 - 多账户管理
 - Netscape 格式导出 (yt-dlp 兼容)
@@ -53,7 +53,7 @@ class AuthProfile:
     name: str                          # 显示名称 (如 "YouTube 会员")
     platform: str                      # 平台标识 (youtube, bilibili)
     cookie_source: str                 # 来源 (chrome, edge, file)
-    cookie_path: str | None = None     # cookies.txt 路径 (仅 source=file)
+    cookie_path: str | None = None     # cookies.txt 路径 (当 source=file)
     user_agent: str | None = None      # 自定义 User-Agent
     enabled: bool = True               # 是否启用
     last_updated: str | None = None    # 最后更新时间
@@ -118,7 +118,7 @@ class CookieManager:
             RuntimeError: 提取失败
         """
         if not HAS_ROOKIEPY:
-            raise RuntimeError("rookiepy 未安装，请运行: pip install rookiepy")
+            raise RuntimeError("rookiepy 未安装，请运行 pip install rookiepy")
         
         browser = browser.lower()
         if browser not in SUPPORTED_BROWSERS:
@@ -133,7 +133,7 @@ class CookieManager:
                 raise RuntimeError(f"rookiepy 不支持 {browser}")
             
             cookies = extractor(domains)
-            logger.info(f"从 {browser} 提取了 {len(cookies)} 个 Cookie")
+            logger.info(f"从 {browser} 提取到 {len(cookies)} 个 Cookie")
             return cookies
             
         except Exception as e:
@@ -287,7 +287,7 @@ class CookieManager:
         return None
     
     def refresh_profile(self, profile: AuthProfile) -> bool:
-        """刷新配置的 Cookie"""
+        """刷新配置中的 Cookie"""
         try:
             if profile.cookie_source in SUPPORTED_BROWSERS:
                 domains = PLATFORM_DOMAINS.get(profile.platform, [".youtube.com"])
@@ -323,7 +323,8 @@ class CookieManager:
             "profiles": [p.to_dict() for p in self._profiles.values()],
             "updated_at": datetime.now().isoformat(),
         }
-        self._profiles_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        with open(self._profiles_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, ensure_ascii=False, indent=2))
     
     def _load_profiles(self) -> None:
         """从文件加载配置"""
@@ -331,7 +332,8 @@ class CookieManager:
             return
         
         try:
-            data = json.loads(self._profiles_path.read_text(encoding="utf-8"))
+            with open(self._profiles_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
             for p_data in data.get("profiles", []):
                 profile = AuthProfile.from_dict(p_data)
                 key = f"{profile.platform}_{profile.name}"

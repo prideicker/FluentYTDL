@@ -23,8 +23,8 @@ from qfluentwidgets import (
     MessageBox,
 )
 
-from ...core.download_manager import download_manager
-from ...core.workers import DownloadWorker
+from ...download.download_manager import download_manager
+from ...download.workers import DownloadWorker
 from ...utils.image_loader import ImageLoader
 
 
@@ -246,7 +246,7 @@ class DownloadItemCard(CardWidget):
         """
         try:
             from .cookie_repair_dialog import CookieRepairDialog
-            from ...core.cookie_sentinel import cookie_sentinel
+            from ...auth.cookie_sentinel import cookie_sentinel
             
             # 创建修复对话框
             dialog = CookieRepairDialog(error_message, parent=self.window())

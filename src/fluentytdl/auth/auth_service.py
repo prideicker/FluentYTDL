@@ -1,20 +1,18 @@
 """
 FluentYTDL 统一身份验证服务
 
-重构后的核心设计：
+重构后的核心设计:
 - 所有 Cookie 处理统一走此服务
 - 用户在 UI 选择"来源"，底层全部转为文件路径
 - 彻底避免 yt-dlp --cookies-from-browser 的文件锁问题
 
-架构：
+架构:
   UI (选浏览器/文件) -> AuthService -> rookiepy/文件读取 -> 临时 cookies.txt -> yt-dlp --cookies
-
-注意：此文件为旧版本备份，当前使用 core/auth_service.py
-已移除子进程 UAC 提权逻辑，改用 restart_as_admin() 重启整个程序
 """
 
 from __future__ import annotations
 
+import ctypes
 import json
 import sys
 import tempfile
@@ -35,21 +33,20 @@ except ImportError:
     logger.warning("rookiepy 未安装，浏览器 Cookie 自动提取功能不可用")
 
 
-# ==================== Windows 提权辅助函数 ====================
+# ==================== Windows 管理员权限检查 ====================
 
 def is_admin() -> bool:
     """检查当前是否为管理员权限"""
     if sys.platform != "win32":
         return True  # 非 Windows 假设无需提权
     try:
-        import ctypes
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:
         return False
 
 
 def _is_appbound_error(error: Exception) -> bool:
-    """检测是否为 Chrome App-Bound 加密错误"""
+    """检测是否为 Chromium App-Bound 加密错误（需要管理员权限）"""
     err_str = str(error).lower()
     return (
         "admin" in err_str
@@ -57,10 +54,6 @@ def _is_appbound_error(error: Exception) -> bool:
         or "v130" in err_str
         or "decrypted only when running as admin" in err_str
     )
-
-
-# 注意：已移除子进程 UAC 提权逻辑 (_run_elevated_extractor)
-# 现在统一使用 utils.admin_utils.restart_as_admin() 重启整个程序获取管理员权限
 
 
 class AuthSourceType(str, Enum):
@@ -82,7 +75,8 @@ class AuthSourceType(str, Enum):
     FILE = "file"           # 手动导入的 cookies.txt
 
 
-# 浏览器类型列表（用于 UI 展示）
+# 浏览器类型列表（用于 UI 展示和逻辑判断）
+# Chromium 内核 v130+ 都需要管理员权限提取 Cookie
 BROWSER_SOURCES = [
     AuthSourceType.EDGE, AuthSourceType.CHROME, AuthSourceType.CHROMIUM,
     AuthSourceType.BRAVE, AuthSourceType.OPERA, AuthSourceType.OPERA_GX,
@@ -126,7 +120,7 @@ class AuthProfile:
     name: str                              # 显示名称
     platform: str = "youtube"              # 平台标识
     source_type: AuthSourceType = AuthSourceType.EDGE
-    file_path: str | None = None           # 仅 FILE 类型使用
+    file_path: str | None = None           # 当 FILE 类型使用
     cached_cookie_path: str | None = None  # 缓存的 cookie 文件路径
     enabled: bool = True
     last_updated: str | None = None
@@ -150,10 +144,10 @@ class AuthService:
     """
     统一身份验证服务
     
-    核心职责：
+    核心职责:
     1. 管理当前激活的验证源
     2. 按需提取/读取 Cookie 并生成临时文件
-    3. 为 yt-dlp 提供统一的 cookie 文件路径
+    3. 向 yt-dlp 提供统一的 cookie 文件路径
     """
     
     def __init__(self, cache_dir: Path | None = None):
@@ -226,17 +220,28 @@ class AuthService:
         """
         设置验证源
         
+        当来源变化时，会通知 CookieSentinel 清理旧的 Cookie 文件，
+        确保不会复用来自不同浏览器的旧 Cookie。
+        
         Args:
             source: 验证源类型
-            file_path: 仅 FILE 类型需要
+            file_path: 当 FILE 类型需要
             auto_refresh: 是否自动刷新
         """
+        old_source = self._current_source
+        
         self._current_source = source
         self._current_file_path = file_path if source == AuthSourceType.FILE else None
         self._auto_refresh = auto_refresh
         self._save_config()
         
         logger.info(f"验证源已设置: {self.current_source_display}")
+        
+        # 注意：不再立即清理旧 Cookie 文件
+        # 延迟到实际提取成功后再清理，避免提取失败时丢失旧 Cookie
+        if old_source != source:
+            logger.info(f"验证源变化: {old_source.value} -> {source.value}")
+            logger.info("将在下次成功提取后更新 Cookie 文件")
     
     def get_cookie_file_for_ytdlp(
         self,
@@ -360,7 +365,7 @@ class AuthService:
         # 缓存文件路径
         cache_file = self.cache_dir / f"cached_{browser}_{platform}.txt"
         
-        # 检查缓存是否足够新（5分钟内）
+        # 检查缓存是否足够新（5 分钟内）
         if not force_refresh and cache_file.exists():
             mtime = datetime.fromtimestamp(cache_file.stat().st_mtime)
             age_minutes = (datetime.now() - mtime).total_seconds() / 60
@@ -380,7 +385,7 @@ class AuthService:
                 raise RuntimeError(f"rookiepy 不支持 {browser}")
             
             cookies = extractor(domains)
-            logger.info(f"从 {browser} 提取了 {len(cookies)} 个 Cookie")
+            logger.info(f"从 {browser} 提取到 {len(cookies)} 个 Cookie")
             
         except Exception as e:
             logger.warning(f"直接提取失败: {e}")
@@ -390,7 +395,7 @@ class AuthService:
                 logger.info("检测到 Chrome v130+ App-Bound 加密，需要管理员权限")
                 
                 # 直接抛出 PermissionError，由 UI 层调用 restart_as_admin() 重启程序
-                browser_display = BROWSER_SOURCES.get(browser, browser.capitalize())
+                browser_display = self.current_source_display
                 self._last_status = AuthStatus(
                     valid=False,
                     message=f"{browser_display} 需要管理员权限才能提取 Cookie（App-Bound 加密）",
@@ -405,9 +410,20 @@ class AuthService:
                 raise
         
         if not cookies:
+            browser_display = self.current_source_display
             self._last_status = AuthStatus(
                 valid=False,
-                message=f"未找到 {platform} 的 Cookie，请确保已登录",
+                message=(
+                    f"无法从 {browser_display} 提取 Cookie\n\n"
+                    "可能的原因：\n"
+                    f"1. {browser_display} 未安装\n"
+                    f"2. 未在 {browser_display} 中登录 YouTube\n"
+                    f"3. {browser_display} 正在运行（Cookie 数据库被锁定）\n\n"
+                    "建议：\n"
+                    "• 确保已在浏览器中登录 YouTube\n"
+                    "• 完全关闭浏览器后重试\n"
+                    "• 尝试使用其他浏览器（如 Edge）"
+                ),
             )
             return None
         
@@ -485,7 +501,7 @@ class AuthService:
                 }
             return {
                 "valid": True,
-                "message": "✅ 已验证 (检测到 YouTube 登录)",
+                "message": "已验证 (检测到 YouTube 登录)",
             }
         else:
             if cookies:
@@ -531,7 +547,8 @@ class AuthService:
             "auto_refresh": self._auto_refresh,
             "updated_at": datetime.now().isoformat(),
         }
-        self._config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        with open(self._config_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, ensure_ascii=False, indent=2))
     
     def _load_config(self) -> None:
         """加载配置"""
@@ -544,7 +561,8 @@ class AuthService:
             return
         
         try:
-            data = json.loads(self._config_path.read_text(encoding="utf-8"))
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
             source_value = data.get("source", "edge")  # 默认 edge
             # 如果是 none，自动切换为 edge
             if source_value == "none":
@@ -588,7 +606,7 @@ class AuthService:
         """
         启动时自动刷新 Cookie
         
-        在应用启动时调用，自动获取 Cookie 并验证有效性
+        在应用启动时调用，自动获取 Cookie 并验证有效性。
         
         Returns:
             刷新后的状态
@@ -651,14 +669,16 @@ class AuthService:
             "version": 1,
             "profiles": [p.to_dict() for p in self._profiles.values()],
         }
-        self._profiles_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        with open(self._profiles_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, ensure_ascii=False, indent=2))
     
     def _load_profiles(self) -> None:
         """加载配置文件"""
         if not self._profiles_path.exists():
             return
         try:
-            data = json.loads(self._profiles_path.read_text(encoding="utf-8"))
+            with open(self._profiles_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
             for p_data in data.get("profiles", []):
                 profile = AuthProfile.from_dict(p_data)
                 key = f"{profile.platform}_{profile.name}"

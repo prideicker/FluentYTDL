@@ -33,7 +33,7 @@ from qfluentwidgets import (
     StrongBodyLabel,
 )
 
-from ...core.auth_service import (
+from ...auth.auth_service import (
     AuthSourceType,
     AuthStatus,
     auth_service,

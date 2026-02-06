@@ -66,6 +66,13 @@ class DownloadTask:
     thumbnail_url: str = ""
     duration: int = 0
     
+    # 视频标识（用于去重和历史记录）
+    video_id: str = ""
+    
+    # 文件状态（历史记录用）
+    file_size: int = 0
+    file_exists: bool = True
+    
     # 重试
     retries: int = 0
     max_retries: int = 3
