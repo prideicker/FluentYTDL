@@ -426,6 +426,7 @@ class SettingsPage(ScrollArea):
         self._init_advanced_group()
         self._init_automation_group()
         self._init_postprocess_group()
+        self._init_subtitle_group()
         self._init_behavior_group()
         self._init_log_group()
         self._init_about_group()
@@ -813,6 +814,73 @@ class SettingsPage(ScrollArea):
         
         self.expandLayout.addWidget(self.postprocessGroup)
 
+    def _init_subtitle_group(self) -> None:
+        """初始化字幕配置组"""
+        self.subtitleGroup = SettingCardGroup("字幕下载", self.scrollWidget)
+        
+        # 字幕启用开关
+        self.subtitleEnabledCard = InlineSwitchCard(
+            FluentIcon.CAPTION,
+            "启用字幕下载",
+            "自动下载视频字幕（支持多语言、嵌入、双语合成）",
+            parent=self.subtitleGroup,
+        )
+        self.subtitleEnabledCard.checkedChanged.connect(self._on_subtitle_enabled_changed)
+        
+        # 默认语言设置
+        self.subtitleLanguagesCard = InlineLineEditCard(
+            FluentIcon.LANGUAGE,
+            "默认语言",
+            "优先下载的字幕语言（逗号分隔，如: zh-Hans,en,ja）",
+            placeholder="zh-Hans,en",
+            parent=self.subtitleGroup,
+        )
+        self.subtitleLanguagesCard.lineEdit.editingFinished.connect(self._on_subtitle_languages_edited)
+        
+        # 嵌入模式
+        self.subtitleEmbedModeCard = InlineComboBoxCard(
+            FluentIcon.EMBED,
+            "嵌入模式",
+            "字幕嵌入视频的策略",
+            ["总是嵌入", "从不嵌入", "每次询问"],
+            parent=self.subtitleGroup,
+        )
+        self.subtitleEmbedModeCard.comboBox.currentIndexChanged.connect(self._on_subtitle_embed_mode_changed)
+        
+        # 字幕格式
+        self.subtitleFormatCard = InlineComboBoxCard(
+            FluentIcon.DOCUMENT,
+            "字幕格式",
+            "下载的字幕文件格式",
+            ["SRT", "ASS", "VTT"],
+            parent=self.subtitleGroup,
+        )
+        self.subtitleFormatCard.comboBox.currentIndexChanged.connect(self._on_subtitle_format_changed)
+        
+        # 双语字幕开关
+        self.subtitleBilingualCard = InlineSwitchCard(
+            FluentIcon.SYNC,
+            "启用双语字幕",
+            "合成两种语言的字幕到一个文件（主语言在上，副语言在下）",
+            parent=self.subtitleGroup,
+        )
+        self.subtitleBilingualCard.checkedChanged.connect(self._on_subtitle_bilingual_changed)
+        
+        # 添加卡片到组
+        self.subtitleGroup.addSettingCard(self.subtitleEnabledCard)
+        self.subtitleGroup.addSettingCard(self.subtitleLanguagesCard)
+        self.subtitleGroup.addSettingCard(self.subtitleEmbedModeCard)
+        self.subtitleGroup.addSettingCard(self.subtitleFormatCard)
+        self.subtitleGroup.addSettingCard(self.subtitleBilingualCard)
+        
+        # 缩进依赖项
+        self._indent_setting_card(self.subtitleLanguagesCard)
+        self._indent_setting_card(self.subtitleEmbedModeCard)
+        self._indent_setting_card(self.subtitleFormatCard)
+        self._indent_setting_card(self.subtitleBilingualCard)
+        
+        self.expandLayout.addWidget(self.subtitleGroup)
+
     def _init_about_group(self) -> None:
         self.aboutGroup = SettingCardGroup("关于", self.scrollWidget)
         self.aboutCard = HyperlinkCard(
@@ -1035,6 +1103,40 @@ class SettingsPage(ScrollArea):
         # SponsorBlock: 更新类别卡片描述和可见性
         self.sponsorBlockCategoriesCard.setContent(self._get_sponsorblock_categories_text())
         self._update_sponsorblock_categories_visibility(sponsorblock_enabled)
+        
+        # Subtitle: enabled switch
+        subtitle_enabled = bool(config_manager.get("subtitle_enabled", False))
+        self.subtitleEnabledCard.switchButton.blockSignals(True)
+        self.subtitleEnabledCard.switchButton.setChecked(subtitle_enabled)
+        self.subtitleEnabledCard.switchButton.blockSignals(False)
+        
+        # Subtitle: languages
+        subtitle_languages = config_manager.get("subtitle_default_languages", ["zh-Hans", "en"])
+        languages_str = ",".join(subtitle_languages) if isinstance(subtitle_languages, list) else str(subtitle_languages)
+        self.subtitleLanguagesCard.lineEdit.setText(languages_str)
+        
+        # Subtitle: embed mode
+        embed_mode = str(config_manager.get("subtitle_embed_mode", "always"))
+        embed_mode_map = {"always": 0, "never": 1, "ask": 2}
+        self.subtitleEmbedModeCard.comboBox.blockSignals(True)
+        self.subtitleEmbedModeCard.comboBox.setCurrentIndex(embed_mode_map.get(embed_mode, 0))
+        self.subtitleEmbedModeCard.comboBox.blockSignals(False)
+        
+        # Subtitle: format
+        subtitle_format = str(config_manager.get("subtitle_format", "srt")).lower()
+        format_map = {"srt": 0, "ass": 1, "vtt": 2}
+        self.subtitleFormatCard.comboBox.blockSignals(True)
+        self.subtitleFormatCard.comboBox.setCurrentIndex(format_map.get(subtitle_format, 0))
+        self.subtitleFormatCard.comboBox.blockSignals(False)
+        
+        # Subtitle: bilingual
+        subtitle_bilingual = bool(config_manager.get("subtitle_enable_bilingual", False))
+        self.subtitleBilingualCard.switchButton.blockSignals(True)
+        self.subtitleBilingualCard.switchButton.setChecked(subtitle_bilingual)
+        self.subtitleBilingualCard.switchButton.blockSignals(False)
+        
+        # Update subtitle settings visibility
+        self._update_subtitle_settings_visibility(subtitle_enabled)
 
     def _on_update_source_changed(self, index: int) -> None:
         source = "ghproxy" if index == 1 else "github"
@@ -2007,3 +2109,39 @@ class SettingsPage(ScrollArea):
             parent=self,
         )
         self.ytDlpCard.setContent(self._yt_dlp_status_text())
+
+    def _on_subtitle_enabled_changed(self, checked: bool) -> None:
+        config_manager.set('subtitle_enabled', checked)
+        self._update_subtitle_settings_visibility(checked)
+        status = 'enabled' if checked else 'disabled'
+        InfoBar.success('Subtitle Settings', f'Subtitle download {status}', duration=3000, parent=self)
+    
+    def _on_subtitle_languages_edited(self) -> None:
+        text = self.subtitleLanguagesCard.lineEdit.text().strip()
+        languages = [lang.strip() for lang in text.split(',') if lang.strip()] if text else ['zh-Hans', 'en']
+        config_manager.set('subtitle_default_languages', languages)
+        InfoBar.success('Language Settings', f'Default subtitle languages: {', '.join(languages)}', duration=3000, parent=self)
+    
+    def _on_subtitle_embed_mode_changed(self, index: int) -> None:
+        mode_map = {0: 'always', 1: 'never', 2: 'ask'}
+        mode = mode_map.get(index, 'always')
+        config_manager.set('subtitle_embed_mode', mode)
+        InfoBar.success('Embed Mode', f'Subtitle embed strategy: {mode}', duration=3000, parent=self)
+    
+    def _on_subtitle_format_changed(self, index: int) -> None:
+        format_map = {0: 'srt', 1: 'ass', 2: 'vtt'}
+        fmt = format_map.get(index, 'srt')
+        config_manager.set('subtitle_format', fmt)
+        InfoBar.success('Format Settings', f'Subtitle format: {fmt.upper()}', duration=3000, parent=self)
+    
+    def _on_subtitle_bilingual_changed(self, checked: bool) -> None:
+        config_manager.set('subtitle_enable_bilingual', checked)
+        status = 'enabled' if checked else 'disabled'
+        InfoBar.success('Bilingual Subtitles', f'Bilingual subtitle merge {status}', duration=3000, parent=self)
+    
+    def _update_subtitle_settings_visibility(self, enabled: bool) -> None:
+        self.subtitleLanguagesCard.setVisible(enabled)
+        self.subtitleEmbedModeCard.setVisible(enabled)
+        self.subtitleFormatCard.setVisible(enabled)
+        self.subtitleBilingualCard.setVisible(enabled)
+
