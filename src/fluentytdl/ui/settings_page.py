@@ -820,7 +820,7 @@ class SettingsPage(ScrollArea):
         
         # 字幕启用开关
         self.subtitleEnabledCard = InlineSwitchCard(
-            FluentIcon.CAPTION,
+            FluentIcon.DOCUMENT,
             "启用字幕下载",
             "自动下载视频字幕（支持多语言、嵌入、双语合成）",
             parent=self.subtitleGroup,
@@ -829,7 +829,7 @@ class SettingsPage(ScrollArea):
         
         # 默认语言设置
         self.subtitleLanguagesCard = InlineLineEditCard(
-            FluentIcon.LANGUAGE,
+            FluentIcon.GLOBE,
             "默认语言",
             "优先下载的字幕语言（逗号分隔，如: zh-Hans,en,ja）",
             placeholder="zh-Hans,en",
@@ -839,7 +839,7 @@ class SettingsPage(ScrollArea):
         
         # 嵌入模式
         self.subtitleEmbedModeCard = InlineComboBoxCard(
-            FluentIcon.EMBED,
+            FluentIcon.VIDEO,
             "嵌入模式",
             "字幕嵌入视频的策略",
             ["总是嵌入", "从不嵌入", "每次询问"],
@@ -2120,7 +2120,7 @@ class SettingsPage(ScrollArea):
         text = self.subtitleLanguagesCard.lineEdit.text().strip()
         languages = [lang.strip() for lang in text.split(',') if lang.strip()] if text else ['zh-Hans', 'en']
         config_manager.set('subtitle_default_languages', languages)
-        InfoBar.success('Language Settings', f'Default subtitle languages: {', '.join(languages)}', duration=3000, parent=self)
+        InfoBar.success('Language Settings', f'Default subtitle languages: {", ".join(languages)}', duration=3000, parent=self)
     
     def _on_subtitle_embed_mode_changed(self, index: int) -> None:
         mode_map = {0: 'always', 1: 'never', 2: 'ask'}
