@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..models.subtitle_config import SubtitleConfig
 from ..utils.paths import config_path, legacy_config_path
 
 
@@ -103,6 +104,22 @@ class ConfigManager:
         "sponsorblock_categories": ["sponsor", "selfpromo", "interaction"],
         # sponsorblock_action: 处理动作 - remove: 移除片段, mark: 仅标记为章节
         "sponsorblock_action": "remove",
+        
+        # 字幕配置
+        "subtitle_enabled": False,  # 是否启用字幕下载（全局开关）
+        "subtitle_default_languages": ["zh-Hans", "en"],  # 默认字幕语言优先级
+        "subtitle_enable_auto_captions": True,  # 是否启用自动生成字幕
+        "subtitle_embed_mode": "always",  # 嵌入模式: always/never/ask
+        "subtitle_write_separate_file": True,  # 是否同时保存单独文件
+        "subtitle_format": "srt",  # 字幕格式偏好
+        "subtitle_enable_bilingual": False,  # 是否启用双语字幕合成
+        "subtitle_bilingual_primary": "zh-Hans",  # 双语字幕主语言
+        "subtitle_bilingual_secondary": "en",  # 双语字幕副语言
+        "subtitle_bilingual_style": "top-bottom",  # 双语字幕样式
+        "subtitle_quality_check": True,  # 是否启用字幕质量检查
+        "subtitle_remove_ads": False,  # 是否自动移除字幕广告
+        "subtitle_fallback_to_english": True,  # 是否回退到英语
+        "subtitle_max_languages": 2,  # 最多下载字幕数量
     }
 
     def __new__(cls) -> "ConfigManager":
@@ -195,6 +212,43 @@ class ConfigManager:
 
     def set(self, key: str, value: Any) -> None:
         self.config[key] = value
+        self.save()
+    
+    def get_subtitle_config(self) -> SubtitleConfig:
+        """获取字幕配置对象"""
+        return SubtitleConfig(
+            enabled=self.config.get("subtitle_enabled", False),
+            default_languages=self.config.get("subtitle_default_languages", ["zh-Hans", "en"]),
+            enable_auto_captions=self.config.get("subtitle_enable_auto_captions", True),
+            embed_mode=self.config.get("subtitle_embed_mode", "always"),
+            write_separate_file=self.config.get("subtitle_write_separate_file", True),
+            format=self.config.get("subtitle_format", "srt"),
+            enable_bilingual=self.config.get("subtitle_enable_bilingual", False),
+            bilingual_primary=self.config.get("subtitle_bilingual_primary", "zh-Hans"),
+            bilingual_secondary=self.config.get("subtitle_bilingual_secondary", "en"),
+            bilingual_style=self.config.get("subtitle_bilingual_style", "top-bottom"),
+            quality_check=self.config.get("subtitle_quality_check", True),
+            remove_ads=self.config.get("subtitle_remove_ads", False),
+            fallback_to_english=self.config.get("subtitle_fallback_to_english", True),
+            max_languages=self.config.get("subtitle_max_languages", 2),
+        )
+    
+    def set_subtitle_config(self, config: SubtitleConfig) -> None:
+        """设置字幕配置并保存"""
+        self.config["subtitle_enabled"] = config.enabled
+        self.config["subtitle_default_languages"] = config.default_languages
+        self.config["subtitle_enable_auto_captions"] = config.enable_auto_captions
+        self.config["subtitle_embed_mode"] = config.embed_mode
+        self.config["subtitle_write_separate_file"] = config.write_separate_file
+        self.config["subtitle_format"] = config.format
+        self.config["subtitle_enable_bilingual"] = config.enable_bilingual
+        self.config["subtitle_bilingual_primary"] = config.bilingual_primary
+        self.config["subtitle_bilingual_secondary"] = config.bilingual_secondary
+        self.config["subtitle_bilingual_style"] = config.bilingual_style
+        self.config["subtitle_quality_check"] = config.quality_check
+        self.config["subtitle_remove_ads"] = config.remove_ads
+        self.config["subtitle_fallback_to_english"] = config.fallback_to_english
+        self.config["subtitle_max_languages"] = config.max_languages
         self.save()
 
 

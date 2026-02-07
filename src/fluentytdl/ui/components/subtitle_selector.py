@@ -28,7 +28,7 @@ from qfluentwidgets import (
     SwitchButton,
 )
 
-from ...core.subtitle_manager import (
+from ...processing.subtitle_manager import (
     get_subtitle_languages,
     build_subtitle_opts,
 )

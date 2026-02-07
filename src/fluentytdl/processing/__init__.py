@@ -11,6 +11,15 @@ from .subtitle_manager import (
     build_subtitle_opts,
     SubtitleTrack,
 )
+from .subtitle_service import (
+    SubtitleService,
+    subtitle_service,
+    SubtitleStrategy,
+    SmartStrategy,
+    SingleLanguageStrategy,
+    MultiLanguageStrategy,
+    BilingualStrategy,
+)
 from .section_download import (
     TimeRange,
     parse_time_input,
@@ -33,6 +42,13 @@ __all__ = [
     "get_subtitle_languages",
     "build_subtitle_opts",
     "SubtitleTrack",
+    "SubtitleService",
+    "subtitle_service",
+    "SubtitleStrategy",
+    "SmartStrategy",
+    "SingleLanguageStrategy",
+    "MultiLanguageStrategy",
+    "BilingualStrategy",
     "TimeRange",
     "parse_time_input",
     "parse_time_range",
