@@ -624,6 +624,9 @@ class DownloadWorker(QThread):
         # 执行封面嵌入后处理（使用外置工具）
         self._embed_thumbnail_postprocess(merged_opts)
         
+        # 执行字幕后处理（验证、双语合并）
+        self._subtitle_postprocess(merged_opts)
+        
         # 清理遗留的缩略图文件
         self._cleanup_thumbnail_files(merged_opts)
 
@@ -962,4 +965,39 @@ class DownloadWorker(QThread):
                         logger.debug("已删除缩略图文件: {}", thumb_file)
                     except Exception as e:
                         logger.warning("无法删除缩略图文件 {}: {}", thumb_file, e)
+
+    def _subtitle_postprocess(self, opts: dict[str, Any]) -> None:
+        """
+        字幕后处理
+        
+        功能：
+        - 验证字幕文件存在性和完整性
+        - 自动合并双语字幕
+        """
+        from ..processing import subtitle_processor
+        
+        logger.info("字幕后处理开始")
+        
+        try:
+            result = subtitle_processor.process(
+                output_path=self.output_path,
+                opts=opts,
+                status_callback=lambda msg: self.status_msg.emit(msg)
+            )
+            
+            if result.success:
+                logger.info("字幕后处理成功: {}", result.message)
+                
+                if result.merged_file:
+                    self.status_msg.emit(f"[字幕处理] ✓ 双语字幕已生成")
+                    logger.info("双语字幕文件: {}", result.merged_file)
+                
+                if result.processed_files:
+                    logger.info("处理了 {} 个字幕文件", len(result.processed_files))
+            else:
+                logger.warning("字幕后处理失败: {}", result.message)
+        
+        except Exception as e:
+            logger.exception("字幕后处理异常: {}", e)
+            # 不阻塞主流程，只记录错误
 

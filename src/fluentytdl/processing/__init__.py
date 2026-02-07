@@ -20,6 +20,11 @@ from .subtitle_service import (
     MultiLanguageStrategy,
     BilingualStrategy,
 )
+from .subtitle_processor import (
+    SubtitleProcessor,
+    subtitle_processor,
+    SubtitleProcessResult,
+)
 from .section_download import (
     TimeRange,
     parse_time_input,
@@ -49,6 +54,9 @@ __all__ = [
     "SingleLanguageStrategy",
     "MultiLanguageStrategy",
     "BilingualStrategy",
+    "SubtitleProcessor",
+    "subtitle_processor",
+    "SubtitleProcessResult",
     "TimeRange",
     "parse_time_input",
     "parse_time_range",
