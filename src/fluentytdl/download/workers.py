@@ -571,9 +571,21 @@ class DownloadWorker(QThread):
                 self.status_msg.emit(line)
                 continue
 
-            # Other informative lines
+            # Other informative lines - 特殊处理字幕相关信息
             if line.startswith("["):
-                self.status_msg.emit(line)
+                # 检测字幕下载
+                if "subtitles" in line.lower() or "subtitle" in line.lower():
+                    if "Writing" in line and "subtitles" in line:
+                        # [info] Writing video subtitles to: xxx.zh-Hans.srt
+                        self.status_msg.emit("📝 正在下载字幕...")
+                        logger.info("字幕下载: {}", line)
+                    elif "Downloading" in line and "subtitle" in line:
+                        self.status_msg.emit("📝 正在下载字幕...")
+                        logger.info("字幕下载: {}", line)
+                    else:
+                        self.status_msg.emit(line)
+                else:
+                    self.status_msg.emit(line)
 
         rc = None
         try:

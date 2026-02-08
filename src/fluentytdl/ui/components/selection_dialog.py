@@ -1895,6 +1895,52 @@ class SelectionDialog(MessageBoxBase):
                 return
             self.download_tasks = tasks
         else:
+            # 单个视频下载：先检查字幕配置
+            embed_subtitles = None  # None 表示使用配置默认值
+            
+            if self.video_info is not None:
+                # 检查字幕配置
+                from ...core.config_manager import config_manager
+                subtitle_config = config_manager.get_subtitle_config()
+                
+                if subtitle_config.enabled:
+                    # 检查视频是否有字幕
+                    from ...processing import subtitle_service
+                    from ...processing.subtitle_manager import extract_subtitle_tracks
+                    
+                    tracks = extract_subtitle_tracks(self.video_info)
+                    
+                    if not tracks:
+                        # 视频没有字幕，提示用户
+                        box = MessageBox(
+                            "⚠️ 无可用字幕",
+                            f"此视频没有可用字幕。\n\n"
+                            f"是否继续下载（无字幕）？",
+                            parent=self,
+                        )
+                        box.yesButton.setText("继续下载")
+                        box.cancelButton.setText("取消")
+                        if not box.exec():
+                            return
+                    else:
+                        # 有字幕，检查是否需要询问嵌入模式
+                        if subtitle_config.embed_mode == "ask":
+                            available_langs = [t.lang_code for t in tracks[:5]]
+                            lang_display = ", ".join(available_langs)
+                            if len(tracks) > 5:
+                                lang_display += f" 等 {len(tracks)} 种语言"
+                            
+                            box = MessageBox(
+                                "📝 字幕嵌入确认",
+                                f"检测到可用字幕：{lang_display}\n\n"
+                                f"是否将字幕嵌入到视频文件中？\n"
+                                f"(嵌入后可在播放器中直接显示)",
+                                parent=self,
+                            )
+                            box.yesButton.setText("嵌入字幕")
+                            box.cancelButton.setText("仅下载文件")
+                            embed_subtitles = box.exec()  # True 或 False
+            
             if self.video_info is not None:
                 title = str(self.video_info.get("title") or "未命名任务")
                 thumb = str(self.video_info.get("thumbnail") or "").strip() or None
@@ -1906,7 +1952,7 @@ class SelectionDialog(MessageBoxBase):
                     "url": self.url,
                     "title": title,
                     "thumbnail": thumb,
-                    "opts": self.get_download_options(),
+                    "opts": self.get_download_options(embed_subtitles_override=embed_subtitles),
                 }
             ]
         super().accept()
@@ -2154,8 +2200,13 @@ class SelectionDialog(MessageBoxBase):
         else:  # Audio Only
             self.format_combo.addItem("最佳质量 (原格式)", userData="bestaudio")
 
-    def get_download_options(self) -> dict[str, Any]:
-        """返回构建好的 yt-dlp options"""
+    def get_download_options(self, embed_subtitles_override: bool | None = None) -> dict[str, Any]:
+        """
+        返回构建好的 yt-dlp options
+        
+        Args:
+            embed_subtitles_override: 覆盖字幕嵌入选项 (None=使用配置默认, True=嵌入, False=不嵌入)
+        """
         opts: dict[str, Any] = {}
 
         # Prefer new single-video table selection if available
@@ -2209,6 +2260,10 @@ class SelectionDialog(MessageBoxBase):
                     video_info=self.video_info,
                 )
                 opts.update(subtitle_opts)
+                
+                # 如果有覆盖选项，应用它
+                if embed_subtitles_override is not None and "embedsubtitles" in subtitle_opts:
+                    opts["embedsubtitles"] = embed_subtitles_override
             
             return opts
 
@@ -2232,5 +2287,9 @@ class SelectionDialog(MessageBoxBase):
                 video_info=self.video_info,
             )
             opts.update(subtitle_opts)
+            
+            # 如果有覆盖选项，应用它
+            if embed_subtitles_override is not None and "embedsubtitles" in subtitle_opts:
+                opts["embedsubtitles"] = embed_subtitles_override
         
         return opts
