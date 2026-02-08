@@ -2003,7 +2003,23 @@ class SelectionDialog(MessageBoxBase):
                 return
             self.download_tasks = tasks
         else:
-            # 单个视频下载：先检查字幕配置
+            # 单个视频下载
+            # 【关键修复】当有格式选择器时，不在这里处理字幕
+            # 因为 get_selected_tasks() 会处理字幕和格式
+            print("[DEBUG] accept: Checking for format selector")
+            has_selector = hasattr(self, "_format_selector")
+            print(f"[DEBUG] accept: has_format_selector={has_selector}")
+            
+            if has_selector:
+                # 有格式选择器：字幕处理在 get_selected_tasks() 中完成
+                # 这里只是简单地关闭对话框，不设置 download_tasks
+                print("[DEBUG] accept: Has format selector, skipping subtitle check (will be done in get_selected_tasks)")
+                # 不设置 download_tasks，让 MainWindow 调用 get_selected_tasks()
+                super().accept()
+                return
+            
+            # 没有格式选择器：使用旧流程（检查字幕 → get_download_options）
+            print("[DEBUG] accept: No format selector, using legacy flow with subtitle check")
             embed_subtitles = None  # None 表示使用配置默认值
             
             if self.video_info is not None:
