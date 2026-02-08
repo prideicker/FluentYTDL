@@ -1800,22 +1800,27 @@ class SelectionDialog(MessageBoxBase):
             
             # 【关键修复】集成字幕服务到新格式选择器路径
             if self.video_info:
-                # 先检查字幕并询问用户（如果需要）
-                try:
-                    print("[DEBUG] get_selected_tasks: Calling _check_subtitle_and_ask()")
-                    embed_override = self._check_subtitle_and_ask()
-                    print(f"[DEBUG] get_selected_tasks: embed_override = {embed_override}")
-                except ValueError as e:
-                    # 用户取消下载
-                    print(f"[DEBUG] get_selected_tasks: User cancelled - {e}")
-                    return []
-                except Exception as e:
-                    # 其他异常
-                    print(f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}")
-                    import traceback
-                    traceback.print_exc()
-                    # 继续下载，但不设置字幕
-                    embed_override = None
+                # 优先使用缓存的用户选择（在 accept() 中已询问）
+                if self._subtitle_choice_made:
+                    print(f"[DEBUG] get_selected_tasks: Using cached subtitle choice: {self._subtitle_embed_choice}")
+                    embed_override = self._subtitle_embed_choice
+                else:
+                    # 如果没有缓存，再询问（不应该发生，但作为后备）
+                    print("[DEBUG] get_selected_tasks: No cached choice, calling _check_subtitle_and_ask()")
+                    try:
+                        embed_override = self._check_subtitle_and_ask()
+                        print(f"[DEBUG] get_selected_tasks: embed_override = {embed_override}")
+                    except ValueError as e:
+                        # 用户取消下载
+                        print(f"[DEBUG] get_selected_tasks: User cancelled - {e}")
+                        return []
+                    except Exception as e:
+                        # 其他异常
+                        print(f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # 继续下载，但不设置字幕
+                        embed_override = None
                 
                 subtitle_opts = subtitle_service.apply(
                     video_id=self.video_info.get("id", ""),
@@ -1824,7 +1829,7 @@ class SelectionDialog(MessageBoxBase):
                 ydl_opts.update(subtitle_opts)
                 
                 # 如果用户明确选择了嵌入选项，覆盖配置默认值
-                if embed_override is not None and "embedsubtitles" in subtitle_opts:
+                if embed_override is not None:
                     ydl_opts["embedsubtitles"] = embed_override
                 
                 print(f"[DEBUG] get_selected_tasks: subtitle_opts = {subtitle_opts}")
@@ -2004,30 +2009,36 @@ class SelectionDialog(MessageBoxBase):
             self.download_tasks = tasks
         else:
             # 单个视频下载
-            # 【关键修复】当有格式选择器时，不在这里处理字幕
-            # 因为 get_selected_tasks() 会处理字幕和格式
+            print("[DEBUG] accept: Single video mode")
+            
+            # 【关键修复】无论是否有格式选择器，都需要在这里询问字幕
+            # 因为 accept() 是在对话框关闭前执行，此时 MessageBox 能正常工作
+            # get_selected_tasks() 是在对话框关闭后执行，MessageBox 可能无法正常工作
+            if self.video_info is not None and not self._subtitle_choice_made:
+                try:
+                    print("[DEBUG] accept: Calling _check_subtitle_and_ask()")
+                    self._subtitle_embed_choice = self._check_subtitle_and_ask()
+                    self._subtitle_choice_made = True
+                    print(f"[DEBUG] accept: User choice cached: {self._subtitle_embed_choice}")
+                except ValueError:
+                    # 用户取消下载
+                    print("[DEBUG] accept: User cancelled")
+                    return
+            
+            # 检查是否有格式选择器
             print("[DEBUG] accept: Checking for format selector")
             has_selector = hasattr(self, "_format_selector")
             print(f"[DEBUG] accept: has_format_selector={has_selector}")
             
             if has_selector:
-                # 有格式选择器：字幕处理在 get_selected_tasks() 中完成
-                # 这里只是简单地关闭对话框，不设置 download_tasks
-                print("[DEBUG] accept: Has format selector, skipping subtitle check (will be done in get_selected_tasks)")
+                # 有格式选择器：字幕选择已完成，格式处理在 get_selected_tasks() 中完成
+                print("[DEBUG] accept: Has format selector, subtitle choice done, format will be handled in get_selected_tasks")
                 # 不设置 download_tasks，让 MainWindow 调用 get_selected_tasks()
                 super().accept()
                 return
             
-            # 没有格式选择器：使用旧流程（检查字幕 → get_download_options）
-            print("[DEBUG] accept: No format selector, using legacy flow with subtitle check")
-            embed_subtitles = None  # None 表示使用配置默认值
-            
-            if self.video_info is not None:
-                try:
-                    embed_subtitles = self._check_subtitle_and_ask()
-                except ValueError:
-                    # 用户取消下载
-                    return
+            # 没有格式选择器：使用旧流程（get_download_options）
+            print("[DEBUG] accept: No format selector, using legacy flow")
             
             if self.video_info is not None:
                 title = str(self.video_info.get("title") or "未命名任务")
@@ -2040,7 +2051,7 @@ class SelectionDialog(MessageBoxBase):
                     "url": self.url,
                     "title": title,
                     "thumbnail": thumb,
-                    "opts": self.get_download_options(embed_subtitles_override=embed_subtitles),
+                    "opts": self.get_download_options(embed_subtitles_override=self._subtitle_embed_choice),
                 }
             ]
         super().accept()
