@@ -40,6 +40,7 @@ from qfluentwidgets import (
 from ...download.workers import EntryDetailWorker, InfoExtractWorker
 from ...youtube.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
 from ...utils.image_loader import ImageLoader
+from ...processing import subtitle_service
 from .format_selector import VideoFormatSelectorWidget
 
 
@@ -2200,6 +2201,15 @@ class SelectionDialog(MessageBoxBase):
             # Do not download thumbnail files during download.
             opts["writethumbnail"] = False
             opts["addmetadata"] = True
+            
+            # 集成字幕服务
+            if self.video_info:
+                subtitle_opts = subtitle_service.apply(
+                    video_id=self.video_info.get("id", ""),
+                    video_info=self.video_info,
+                )
+                opts.update(subtitle_opts)
+            
             return opts
 
         # Fallback to legacy combo selection (for safety)
@@ -2214,4 +2224,13 @@ class SelectionDialog(MessageBoxBase):
             opts["format"] = "bestaudio/best"
         opts["writethumbnail"] = False
         opts["addmetadata"] = True
+        
+        # 集成字幕服务
+        if self.video_info:
+            subtitle_opts = subtitle_service.apply(
+                video_id=self.video_info.get("id", ""),
+                video_info=self.video_info,
+            )
+            opts.update(subtitle_opts)
+        
         return opts

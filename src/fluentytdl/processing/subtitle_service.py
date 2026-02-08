@@ -100,7 +100,7 @@ class SingleLanguageStrategy(SubtitleStrategy):
             "writesubtitles": True,
             "writeautomaticsub": self.enable_auto,
             "subtitleslangs": [self.language],
-            "embedsubtitles": config.embed_mode == "always",
+            "embedsubtitles": config.embed_mode != "never",
             "convertsubtitles": config.format if config.format in ["srt", "ass", "vtt"] else None,
         }
     
@@ -140,7 +140,7 @@ class MultiLanguageStrategy(SubtitleStrategy):
             "writesubtitles": True,
             "writeautomaticsub": config.enable_auto_captions,
             "subtitleslangs": selected,
-            "embedsubtitles": config.embed_mode == "always",
+            "embedsubtitles": config.embed_mode != "never",
             "convertsubtitles": config.format if config.format in ["srt", "ass", "vtt"] else None,
         }
     
@@ -196,7 +196,7 @@ class SmartStrategy(SubtitleStrategy):
             "writesubtitles": True,
             "writeautomaticsub": config.enable_auto_captions,
             "subtitleslangs": selected,
-            "embedsubtitles": config.embed_mode == "always",
+            "embedsubtitles": config.embed_mode != "never",
             "convertsubtitles": config.format if config.format in ["srt", "ass", "vtt"] else None,
         }
     
