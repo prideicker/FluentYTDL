@@ -539,6 +539,10 @@ class SelectionDialog(MessageBoxBase):
         self.video_info: dict[str, Any] | None = None
         self._is_playlist = False
         self.download_tasks: list[dict[str, Any]] = []
+        
+        # 缓存字幕用户选择，避免在 get_selected_tasks() 中重复弹窗
+        self._subtitle_embed_choice: bool | None = None
+        self._subtitle_choice_made = False
 
         self.image_loader = ImageLoader(self)
         self.image_loader.loaded.connect(self._on_thumb_loaded)
