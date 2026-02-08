@@ -1802,11 +1802,20 @@ class SelectionDialog(MessageBoxBase):
             if self.video_info:
                 # 先检查字幕并询问用户（如果需要）
                 try:
+                    print("[DEBUG] get_selected_tasks: Calling _check_subtitle_and_ask()")
                     embed_override = self._check_subtitle_and_ask()
-                except ValueError:
+                    print(f"[DEBUG] get_selected_tasks: embed_override = {embed_override}")
+                except ValueError as e:
                     # 用户取消下载
-                    print("[DEBUG] get_selected_tasks: User cancelled due to no subtitles")
+                    print(f"[DEBUG] get_selected_tasks: User cancelled - {e}")
                     return []
+                except Exception as e:
+                    # 其他异常
+                    print(f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # 继续下载，但不设置字幕
+                    embed_override = None
                 
                 subtitle_opts = subtitle_service.apply(
                     video_id=self.video_info.get("id", ""),
@@ -1819,7 +1828,7 @@ class SelectionDialog(MessageBoxBase):
                     ydl_opts["embedsubtitles"] = embed_override
                 
                 print(f"[DEBUG] get_selected_tasks: subtitle_opts = {subtitle_opts}")
-                print(f"[DEBUG] get_selected_tasks: embed_override = {embed_override}")
+                print(f"[DEBUG] get_selected_tasks: final embed = {ydl_opts.get('embedsubtitles')}")
             
             tasks.append((title, url, ydl_opts, thumb))
             return tasks
