@@ -1789,18 +1789,39 @@ class SelectionDialog(MessageBoxBase):
                 if sel and sel.get("format"):
                     ydl_opts["format"] = sel["format"]
                     ydl_opts.update(sel.get("extra_opts") or {})
-                    tasks.append((title, url, ydl_opts, thumb))
                 else:
                     # 修复：即使没有格式选择，也应该使用默认格式
                     print("[DEBUG] get_selected_tasks: No format in selection, using default")
                     ydl_opts["format"] = "bestvideo+bestaudio/best"
-                    tasks.append((title, url, ydl_opts, thumb))
             else:
                 # 没有格式选择器，使用默认格式
                 print("[DEBUG] get_selected_tasks: No format selector, using default")
                 ydl_opts["format"] = "bestvideo+bestaudio/best"
-                tasks.append((title, url, ydl_opts, thumb))
             
+            # 【关键修复】集成字幕服务到新格式选择器路径
+            if self.video_info:
+                # 先检查字幕并询问用户（如果需要）
+                try:
+                    embed_override = self._check_subtitle_and_ask()
+                except ValueError:
+                    # 用户取消下载
+                    print("[DEBUG] get_selected_tasks: User cancelled due to no subtitles")
+                    return []
+                
+                subtitle_opts = subtitle_service.apply(
+                    video_id=self.video_info.get("id", ""),
+                    video_info=self.video_info,
+                )
+                ydl_opts.update(subtitle_opts)
+                
+                # 如果用户明确选择了嵌入选项，覆盖配置默认值
+                if embed_override is not None and "embedsubtitles" in subtitle_opts:
+                    ydl_opts["embedsubtitles"] = embed_override
+                
+                print(f"[DEBUG] get_selected_tasks: subtitle_opts = {subtitle_opts}")
+                print(f"[DEBUG] get_selected_tasks: embed_override = {embed_override}")
+            
+            tasks.append((title, url, ydl_opts, thumb))
             return tasks
 
         # 2. Playlist Mode (Existing Logic)
@@ -1870,6 +1891,128 @@ class SelectionDialog(MessageBoxBase):
             tasks.append((title, url, row_opts, thumb))
             
         return tasks
+    
+    def _check_subtitle_and_ask(self) -> bool | None:
+        """
+        检查字幕配置并弹出询问对话框
+        
+        Returns:
+            None: 不需要嵌入或使用默认配置
+            True: 用户选择嵌入
+            False: 用户选择不嵌入
+            
+        Raises:
+            ValueError: 用户取消下载
+        """
+        if not self.video_info:
+            return None
+        
+        from ...core.config_manager import config_manager
+        from ...processing import subtitle_service
+        from ...processing.subtitle_manager import extract_subtitle_tracks
+        
+        subtitle_config = config_manager.get_subtitle_config()
+        
+        if not subtitle_config.enabled:
+            return None
+        
+        # 检查视频是否有字幕
+        tracks = extract_subtitle_tracks(self.video_info)
+        
+        if not tracks:
+            # 视频没有字幕，提示用户
+            box = MessageBox(
+                "⚠️ 无可用字幕",
+                f"此视频没有可用字幕。\n\n"
+                f"是否继续下载（无字幕）？",
+                parent=self,
+            )
+            box.yesButton.setText("继续下载")
+            box.cancelButton.setText("取消")
+            if not box.exec():
+                raise ValueError("用户取消下载：无字幕")
+            return None
+        
+        # 有字幕，检查是否需要询问嵌入模式
+        if subtitle_config.embed_mode == "ask":
+            available_langs = [t.lang_code for t in tracks[:5]]
+            lang_display = ", ".join(available_langs)
+            if len(tracks) > 5:
+                lang_display += f" 等 {len(tracks)} 种语言"
+            
+            box = MessageBox(
+                "📝 字幕嵌入确认",
+                f"检测到可用字幕：{lang_display}\n\n"
+                f"是否将字幕嵌入到视频文件中？\n"
+                f"(嵌入后可在播放器中直接显示)",
+                parent=self,
+            )
+            box.yesButton.setText("嵌入字幕")
+            box.cancelButton.setText("仅下载文件")
+            return box.exec()  # True 或 False
+        
+        return None  # 使用配置默认值
+    
+    def _check_subtitle_and_ask(self) -> bool | None:
+        """
+        检查字幕配置并弹出询问对话框
+        
+        Returns:
+            None: 不需要嵌入或使用默认配置
+            True: 用户选择嵌入
+            False: 用户选择不嵌入
+            
+        Raises:
+            ValueError: 用户取消下载
+        """
+        if not self.video_info:
+            return None
+        
+        from ...core.config_manager import config_manager
+        from ...processing import subtitle_service
+        from ...processing.subtitle_manager import extract_subtitle_tracks
+        
+        subtitle_config = config_manager.get_subtitle_config()
+        
+        if not subtitle_config.enabled:
+            return None
+        
+        # 检查视频是否有字幕
+        tracks = extract_subtitle_tracks(self.video_info)
+        
+        if not tracks:
+            # 视频没有字幕，提示用户
+            box = MessageBox(
+                "⚠️ 无可用字幕",
+                f"此视频没有可用字幕。\n\n"
+                f"是否继续下载（无字幕）？",
+                parent=self,
+            )
+            box.yesButton.setText("继续下载")
+            box.cancelButton.setText("取消")
+            if not box.exec():
+                raise ValueError("用户取消下载：无字幕")
+            return None
+        
+        # 有字幕，检查是否需要询问嵌入模式
+        if subtitle_config.embed_mode == "ask":
+            available_langs = [t.lang_code for t in tracks[:5]]
+            lang_display = ", ".join(available_langs)
+            if len(tracks) > 5:
+                lang_display += f" 等 {len(tracks)} 种语言"
+            
+            box = MessageBox(
+                "📝 字幕嵌入确认",
+                f"检测到可用字幕：{lang_display}\n\n"
+                f"是否将字幕嵌入到视频文件中？\n"
+                f"(嵌入后可在播放器中直接显示)",
+                parent=self,
+            )
+            box.yesButton.setText("嵌入字幕")
+            box.cancelButton.setText("仅下载文件")
+            return box.exec()  # True 或 False
+        
+        return None  # 使用配置默认值
 
     def accept(self) -> None:
         if self._is_playlist:
@@ -1899,47 +2042,11 @@ class SelectionDialog(MessageBoxBase):
             embed_subtitles = None  # None 表示使用配置默认值
             
             if self.video_info is not None:
-                # 检查字幕配置
-                from ...core.config_manager import config_manager
-                subtitle_config = config_manager.get_subtitle_config()
-                
-                if subtitle_config.enabled:
-                    # 检查视频是否有字幕
-                    from ...processing import subtitle_service
-                    from ...processing.subtitle_manager import extract_subtitle_tracks
-                    
-                    tracks = extract_subtitle_tracks(self.video_info)
-                    
-                    if not tracks:
-                        # 视频没有字幕，提示用户
-                        box = MessageBox(
-                            "⚠️ 无可用字幕",
-                            f"此视频没有可用字幕。\n\n"
-                            f"是否继续下载（无字幕）？",
-                            parent=self,
-                        )
-                        box.yesButton.setText("继续下载")
-                        box.cancelButton.setText("取消")
-                        if not box.exec():
-                            return
-                    else:
-                        # 有字幕，检查是否需要询问嵌入模式
-                        if subtitle_config.embed_mode == "ask":
-                            available_langs = [t.lang_code for t in tracks[:5]]
-                            lang_display = ", ".join(available_langs)
-                            if len(tracks) > 5:
-                                lang_display += f" 等 {len(tracks)} 种语言"
-                            
-                            box = MessageBox(
-                                "📝 字幕嵌入确认",
-                                f"检测到可用字幕：{lang_display}\n\n"
-                                f"是否将字幕嵌入到视频文件中？\n"
-                                f"(嵌入后可在播放器中直接显示)",
-                                parent=self,
-                            )
-                            box.yesButton.setText("嵌入字幕")
-                            box.cancelButton.setText("仅下载文件")
-                            embed_subtitles = box.exec()  # True 或 False
+                try:
+                    embed_subtitles = self._check_subtitle_and_ask()
+                except ValueError:
+                    # 用户取消下载
+                    return
             
             if self.video_info is not None:
                 title = str(self.video_info.get("title") or "未命名任务")
