@@ -1921,6 +1921,9 @@ class SelectionDialog(MessageBoxBase):
         
         from ...core.config_manager import config_manager
         from ...processing import subtitle_service
+        from ...processing.subtitle_manager import extract_subtitle_tracks
+        
+        subtitle_config = config_manager.get_subtitle_config()
         print(f"[DEBUG] _check_subtitle_and_ask: subtitle_enabled={subtitle_config.enabled}, embed_mode={subtitle_config.embed_mode}")
         
         if not subtitle_config.enabled:
@@ -1929,8 +1932,11 @@ class SelectionDialog(MessageBoxBase):
         
         # 检查视频是否有字幕
         tracks = extract_subtitle_tracks(self.video_info)
-        print(f"[DEBUG] _check_subtitle_and_ask: Found {len(tracks)} subtitle tracks"
-        print("[DEBUG] _check_subtitle_and_ask: No subtitles, showing warning dialog")
+        print(f"[DEBUG] _check_subtitle_and_ask: Found {len(tracks)} subtitle tracks")
+        
+        if not tracks:
+            # 视频没有字幕，提示用户
+            print("[DEBUG] _check_subtitle_and_ask: No subtitles, showing warning dialog")
             box = MessageBox(
                 "⚠️ 无可用字幕",
                 f"此视频没有可用字幕。\n\n"
@@ -1945,13 +1951,16 @@ class SelectionDialog(MessageBoxBase):
             if not result:
                 print("[DEBUG] _check_subtitle_and_ask: User cancelled, raising ValueError")
                 raise ValueError("用户取消下载：无字幕")
-            print("[DEBUG] _check_subtitle_and_ask: User continue, returning None
-                parent=self,
-            )
-            box.yesButton.setText("继续下载")
-            box.cancelButton.setText("取消")
-            if not box.exec():
-                raise ValueError("用户取消下载：无字幕")
+            print("[DEBUG] _check_subtitle_and_ask: User continue, returning None")
+            return None
+        
+        # 有字幕，检查是否需要询问嵌入模式
+        if subtitle_config.embed_mode == "ask":
+            available_langs = [t.lang_code for t in tracks[:5]]
+            lang_display = ", ".join(available_langs)
+            if len(tracks) > 5:
+                lang_display += f" 等 {len(tracks)} 种语言"
+            
             print(f"[DEBUG] _check_subtitle_and_ask: embed_mode is 'ask', showing confirmation dialog with langs: {lang_display}")
             box = MessageBox(
                 "📝 字幕嵌入确认",
@@ -1964,16 +1973,7 @@ class SelectionDialog(MessageBoxBase):
             box.cancelButton.setText("仅下载文件")
             print("[DEBUG] _check_subtitle_and_ask: About to call box.exec() for embed confirmation")
             result = box.exec()
-            print(f"[DEBUG] _check_subtitle_and_ask: box.exec() returned {result} (type: {type(result)})
-                f"是否将字幕嵌入到视频文件中？\n"
-                f"(嵌入后可在播放器中直接显示)",
-                parent=self,
-            )
-            box.yesButton.setText("嵌入字幕")
-            box.cancelButton.setText("仅下载文件")
-            print("[DEBUG] _check_subtitle_and_ask: About to call box.exec() for embed")
-            result = box.exec()
-            print(f"[DEBUG] _check_subtitle_and_ask: box.exec() returned {result}")
+            print(f"[DEBUG] _check_subtitle_and_ask: box.exec() returned {result} (type: {type(result)})")
             return result  # True 或 False
         
         print("[DEBUG] _check_subtitle_and_ask: Returning None (use config default)")
