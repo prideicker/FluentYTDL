@@ -34,6 +34,8 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SwitchButton,
     ToolButton,
+    ToolTipFilter,
+    ToolTipPosition,
 )
 
 from ...core.cookie_manager import (
@@ -123,11 +125,13 @@ class AuthProfileCard(QFrame):
         
         self.refreshBtn = ToolButton(FluentIcon.SYNC, self)
         self.refreshBtn.setToolTip("刷新 Cookie")
+        self.refreshBtn.installEventFilter(ToolTipFilter(self.refreshBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.refreshBtn.clicked.connect(self._on_refresh)
         btn_layout.addWidget(self.refreshBtn)
         
         self.deleteBtn = ToolButton(FluentIcon.DELETE, self)
         self.deleteBtn.setToolTip("删除账户")
+        self.deleteBtn.installEventFilter(ToolTipFilter(self.deleteBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.deleteBtn.clicked.connect(self._on_delete)
         btn_layout.addWidget(self.deleteBtn)
         

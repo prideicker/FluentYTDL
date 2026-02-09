@@ -23,6 +23,8 @@ from qfluentwidgets import (
     FluentIcon,
     NavigationItemPosition,
     SubtitleLabel,
+    ToolTipFilter,
+    ToolTipPosition,
     TransparentToolButton,
     PrimaryPushButton,
     PushButton,
@@ -240,45 +242,55 @@ class MainWindow(FluentWindow):
         # 新建任务 (Primary Action - 位于任务列表内操作)
         new_task_btn = PrimaryPushButton(FluentIcon.ADD, "新建任务", self)
         new_task_btn.setToolTip("创建下载任务")
+        new_task_btn.installEventFilter(ToolTipFilter(new_task_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         new_task_btn.clicked.connect(lambda: self.switchTo(self.parse_page))
         
         # 全部开始/暂停按钮 (Secondary Actions)
         start_all = TransparentToolButton(FluentIcon.PLAY, self)
         start_all.setToolTip("全部开始")
+        start_all.installEventFilter(ToolTipFilter(start_all, showDelay=300, position=ToolTipPosition.BOTTOM))
         start_all.clicked.connect(self.on_start_all)
         
         pause_all = TransparentToolButton(FluentIcon.PAUSE, self)
         pause_all.setToolTip("全部暂停")
+        pause_all.installEventFilter(ToolTipFilter(pause_all, showDelay=300, position=ToolTipPosition.BOTTOM))
         pause_all.clicked.connect(self.on_pause_all)
         
         # 打开目录
         open_dir = TransparentToolButton(FluentIcon.FOLDER, self)
         open_dir.setToolTip("打开下载目录")
+        open_dir.installEventFilter(ToolTipFilter(open_dir, showDelay=300, position=ToolTipPosition.BOTTOM))
         open_dir.clicked.connect(self.on_open_download_dir)
         
         # 清空已完成
         clear_completed = TransparentToolButton(FluentIcon.DELETE, self)
         clear_completed.setToolTip("清空已完成记录")
+        clear_completed.installEventFilter(ToolTipFilter(clear_completed, showDelay=300, position=ToolTipPosition.BOTTOM))
         clear_completed.clicked.connect(self.on_clear_completed)
         
         # 批量操作按钮
         batch_btn = PushButton(FluentIcon.CHECKBOX, "批量操作", page)
         batch_btn.setToolTip("进入批量操作模式")
+        batch_btn.installEventFilter(ToolTipFilter(batch_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         
         select_all_btn = PushButton(FluentIcon.ACCEPT, "全选", page)
         select_all_btn.setToolTip("全选")
+        select_all_btn.installEventFilter(ToolTipFilter(select_all_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         select_all_btn.hide()
         
         start_sel_btn = PushButton(FluentIcon.PLAY, "开始选中", page)
         start_sel_btn.setToolTip("开始选中任务")
+        start_sel_btn.installEventFilter(ToolTipFilter(start_sel_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         start_sel_btn.hide()
         
         pause_sel_btn = PushButton(FluentIcon.PAUSE, "暂停选中", page)
         pause_sel_btn.setToolTip("暂停选中任务")
+        pause_sel_btn.installEventFilter(ToolTipFilter(pause_sel_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         pause_sel_btn.hide()
         
         del_sel_btn = PushButton(FluentIcon.DELETE, "删除选中", page)
         del_sel_btn.setToolTip("删除选中任务")
+        del_sel_btn.installEventFilter(ToolTipFilter(del_sel_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         del_sel_btn.hide()
         
         def toggle_batch():
@@ -854,6 +866,7 @@ class MainWindow(FluentWindow):
         # Parent MUST be titleBar to ensure correct z-order and event handling
         self.help_btn = TransparentToolButton(FluentIcon.HELP, self.titleBar)
         self.help_btn.setToolTip("帮助中心")
+        self.help_btn.installEventFilter(ToolTipFilter(self.help_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.help_btn.clicked.connect(self.show_help_window)
         self.help_btn.setFixedSize(46, 32)
         

@@ -19,6 +19,75 @@ from .subtitle_manager import (
 )
 
 
+def should_embed_subtitles(config: SubtitleConfig) -> bool:
+    """
+    判断是否应该嵌入字幕到视频容器（软嵌入）
+    
+    Args:
+        config: 字幕配置对象
+        
+    Returns:
+        True 表示应该嵌入，False 表示不嵌入
+    """
+    # 只有软嵌入类型才使用容器嵌入
+    if config.embed_type != "soft":
+        return False
+    
+    # 检查嵌入模式
+    return config.embed_mode != "never"
+
+
+def build_embed_opts(config: SubtitleConfig) -> dict[str, Any]:
+    """
+    根据 embed_type 构建完整的嵌入相关选项
+    
+    这是统一的入口，确保 embedsubtitles、merge_output_format、
+    writesubtitles 等选项的一致性。
+    
+    Args:
+        config: 字幕配置对象
+        
+    Returns:
+        嵌入相关的 yt-dlp 选项
+    """
+    from ..utils.logger import logger as _logger
+    _logger.info("[SubEmbed] build_embed_opts: embed_type={}, embed_mode={}",
+                 config.embed_type, config.embed_mode)
+    
+    opts: dict[str, Any] = {}
+    
+    if config.embed_type == "soft":
+        # 软嵌入：封装到视频容器中
+        if config.embed_mode != "never":
+            opts["embedsubtitles"] = True
+            # 注意：不在此处设置 merge_output_format
+            # MP4 和 MKV 都支持字幕嵌入（FFmpeg 会自动将 SRT 转为 mov_text）
+            # 只有 WebM 不支持 SRT/ASS 嵌入
+            # 容器格式由格式选择器决定，仅在必要时（WebM/未指定）才覆盖
+        else:
+            opts["embedsubtitles"] = False
+        opts["writesubtitles"] = True  # 需要先下载字幕才能嵌入
+        
+    elif config.embed_type == "external":
+        # 外置文件：只下载字幕，不嵌入
+        opts["embedsubtitles"] = False
+        opts["writesubtitles"] = True
+        
+    elif config.embed_type == "hard":
+        # 硬嵌入（烧录）：目前实际走软嵌入路径
+        # 真正的硬嵌入需要 FFmpeg 重编码，尚未实现
+        # 为了让用户得到嵌入效果，暂时使用软嵌入替代
+        if config.embed_mode != "never":
+            opts["embedsubtitles"] = True
+            _logger.warning("[SubEmbed] 硬嵌入暂未实现，已自动使用软嵌入替代")
+        else:
+            opts["embedsubtitles"] = False
+        opts["writesubtitles"] = True
+    
+    _logger.info("[SubEmbed] build_embed_opts 返回: {}", opts)
+    return opts
+
+
 @dataclass
 class SubtitleRequest:
     """
@@ -69,7 +138,12 @@ class NoneStrategy(SubtitleStrategy):
     """不下载字幕策略"""
     
     def apply(self, request: SubtitleRequest) -> dict[str, Any]:
-        return {}
+        # 显式禁用所有字幕选项，确保覆盖外部 yt-dlp 配置
+        return {
+            "writesubtitles": False,
+            "writeautomaticsub": False,
+            "embedsubtitles": False,
+        }
     
     def get_description(self) -> str:
         return "不下载字幕"
@@ -95,14 +169,17 @@ class SingleLanguageStrategy(SubtitleStrategy):
             return {}
         
         config = request.user_config or config_manager.get_subtitle_config()
+        embed_opts = build_embed_opts(config)
         
-        return {
-            "writesubtitles": True,
+        opts = {
             "writeautomaticsub": self.enable_auto,
             "subtitleslangs": [self.language],
-            "embedsubtitles": config.embed_mode != "never",
-            "convertsubtitles": config.format if config.format in ["srt", "ass", "vtt"] else None,
         }
+        # 仅外置模式需要格式转换；软/硬嵌入让 FFmpeg 处理原生格式（VTT→mov_text 更可靠）
+        if config.embed_type == "external" and config.format in ["srt", "ass", "vtt"]:
+            opts["convertsubtitles"] = config.format
+        opts.update(embed_opts)
+        return opts
     
     def get_description(self) -> str:
         return f"单语言字幕: {self.language}"
@@ -135,14 +212,17 @@ class MultiLanguageStrategy(SubtitleStrategy):
             return {}
         
         config = request.user_config or config_manager.get_subtitle_config()
+        embed_opts = build_embed_opts(config)
         
-        return {
-            "writesubtitles": True,
+        opts = {
             "writeautomaticsub": config.enable_auto_captions,
             "subtitleslangs": selected,
-            "embedsubtitles": config.embed_mode != "never",
-            "convertsubtitles": config.format if config.format in ["srt", "ass", "vtt"] else None,
         }
+        # 仅外置模式需要格式转换；软/硬嵌入让 FFmpeg 处理原生格式
+        if config.embed_type == "external" and config.format in ["srt", "ass", "vtt"]:
+            opts["convertsubtitles"] = config.format
+        opts.update(embed_opts)
+        return opts
     
     def get_description(self) -> str:
         return f"多语言字幕: {', '.join(self.languages[:3])}{'...' if len(self.languages) > 3 else ''}"
@@ -191,65 +271,20 @@ class SmartStrategy(SubtitleStrategy):
             return {}
         
         config = request.user_config or config_manager.get_subtitle_config()
+        embed_opts = build_embed_opts(config)
         
-        return {
-            "writesubtitles": True,
+        opts = {
             "writeautomaticsub": config.enable_auto_captions,
             "subtitleslangs": selected,
-            "embedsubtitles": config.embed_mode != "never",
-            "convertsubtitles": config.format if config.format in ["srt", "ass", "vtt"] else None,
         }
+        # 仅外置模式需要格式转换；软/硬嵌入让 FFmpeg 处理原生格式
+        if config.embed_type == "external" and config.format in ["srt", "ass", "vtt"]:
+            opts["convertsubtitles"] = config.format
+        opts.update(embed_opts)
+        return opts
     
     def get_description(self) -> str:
         return "智能选择字幕（中文→英语→日语）"
-
-
-class BilingualStrategy(SubtitleStrategy):
-    """
-    双语字幕策略
-    
-    下载两种语言并后处理合并为双语字幕文件。
-    注意：合并操作在下载完成后由 SubtitleProcessor 执行。
-    """
-    
-    def __init__(self, primary: str, secondary: str):
-        self.primary = primary
-        self.secondary = secondary
-    
-    def apply(self, request: SubtitleRequest) -> dict[str, Any]:
-        tracks = extract_subtitle_tracks(request.video_info)
-        available_codes = {t.lang_code for t in tracks}
-        
-        # 检查两种语言是否都可用
-        has_primary = self.primary in available_codes
-        has_secondary = self.secondary in available_codes
-        
-        if not (has_primary and has_secondary):
-            # 回退到单语言
-            if has_primary:
-                return SingleLanguageStrategy(self.primary).apply(request)
-            elif has_secondary:
-                return SingleLanguageStrategy(self.secondary).apply(request)
-            return {}
-        
-        config = request.user_config or config_manager.get_subtitle_config()
-        
-        # 下载两种语言，但不嵌入（因为需要先合并）
-        return {
-            "writesubtitles": True,
-            "writeautomaticsub": config.enable_auto_captions,
-            "subtitleslangs": [self.primary, self.secondary],
-            "embedsubtitles": False,  # 双语合并后再嵌入
-            "convertsubtitles": "srt",  # 强制 SRT 格式便于合并
-            # 添加标记用于后处理识别
-            "_bilingual_merge": True,
-            "_bilingual_primary": self.primary,
-            "_bilingual_secondary": self.secondary,
-            "_bilingual_style": config.bilingual_style,
-        }
-    
-    def get_description(self) -> str:
-        return f"双语字幕: {self.primary} + {self.secondary}"
 
 
 class SubtitleService:
@@ -295,13 +330,6 @@ class SubtitleService:
         # 全局禁用
         if not config.enabled:
             return NoneStrategy()
-        
-        # 双语模式
-        if config.enable_bilingual:
-            return BilingualStrategy(
-                config.bilingual_primary,
-                config.bilingual_secondary,
-            )
         
         # 多语言模式
         if len(config.default_languages) > 1:

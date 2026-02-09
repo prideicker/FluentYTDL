@@ -15,6 +15,8 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     ProgressBar,
+    ToolTipFilter,
+    ToolTipPosition,
     TransparentToolButton,
     StrongBodyLabel,
 )
@@ -110,15 +112,18 @@ class DownloadItemWidget(CardWidget):
 
         self.actionBtn = TransparentToolButton(FluentIcon.PAUSE, self)
         self.actionBtn.setToolTip("暂停任务")
+        self.actionBtn.installEventFilter(ToolTipFilter(self.actionBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.actionBtn.clicked.connect(self.on_action_clicked)
 
         self.folderBtn = TransparentToolButton(FluentIcon.FOLDER, self)
         self.folderBtn.setToolTip("打开文件夹")
+        self.folderBtn.installEventFilter(ToolTipFilter(self.folderBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.folderBtn.setEnabled(False)
         self.folderBtn.clicked.connect(self._open_output_location)
 
         self.deleteBtn = TransparentToolButton(FluentIcon.DELETE, self)
         self.deleteBtn.setToolTip("删除任务")
+        self.deleteBtn.installEventFilter(ToolTipFilter(self.deleteBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.deleteBtn.clicked.connect(self.on_delete_clicked)
 
         self.actionLayout.addWidget(self.actionBtn)

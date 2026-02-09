@@ -21,6 +21,7 @@ from qfluentwidgets import (
     ComboBox,
     FluentIcon,
     RadioButton,
+    ScrollArea,
     SegmentedWidget,
 )
 
@@ -82,7 +83,22 @@ class SimplePresetWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.v_layout = QVBoxLayout(self)
+        
+        # 主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 创建滚动区域
+        scroll_area = ScrollArea(self)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(450)  # 限制最大高度
+        
+        # 滚动内容容器
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background-color: transparent;")
+        self.v_layout = QVBoxLayout(content_widget)
         self.v_layout.setSpacing(12)
         self.v_layout.setContentsMargins(10, 10, 10, 10)
         
@@ -184,6 +200,11 @@ class SimplePresetWidget(QWidget):
             
             self.v_layout.addWidget(container)
             
+        # 设置滚动区域
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area)
+        
+        # Select first by default
         if self.radios:
             self.radios[0].setChecked(True)
 

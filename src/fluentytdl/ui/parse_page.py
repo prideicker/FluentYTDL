@@ -17,6 +17,13 @@ class ParsePage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("parsePage")
+        
+        # 设置页面背景色（类似侧边栏的浅灰底色）
+        self.setStyleSheet("""
+            #parsePage {
+                background-color: #F5F5F5;
+            }
+        """)
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
@@ -41,6 +48,14 @@ class ParsePage(QWidget):
         # 2. 核心操作区 (卡片风格)
         self.inputCard = CardWidget(self)
         self.inputCard.setMaximumWidth(760)
+        # 增强卡片样式：更明显的圆角和阴影
+        self.inputCard.setStyleSheet("""
+            CardWidget {
+                background-color: white;
+                border-radius: 12px;
+                border: 1px solid rgba(0, 0, 0, 0.05);
+            }
+        """)
         self.cardLayout = QVBoxLayout(self.inputCard)
         self.cardLayout.setContentsMargins(20, 20, 20, 20)
         self.cardLayout.setSpacing(15)

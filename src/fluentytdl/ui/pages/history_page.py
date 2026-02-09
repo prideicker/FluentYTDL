@@ -26,6 +26,8 @@ from qfluentwidgets import (
     PushButton,
     SearchLineEdit,
     SubtitleLabel,
+    ToolTipFilter,
+    ToolTipPosition,
     TransparentToolButton,
     InfoBar,
     InfoBarPosition,
@@ -76,18 +78,21 @@ class HistoryPage(QWidget):
         # 刷新
         refresh_btn = TransparentToolButton(FluentIcon.SYNC, self)
         refresh_btn.setToolTip("刷新列表")
+        refresh_btn.installEventFilter(ToolTipFilter(refresh_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         refresh_btn.clicked.connect(self.reload)
         toolbar.addWidget(refresh_btn)
 
         # 清理无效
         clean_btn = TransparentToolButton(FluentIcon.BROOM, self)
         clean_btn.setToolTip("清理文件丢失的记录")
+        clean_btn.installEventFilter(ToolTipFilter(clean_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         clean_btn.clicked.connect(self._on_clean)
         toolbar.addWidget(clean_btn)
 
         # 清空全部
         clear_btn = TransparentToolButton(FluentIcon.DELETE, self)
         clear_btn.setToolTip("清空所有历史")
+        clear_btn.installEventFilter(ToolTipFilter(clear_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         clear_btn.clicked.connect(self._on_clear_all)
         toolbar.addWidget(clear_btn)
 

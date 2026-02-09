@@ -40,6 +40,36 @@ LANGUAGE_NAMES = {
     "auto": "自动生成",
 }
 
+# UI显示用的常用语言列表（按使用频率和地区排序）
+COMMON_SUBTITLE_LANGUAGES = [
+    # 东亚地区（高频）
+    ("zh-Hans", "中文(简体)"),
+    ("zh-Hant", "中文(繁体)"),
+    ("en", "英语"),
+    ("ja", "日语"),
+    ("ko", "韩语"),
+    
+    # 欧洲主要语言
+    ("fr", "法语"),
+    ("de", "德语"),
+    ("es", "西班牙语"),
+    ("pt", "葡萄牙语"),
+    ("it", "意大利语"),
+    ("ru", "俄语"),
+    
+    # 其他地区
+    ("ar", "阿拉伯语"),
+    ("hi", "印地语"),
+    ("th", "泰语"),
+    ("vi", "越南语"),
+    ("id", "印尼语"),
+    ("tr", "土耳其语"),
+    ("nl", "荷兰语"),
+    ("pl", "波兰语"),
+    ("sv", "瑞典语"),
+    ("no", "挪威语"),
+]
+
 # 支持的字幕格式
 SUBTITLE_FORMATS = ["srt", "ass", "vtt", "lrc"]
 
@@ -246,161 +276,3 @@ def convert_subtitle(
         raise RuntimeError("字幕转换超时")
     
     return output_path
-
-
-def merge_subtitles(
-    primary_path: str | Path,
-    secondary_path: str | Path,
-    output_path: str | Path | None = None,
-    style: str = "top-bottom",
-) -> Path:
-    """
-    合成双语字幕
-    
-    Args:
-        primary_path: 主字幕路径 (显示在上方)
-        secondary_path: 副字幕路径 (显示在下方)
-        output_path: 输出路径
-        style: 样式 ("top-bottom", "inline")
-        
-    Returns:
-        输出文件路径
-    """
-    primary_path = Path(primary_path)
-    secondary_path = Path(secondary_path)
-    
-    if output_path is None:
-        stem = primary_path.stem
-        output_path = primary_path.parent / f"{stem}_bilingual.srt"
-    else:
-        output_path = Path(output_path)
-    
-    # 解析两个 SRT 文件
-    primary_subs = _parse_srt(primary_path)
-    secondary_subs = _parse_srt(secondary_path)
-    
-    # 合并：按时间对齐
-    merged = _align_and_merge(primary_subs, secondary_subs, style)
-    
-    # 写入输出
-    _write_srt(merged, output_path)
-    
-    return output_path
-
-
-@dataclass
-class SrtEntry:
-    """SRT 字幕条目"""
-    index: int
-    start: str  # 时间码 "00:00:00,000"
-    end: str
-    text: str
-    
-    @property
-    def start_ms(self) -> int:
-        return _timestr_to_ms(self.start)
-    
-    @property
-    def end_ms(self) -> int:
-        return _timestr_to_ms(self.end)
-
-
-def _timestr_to_ms(timestr: str) -> int:
-    """将 SRT 时间码转换为毫秒"""
-    # 00:00:00,000
-    match = re.match(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})", timestr)
-    if not match:
-        return 0
-    h, m, s, ms = map(int, match.groups())
-    return h * 3600000 + m * 60000 + s * 1000 + ms
-
-
-def _ms_to_timestr(ms: int) -> str:
-    """将毫秒转换为 SRT 时间码"""
-    h = ms // 3600000
-    m = (ms % 3600000) // 60000
-    s = (ms % 60000) // 1000
-    ms_part = ms % 1000
-    return f"{h:02d}:{m:02d}:{s:02d},{ms_part:03d}"
-
-
-def _parse_srt(path: Path) -> list[SrtEntry]:
-    """解析 SRT 文件"""
-    content = path.read_text(encoding="utf-8", errors="replace")
-    entries = []
-    
-    # 按空行分割
-    blocks = re.split(r"\n\s*\n", content.strip())
-    
-    for block in blocks:
-        lines = block.strip().split("\n")
-        if len(lines) < 3:
-            continue
-        
-        try:
-            index = int(lines[0])
-            times = lines[1]
-            match = re.match(r"(.+?)\s*-->\s*(.+)", times)
-            if not match:
-                continue
-            start, end = match.groups()
-            text = "\n".join(lines[2:])
-            
-            entries.append(SrtEntry(index, start.strip(), end.strip(), text))
-        except (ValueError, IndexError):
-            continue
-    
-    return entries
-
-
-def _write_srt(entries: list[SrtEntry], path: Path) -> None:
-    """写入 SRT 文件"""
-    lines = []
-    for i, entry in enumerate(entries, 1):
-        lines.append(str(i))
-        lines.append(f"{entry.start} --> {entry.end}")
-        lines.append(entry.text)
-        lines.append("")
-    
-    path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _align_and_merge(
-    primary: list[SrtEntry],
-    secondary: list[SrtEntry],
-    style: str,
-) -> list[SrtEntry]:
-    """对齐并合并字幕"""
-    merged = []
-    s_idx = 0
-    
-    for p in primary:
-        # 找到时间重叠的副字幕
-        matching_secondary = []
-        for s in secondary[s_idx:]:
-            # 检查时间重叠
-            if s.end_ms < p.start_ms:
-                s_idx += 1
-                continue
-            if s.start_ms > p.end_ms:
-                break
-            matching_secondary.append(s)
-        
-        # 合并文本
-        if matching_secondary:
-            secondary_text = "\n".join(s.text for s in matching_secondary)
-            if style == "inline":
-                merged_text = f"{p.text} / {secondary_text}"
-            else:  # top-bottom
-                merged_text = f"{p.text}\n{secondary_text}"
-        else:
-            merged_text = p.text
-        
-        merged.append(SrtEntry(
-            index=len(merged) + 1,
-            start=p.start,
-            end=p.end,
-            text=merged_text,
-        ))
-    
-    return merged

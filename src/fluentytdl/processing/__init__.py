@@ -18,7 +18,6 @@ from .subtitle_service import (
     SmartStrategy,
     SingleLanguageStrategy,
     MultiLanguageStrategy,
-    BilingualStrategy,
 )
 from .subtitle_processor import (
     SubtitleProcessor,
@@ -53,7 +52,6 @@ __all__ = [
     "SmartStrategy",
     "SingleLanguageStrategy",
     "MultiLanguageStrategy",
-    "BilingualStrategy",
     "SubtitleProcessor",
     "subtitle_processor",
     "SubtitleProcessResult",

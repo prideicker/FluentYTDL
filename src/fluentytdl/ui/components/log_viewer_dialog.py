@@ -27,6 +27,8 @@ from qfluentwidgets import (
     PushButton,
     FluentIcon,
     ToolButton,
+    ToolTipFilter,
+    ToolTipPosition,
 )
 
 from ...utils.log_signal_handler import log_signal_handler
@@ -125,11 +127,13 @@ class LogViewerDialog(MessageBoxBase):
         # 清屏按钮
         self.clearBtn = ToolButton(FluentIcon.DELETE)
         self.clearBtn.setToolTip("清屏")
+        self.clearBtn.installEventFilter(ToolTipFilter(self.clearBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         toolbar_layout.addWidget(self.clearBtn)
         
         # 打开目录按钮
         self.openDirBtn = ToolButton(FluentIcon.FOLDER)
         self.openDirBtn.setToolTip("打开日志目录")
+        self.openDirBtn.installEventFilter(ToolTipFilter(self.openDirBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         toolbar_layout.addWidget(self.openDirBtn)
         
         self.viewLayout.addWidget(toolbar)

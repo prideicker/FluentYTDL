@@ -17,7 +17,6 @@ from typing import Any
 
 from ..core.config_manager import config_manager
 from ..utils.logger import logger
-from .subtitle_manager import merge_subtitles
 
 
 @dataclass
@@ -101,36 +100,12 @@ class SubtitleProcessor:
             else:
                 logger.warning("✗ 字幕文件无效: {} - {}", sub_file.name, reason)
         
-        # 3. 检查是否需要双语合并
-        enable_bilingual = config_manager.get("subtitle_enable_bilingual", False)
-        bilingual_mode = opts.get("__fluentytdl_bilingual_mode", False)
-        
-        if (enable_bilingual or bilingual_mode) and len(processed_files) >= 2:
-            if status_callback:
-                status_callback("[字幕处理] 正在合并双语字幕...")
-            
-            merge_result = self._merge_bilingual_subtitles(
-                processed_files,
-                video_path,
-                status_callback
-            )
-            
-            if merge_result:
-                merged_file = str(merge_result)
-                logger.info("✓ 双语字幕合并成功: {}", merge_result.name)
-                if status_callback:
-                    status_callback(f"[字幕处理] ✓ 双语字幕已合并: {merge_result.name}")
-            else:
-                logger.warning("✗ 双语字幕合并失败")
-                if status_callback:
-                    status_callback("[字幕处理] ✗ 双语字幕合并失败")
-        
-        # 4. 返回处理结果
+        # 3. 返回处理结果
         return SubtitleProcessResult(
             success=True,
             message=f"成功处理 {len(processed_files)} 个字幕文件",
             processed_files=processed_files,
-            merged_file=merged_file
+            merged_file=None
         )
     
     def _find_subtitle_files(self, video_path: Path) -> list[Path]:
@@ -184,79 +159,6 @@ class SubtitleProcessor:
             return False, "编码错误"
         except Exception as e:
             return False, f"读取失败: {str(e)}"
-    
-    def _merge_bilingual_subtitles(
-        self,
-        subtitle_files: list[str],
-        video_path: Path,
-        status_callback: callable = None
-    ) -> Path | None:
-        """
-        合并双语字幕
-        
-        策略：
-        1. 优先合并 zh-Hans + en
-        2. 如果没有 zh-Hans，尝试 zh + en
-        3. 如果只有两个字幕，直接合并前两个
-        
-        Returns:
-            合并后的字幕文件路径，失败返回 None
-        """
-        if len(subtitle_files) < 2:
-            logger.warning("字幕文件少于 2 个，无法合并")
-            return None
-        
-        # 1. 按语言代码分类字幕文件
-        subtitle_map = {}
-        for sub_file in subtitle_files:
-            path = Path(sub_file)
-            # 从文件名中提取语言代码 (例如: video.zh-Hans.srt -> zh-Hans)
-            parts = path.stem.split(".")
-            if len(parts) >= 2:
-                lang_code = parts[-1]
-                subtitle_map[lang_code] = path
-        
-        primary_sub = None
-        secondary_sub = None
-        
-        # 2. 选择主副字幕
-        if "zh-Hans" in subtitle_map and "en" in subtitle_map:
-            primary_sub = subtitle_map["zh-Hans"]
-            secondary_sub = subtitle_map["en"]
-            logger.info("找到 zh-Hans + en 字幕组合")
-        elif "zh" in subtitle_map and "en" in subtitle_map:
-            primary_sub = subtitle_map["zh"]
-            secondary_sub = subtitle_map["en"]
-            logger.info("找到 zh + en 字幕组合")
-        elif len(subtitle_files) == 2:
-            # 如果只有两个字幕，直接使用
-            primary_sub = Path(subtitle_files[0])
-            secondary_sub = Path(subtitle_files[1])
-            logger.info("使用前两个字幕文件进行合并")
-        else:
-            logger.warning("无法确定主副字幕，跳过合并")
-            return None
-        
-        # 3. 执行合并
-        try:
-            output_path = video_path.parent / f"{video_path.stem}.bilingual.srt"
-            
-            if status_callback:
-                status_callback(f"[字幕处理] 合并 {primary_sub.name} + {secondary_sub.name}")
-            
-            result = merge_subtitles(
-                primary_path=primary_sub,
-                secondary_path=secondary_sub,
-                output_path=output_path,
-                style="top-bottom"
-            )
-            
-            logger.info("双语字幕合并成功: {}", result)
-            return result
-            
-        except Exception as e:
-            logger.exception("双语字幕合并失败: {}", e)
-            return None
 
 
 # 单例实例

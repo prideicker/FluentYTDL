@@ -21,6 +21,8 @@ from qfluentwidgets import (
     FluentIcon,
     Slider,
     ToolButton,
+    ToolTipFilter,
+    ToolTipPosition,
 )
 
 from ...core.config_manager import config_manager
@@ -107,6 +109,7 @@ class RateLimitSlider(QWidget):
         # 无限速按钮
         self.unlimitedBtn = ToolButton(FluentIcon.SPEED_HIGH, self)
         self.unlimitedBtn.setToolTip("取消限速")
+        self.unlimitedBtn.installEventFilter(ToolTipFilter(self.unlimitedBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.unlimitedBtn.clicked.connect(self._on_unlimited_clicked)
         slider_layout.addWidget(self.unlimitedBtn)
         
@@ -234,6 +237,7 @@ class GlobalRateLimitWidget(QWidget):
         # 图标
         self.iconBtn = ToolButton(FluentIcon.SPEED_OFF, self)
         self.iconBtn.setToolTip("全局限速设置")
+        self.iconBtn.installEventFilter(ToolTipFilter(self.iconBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         layout.addWidget(self.iconBtn)
         
         # 下拉选择

@@ -32,8 +32,11 @@ from qfluentwidgets import (
     MessageBoxBase,
     PushButton,
     PrimaryPushButton,
+    ScrollArea,
     SubtitleLabel,
     RadioButton,
+    ToolTipFilter,
+    ToolTipPosition,
 )
 
 
@@ -42,6 +45,36 @@ from ...youtube.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
 from ...utils.image_loader import ImageLoader
 from ...processing import subtitle_service
 from .format_selector import VideoFormatSelectorWidget
+
+
+# ---- 字幕容器兼容性辅助函数 ----
+# MP4 和 MKV 都支持字幕嵌入（FFmpeg 自动将 SRT 转为 mov_text），只有 WebM 不支持 SRT/ASS
+_SUBTITLE_COMPATIBLE_CONTAINERS = {"mp4", "mkv", "mov", "m4v"}
+
+
+def _ensure_subtitle_compatible_container(opts: dict[str, Any]) -> None:
+    """
+    确保容器格式兼容字幕嵌入。
+
+    只有当 embedsubtitles=True 时才需要检查：
+    - MP4/MKV/MOV 等已经支持字幕嵌入 → 保持不变
+    - WebM 不支持 SRT/ASS → 改用 MKV
+    - 未指定容器（原盘模式）→ 默认 MKV
+    """
+    if not opts.get("embedsubtitles"):
+        return
+
+    fmt = (opts.get("merge_output_format") or "").lower()
+    if fmt in _SUBTITLE_COMPATIBLE_CONTAINERS:
+        # MP4/MKV 等已支持，不覆盖用户选择
+        return
+    elif fmt == "webm":
+        # WebM 不支持 SRT/ASS 字幕嵌入
+        opts["merge_output_format"] = "mkv"
+    elif not fmt:
+        # 未指定容器格式（原盘/默认），使用 MKV 确保兼容
+        opts["merge_output_format"] = "mkv"
+    # 其他格式保持不变，由用户自行负责
 
 
 _TABLE_SELECTION_QSS = """
@@ -74,7 +107,22 @@ class SimplePresetWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.v_layout = QVBoxLayout(self)
+        
+        # 主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 创建滚动区域
+        scroll_area = ScrollArea(self)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(450)  # 限制最大高度
+        
+        # 滚动内容容器
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background-color: transparent;")
+        self.v_layout = QVBoxLayout(content_widget)
         self.v_layout.setSpacing(12)
         self.v_layout.setContentsMargins(10, 10, 10, 10)
         
@@ -176,6 +224,10 @@ class SimplePresetWidget(QWidget):
             
             self.v_layout.addWidget(container)
             
+        # 设置滚动区域
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area)
+        
         # Select first by default
         if self.radios:
             self.radios[0].setChecked(True)
@@ -311,6 +363,7 @@ class PlaylistActionWidget(QWidget):
 
         self.qualityButton = PushButton("待加载", self)
         self.qualityButton.setToolTip("点击获取信息/选择格式")
+        self.qualityButton.installEventFilter(ToolTipFilter(self.qualityButton, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.qualityButton.setMinimumWidth(140)
 
         top.addWidget(self.loadingRing)
@@ -1832,12 +1885,30 @@ class SelectionDialog(MessageBoxBase):
                 )
                 ydl_opts.update(subtitle_opts)
                 
-                # 如果用户明确选择了嵌入选项，覆盖配置默认值
+                # 如果用户明确选择了嵌入选项，需要根据 embed_type 来决定行为
                 if embed_override is not None:
-                    ydl_opts["embedsubtitles"] = embed_override
+                    from ...core.config_manager import config_manager as cfg
+                    embed_type = cfg.get_subtitle_config().embed_type
+                    
+                    if embed_type == "soft":
+                        # 软嵌入：用户选择覆盖 embedsubtitles
+                        ydl_opts["embedsubtitles"] = embed_override
+                    elif embed_type == "external":
+                        # 外置文件：始终不嵌入，忽略用户的弹窗选择
+                        ydl_opts["embedsubtitles"] = False
+                    elif embed_type == "hard":
+                        # 硬嵌入（烧录）尚未实现，自动降级为软嵌入
+                        ydl_opts["embedsubtitles"] = embed_override
+                        print("[DEBUG] get_selected_tasks: hard embed not implemented, using soft embed instead")
+                    
+                    print(f"[DEBUG] get_selected_tasks: embed_type={embed_type}, embed_override={embed_override}, final embedsubtitles={ydl_opts.get('embedsubtitles')}")
+                
+                # 确保容器格式兼容字幕嵌入
+                _ensure_subtitle_compatible_container(ydl_opts)
                 
                 print(f"[DEBUG] get_selected_tasks: subtitle_opts = {subtitle_opts}")
-                print(f"[DEBUG] get_selected_tasks: final embed = {ydl_opts.get('embedsubtitles')}")
+                print(f"[DEBUG] get_selected_tasks: final embedsubtitles = {ydl_opts.get('embedsubtitles')}")
+                print(f"[DEBUG] get_selected_tasks: final merge_output_format = {ydl_opts.get('merge_output_format')}")
             
             tasks.append((title, url, ydl_opts, thumb))
             return tasks
@@ -2364,9 +2435,17 @@ class SelectionDialog(MessageBoxBase):
                 )
                 opts.update(subtitle_opts)
                 
-                # 如果有覆盖选项，应用它
-                if embed_subtitles_override is not None and "embedsubtitles" in subtitle_opts:
-                    opts["embedsubtitles"] = embed_subtitles_override
+                # 根据 embed_type 应用覆盖选项
+                if embed_subtitles_override is not None:
+                    from ...core.config_manager import config_manager as cfg
+                    embed_type = cfg.get_subtitle_config().embed_type
+                    if embed_type in ("soft", "hard"):
+                        # soft/hard 都走软嵌入路径（hard 暂未实现，降级处理）
+                        opts["embedsubtitles"] = embed_subtitles_override
+                    else:
+                        opts["embedsubtitles"] = False
+                
+                _ensure_subtitle_compatible_container(opts)
             
             return opts
 
@@ -2391,8 +2470,15 @@ class SelectionDialog(MessageBoxBase):
             )
             opts.update(subtitle_opts)
             
-            # 如果有覆盖选项，应用它
-            if embed_subtitles_override is not None and "embedsubtitles" in subtitle_opts:
-                opts["embedsubtitles"] = embed_subtitles_override
+            # 根据 embed_type 应用覆盖选项
+            if embed_subtitles_override is not None:
+                from ...core.config_manager import config_manager as cfg
+                embed_type = cfg.get_subtitle_config().embed_type
+                if embed_type in ("soft", "hard"):
+                    opts["embedsubtitles"] = embed_subtitles_override
+                else:
+                    opts["embedsubtitles"] = False
+            
+            _ensure_subtitle_compatible_container(opts)
         
         return opts

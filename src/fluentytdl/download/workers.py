@@ -206,10 +206,36 @@ class DownloadWorker(QThread):
             except Exception:
                 self.download_dir = os.path.abspath(os.getcwd())
 
+            # === 埋点：记录字幕相关选项（合并 base_opts 后）===
+            logger.info("[SubEmbed] === 字幕选项追踪（合并后） ===")
+            logger.info("[SubEmbed] embedsubtitles  = {}", merged.get("embedsubtitles"))
+            logger.info("[SubEmbed] writesubtitles   = {}", merged.get("writesubtitles"))
+            logger.info("[SubEmbed] writeautomaticsub= {}", merged.get("writeautomaticsub"))
+            logger.info("[SubEmbed] subtitleslangs   = {}", merged.get("subtitleslangs"))
+            logger.info("[SubEmbed] convertsubtitles = {}", merged.get("convertsubtitles"))
+            logger.info("[SubEmbed] merge_output_fmt = {}", merged.get("merge_output_format"))
+            logger.info("[SubEmbed] format           = {}", merged.get("format"))
+
             # Strip internal meta options (never pass to yt-dlp)
             for k in list(merged.keys()):
                 if isinstance(k, str) and k.startswith("__fluentytdl_"):
                     merged.pop(k, None)
+
+            # === 字幕嵌入安全网 ===
+            # 当 embedsubtitles 为 True 时，确保容器格式支持字幕嵌入
+            # MP4/MKV 都支持字幕嵌入，只有 WebM 不支持 SRT/ASS
+            if merged.get("embedsubtitles"):
+                fmt = (merged.get("merge_output_format") or "").lower()
+                if fmt == "webm":
+                    merged["merge_output_format"] = "mkv"
+                    logger.info("[SubEmbed] WebM → MKV（WebM 不支持字幕嵌入）")
+                elif not fmt:
+                    merged["merge_output_format"] = "mkv"
+                    logger.info("[SubEmbed] 未指定容器 → MKV（确保字幕嵌入兼容）")
+                else:
+                    logger.info("[SubEmbed] 容器 {} 支持字幕嵌入，保持不变", fmt)
+            else:
+                logger.warning("[SubEmbed] ⚠️ embedsubtitles=False → yt-dlp 不会嵌入字幕！")
 
             # === Phase 2: 断点续传支持 ===
             from ..core.config_manager import config_manager as cfg_mgr
@@ -249,6 +275,7 @@ class DownloadWorker(QThread):
         # Base flags: quiet but keep progress, one line per update.
         cmd: list[str] = [
             exe,
+            "--ignore-config",  # 忽略外部 yt-dlp 配置文件，确保只使用应用内设置
             "--no-warnings",
             "--no-color",
             "--newline",
@@ -272,8 +299,27 @@ class DownloadWorker(QThread):
         cmd += ydl_opts_to_cli_args(merged_opts)
         cmd.append(self.url)
         
-        # DEBUG: 记录完整命令
-        logger.debug("yt-dlp command: {}", ' '.join(cmd))
+        # 记录完整命令（关键调试信息）
+        logger.info("[SubEmbed] === 最终 yt-dlp 命令 ===")
+        # 分行输出关键字幕/容器参数
+        cmd_str = ' '.join(cmd)
+        for flag in ['--embed-subs', '--write-sub', '--write-auto-sub', '--sub-langs',
+                      '--convert-subs', '--merge-output-format', '-f']:
+            if flag in cmd_str:
+                idx = cmd.index(flag) if flag in cmd else -1
+                if idx >= 0:
+                    # 带参数的 flag
+                    if flag in ('-f', '--sub-langs', '--convert-subs', '--merge-output-format'):
+                        val = cmd[idx + 1] if idx + 1 < len(cmd) else '?'
+                        logger.info("[SubEmbed] CLI: {} {}", flag, val)
+                    else:
+                        logger.info("[SubEmbed] CLI: {}", flag)
+        has_embed = '--embed-subs' in cmd
+        has_merge = '--merge-output-format' in cmd
+        logger.info("[SubEmbed] --embed-subs 存在: {}  --merge-output-format 存在: {}", has_embed, has_merge)
+        if not has_embed:
+            logger.warning("[SubEmbed] ⚠️ 命令中没有 --embed-subs！字幕将不会被嵌入到视频中！")
+        logger.debug("yt-dlp full command: {}", cmd_str)
 
         env = prepare_yt_dlp_env()
 
@@ -641,6 +687,9 @@ class DownloadWorker(QThread):
         
         # 清理遗留的缩略图文件
         self._cleanup_thumbnail_files(merged_opts)
+        
+        # 清理遗留的字幕文件（嵌入成功且用户不需要外置文件时）
+        self._cleanup_subtitle_files(merged_opts)
 
     def stop(self) -> None:
         """外部调用此方法暂停/取消下载"""
@@ -977,6 +1026,61 @@ class DownloadWorker(QThread):
                         logger.debug("已删除缩略图文件: {}", thumb_file)
                     except Exception as e:
                         logger.warning("无法删除缩略图文件 {}: {}", thumb_file, e)
+
+    def _cleanup_subtitle_files(self, opts: dict[str, Any]) -> None:
+        """
+        清理嵌入后遗留的字幕文件
+        
+        仅在以下条件同时满足时删除：
+        1. 字幕已嵌入到视频容器 (embedsubtitles=True)
+        2. 用户未要求保留外置文件 (write_separate_file=False)
+        """
+        # 未启用嵌入字幕，字幕文件本身就是最终产物，不删除
+        if not opts.get("embedsubtitles"):
+            logger.debug("[SubCleanup] embedsubtitles 未启用，保留字幕文件")
+            return
+        
+        # 检查用户是否要求保留外置文件
+        write_separate = config_manager.get("subtitle_write_separate_file", False)
+        if write_separate:
+            logger.debug("[SubCleanup] write_separate_file=True，保留字幕文件")
+            return
+        
+        # 收集所有可能的基础路径
+        paths_to_check = []
+        if self.output_path and os.path.exists(self.output_path):
+            paths_to_check.append(self.output_path)
+        for dest_path in self.dest_paths:
+            if os.path.exists(dest_path):
+                paths_to_check.append(dest_path)
+        
+        subtitle_extensions = [".srt", ".ass", ".vtt"]
+        deleted_count = 0
+        
+        for path in paths_to_check:
+            base_path = os.path.splitext(path)[0]
+            parent_dir = os.path.dirname(path)
+            stem = os.path.splitext(os.path.basename(path))[0]
+            
+            # 查找 {stem}.*.{ext} 格式的字幕文件（如 video.zh-Hans.srt）
+            try:
+                for filename in os.listdir(parent_dir):
+                    if not filename.startswith(stem):
+                        continue
+                    _, ext = os.path.splitext(filename)
+                    if ext.lower() in subtitle_extensions:
+                        sub_file = os.path.join(parent_dir, filename)
+                        try:
+                            os.remove(sub_file)
+                            deleted_count += 1
+                            logger.debug("[SubCleanup] 已删除字幕文件: {}", sub_file)
+                        except Exception as e:
+                            logger.warning("[SubCleanup] 无法删除字幕文件 {}: {}", sub_file, e)
+            except Exception as e:
+                logger.warning("[SubCleanup] 遍历目录失败 {}: {}", parent_dir, e)
+        
+        if deleted_count > 0:
+            logger.info("[SubCleanup] 共清理 {} 个字幕文件（已嵌入到视频）", deleted_count)
 
     def _subtitle_postprocess(self, opts: dict[str, Any]) -> None:
         """

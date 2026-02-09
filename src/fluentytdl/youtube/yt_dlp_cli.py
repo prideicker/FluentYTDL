@@ -323,10 +323,16 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     # 写入字幕
     if ydl_opts.get("writesubtitles"):
         args += ["--write-sub"]
+    elif ydl_opts.get("writesubtitles") is False:
+        # 显式禁用：覆盖外部 yt-dlp 配置中可能存在的 --write-sub
+        args += ["--no-write-sub"]
     
     # 写入自动字幕
     if ydl_opts.get("writeautomaticsub"):
         args += ["--write-auto-sub"]
+    elif ydl_opts.get("writeautomaticsub") is False:
+        # 显式禁用：覆盖外部 yt-dlp 配置中可能存在的 --write-auto-sub
+        args += ["--no-write-auto-sub"]
     
     # 字幕语言
     subtitleslangs = ydl_opts.get("subtitleslangs")

@@ -21,6 +21,8 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     StrongBodyLabel,
+    ToolTipFilter,
+    ToolTipPosition,
     TransparentToolButton,
 )
 
@@ -134,18 +136,21 @@ class HistoryItemWidget(CardWidget):
         # 打开文件夹
         self.folder_btn = TransparentToolButton(FluentIcon.FOLDER, self)
         self.folder_btn.setToolTip("打开文件位置")
+        self.folder_btn.installEventFilter(ToolTipFilter(self.folder_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.folder_btn.setEnabled(record.file_exists)
         self.folder_btn.clicked.connect(self._open_location)
 
         # 播放按钮
         self.play_btn = TransparentToolButton(FluentIcon.PLAY, self)
         self.play_btn.setToolTip("播放文件")
+        self.play_btn.installEventFilter(ToolTipFilter(self.play_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.play_btn.setEnabled(record.file_exists)
         self.play_btn.clicked.connect(self._play_file)
 
         # 删除记录
         self.del_btn = TransparentToolButton(FluentIcon.DELETE, self)
         self.del_btn.setToolTip("删除记录")
+        self.del_btn.installEventFilter(ToolTipFilter(self.del_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.del_btn.clicked.connect(lambda: self.remove_requested.emit(self))
 
         btn_layout.addWidget(self.play_btn)

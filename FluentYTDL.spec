@@ -18,7 +18,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['PySide6.QtQml', 'PySide6.QtQuick', 'PySide6.QtQuickWidgets', 'PySide6.QtPdf', 'PySide6.QtPdfWidgets', 'PySide6.Qt3DCore', 'PySide6.Qt3DRender', 'PySide6.QtWebEngine', 'PySide6.QtWebEngineWidgets', 'PySide6.QtMultimedia', 'PySide6.QtBluetooth', 'PySide6.QtPositioning'],
     noarchive=False,
     optimize=0,
 )
@@ -27,16 +27,13 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='FluentYTDL',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -45,4 +42,14 @@ exe = EXE(
     entitlements_file=None,
     version='E:\\YouTube\\FluentYTDL\\build\\version_info.txt',
     icon=['E:\\YouTube\\FluentYTDL\\assets\\logo.ico'],
+    contents_directory='runtime',
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='FluentYTDL',
 )

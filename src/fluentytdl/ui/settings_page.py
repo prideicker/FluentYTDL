@@ -27,6 +27,11 @@ from qfluentwidgets import (
     SubtitleLabel,
     ProgressBar,
     ToolButton,
+    ToolTipFilter,
+    ToolTipPosition,
+    FlowLayout,
+    RadioButton,
+    MessageBox,
 )
 
 from ..core.config_manager import config_manager
@@ -35,6 +40,7 @@ from ..utils.paths import find_bundled_executable, is_frozen
 from ..utils.logger import LOG_DIR
 from .components.smart_setting_card import SmartSettingCard
 from ..core.dependency_manager import dependency_manager
+from ..processing.subtitle_manager import COMMON_SUBTITLE_LANGUAGES
 
 
 # ============================================================================
@@ -114,10 +120,12 @@ class ComponentSettingCard(SettingCard):
         
         self.importButton = PushButton("手动导入", self, FluentIcon.ADD)
         self.importButton.setToolTip("选择本地文件覆盖当前组件")
+        self.importButton.installEventFilter(ToolTipFilter(self.importButton, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.importButton.clicked.connect(self._on_import_clicked)
         
         self.folderButton = ToolButton(FluentIcon.FOLDER, self)
         self.folderButton.setToolTip("打开所在文件夹")
+        self.folderButton.installEventFilter(ToolTipFilter(self.folderButton, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.folderButton.clicked.connect(self._open_folder)
 
         # Layout
@@ -328,6 +336,198 @@ class InlineLineEditCard(SettingCard):
             self.lineEdit.setPlaceholderText(placeholder)
         self.hBoxLayout.addWidget(self.lineEdit, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
+
+
+class LanguageSelectionDialog(MessageBox):
+    """语言多选对话框"""
+    
+    def __init__(self, languages: list[tuple[str, str]], selected: list[str], parent=None):
+        super().__init__("选择字幕语言", "", parent)
+        
+        self.languages = languages
+        self.selected_languages = selected.copy() if selected else []
+        self.checkboxes = {}
+        
+        # 创建内容布局
+        from PySide6.QtWidgets import QVBoxLayout, QFrame, QScrollArea, QGridLayout, QWidget
+        
+        content_widget = QWidget(self)
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 添加说明
+        hint_label = SubtitleLabel("请选择要下载的字幕语言（可多选）：", content_widget)
+        content_layout.addWidget(hint_label)
+        content_layout.addSpacing(12)
+        
+        # 创建复选框容器
+        checkbox_container = QFrame(content_widget)
+        checkbox_layout = QGridLayout(checkbox_container)
+        checkbox_layout.setContentsMargins(8, 8, 8, 8)
+        checkbox_layout.setSpacing(12)
+        
+        # 创建复选框（2列网格，更易读）
+        row = 0
+        col = 0
+        for code, name in languages:
+            checkbox = CheckBox(f"{name} ({code})", checkbox_container)
+            checkbox.setChecked(code in self.selected_languages)
+            checkbox.setMinimumWidth(280)  # 确保复选框有足够宽度显示完整文本
+            checkbox_layout.addWidget(checkbox, row, col)
+            self.checkboxes[code] = checkbox
+            
+            col += 1
+            if col >= 2:  # 2列布局
+                col = 0
+                row += 1
+        
+        # 设置列宽度均匀分布
+        checkbox_layout.setColumnStretch(0, 1)
+        checkbox_layout.setColumnStretch(1, 1)
+        
+        # 添加滚动区域
+        scroll = QScrollArea(content_widget)
+        scroll.setWidget(checkbox_container)
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(250)
+        scroll.setMaximumHeight(400)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content_layout.addWidget(scroll)
+        
+        # 将内容添加到对话框
+        self.textLayout.addWidget(content_widget)
+        
+        # 设置对话框大小（更宽以容纳2列布局）
+        self.widget.setMinimumWidth(700)
+        self.widget.setMaximumWidth(800)
+    
+    def get_selected_languages(self) -> list[str]:
+        """获取选中的语言代码列表"""
+        return [code for code, checkbox in self.checkboxes.items() if checkbox.isChecked()]
+
+
+class LanguageMultiSelectCard(SettingCard):
+    """语言多选卡片 - 按钮弹出对话框"""
+    
+    selectionChanged = Signal(list)  # 选中语言列表变化信号
+    
+    def __init__(
+        self,
+        icon,
+        title: str,
+        content: str | None,
+        languages: list[tuple[str, str]],  # [(code, name), ...]
+        selected_default: list[str] = None,
+        parent=None,
+    ):
+        super().__init__(icon, title, content, parent)
+        
+        self.languages = languages
+        self.selected_languages = selected_default if selected_default else []
+        
+        # 创建按钮显示当前选择
+        self.selectButton = PushButton("选择语言", self)
+        self.selectButton.clicked.connect(self._show_language_dialog)
+        self.hBoxLayout.addWidget(self.selectButton, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(16)
+        
+        # 更新按钮文本
+        self._update_button_text()
+    
+    def _update_button_text(self):
+        """更新按钮显示文本"""
+        if not self.selected_languages:
+            self.selectButton.setText("选择语言")
+        else:
+            # 显示选中的语言名称
+            names = []
+            for code in self.selected_languages[:3]:  # 最多显示3个
+                name = next((n for c, n in self.languages if c == code), code)
+                names.append(name)
+            
+            text = ", ".join(names)
+            if len(self.selected_languages) > 3:
+                text += f" 等 {len(self.selected_languages)} 种语言"
+            self.selectButton.setText(text)
+    
+    def _show_language_dialog(self):
+        """显示语言选择对话框"""
+        dialog = LanguageSelectionDialog(self.languages, self.selected_languages, self.window())
+        if dialog.exec():
+            # 用户点击确定
+            new_selection = dialog.get_selected_languages()
+            if new_selection != self.selected_languages:
+                self.selected_languages = new_selection
+                self._update_button_text()
+                self.selectionChanged.emit(self.selected_languages)
+    
+    def get_selected_languages(self) -> list[str]:
+        """获取选中的语言代码列表"""
+        return self.selected_languages.copy()
+    
+    def set_selected_languages(self, codes: list[str]):
+        """设置选中的语言"""
+        self.selected_languages = codes.copy() if codes else []
+        self._update_button_text()
+
+
+class EmbedTypeComboCard(SettingCard):
+    """嵌入类型下拉框卡片"""
+    
+    valueChanged = Signal(str)  # soft/external/hard
+    
+    # 嵌入类型映射
+    EMBED_TYPES = [
+        ("soft", "软嵌入（推荐） - 封装到容器，可开关，多语言"),
+        ("external", "外置文件 - 独立.srt，易编辑，兼容性最佳"),
+        ("hard", "硬嵌入（烧录） - 永久显示，最多2语言"),
+    ]
+    
+    def __init__(
+        self,
+        icon,
+        title: str,
+        content: str | None,
+        default: str = "soft",
+        parent=None,
+    ):
+        super().__init__(icon, title, content, parent)
+        
+        # 创建下拉框
+        self.comboBox = ComboBox(self)
+        self.comboBox.setMinimumWidth(280)
+        
+        # 添加选项
+        for code, display_text in self.EMBED_TYPES:
+            self.comboBox.addItem(display_text, userData=code)
+        
+        # 设置默认值
+        self.set_value(default)
+        
+        # 连接信号
+        self.comboBox.currentIndexChanged.connect(self._on_selection_changed)
+        
+        # 添加到布局
+        self.hBoxLayout.addWidget(self.comboBox, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(16)
+    
+    def _on_selection_changed(self, index: int):
+        """下拉框选择改变"""
+        value = self.comboBox.itemData(index)
+        if value:
+            self.valueChanged.emit(value)
+    
+    def get_value(self) -> str:
+        """获取当前选中的值"""
+        current_index = self.comboBox.currentIndex()
+        return self.comboBox.itemData(current_index) or "soft"
+    
+    def set_value(self, value: str):
+        """设置选中的值"""
+        for i in range(self.comboBox.count()):
+            if self.comboBox.itemData(i) == value:
+                self.comboBox.setCurrentIndex(i)
+                break
 
 
 class InlinePathPickerCard(SettingCard):
@@ -827,21 +1027,34 @@ class SettingsPage(ScrollArea):
         )
         self.subtitleEnabledCard.checkedChanged.connect(self._on_subtitle_enabled_changed)
         
-        # 默认语言设置
-        self.subtitleLanguagesCard = InlineLineEditCard(
+        # 语言多选卡片 (NEW)
+        config = config_manager.get_subtitle_config()
+        current_languages = config.default_languages if config.default_languages else []
+        self.subtitleLanguagesCard = LanguageMultiSelectCard(
             FluentIcon.GLOBE,
-            "默认语言",
-            "优先下载的字幕语言（逗号分隔，如: zh-Hans,en,ja）",
-            placeholder="zh-Hans,en",
+            "字幕语言",
+            "选择要下载的字幕语言（可多选）",
+            languages=COMMON_SUBTITLE_LANGUAGES,
+            selected_default=current_languages,
             parent=self.subtitleGroup,
         )
-        self.subtitleLanguagesCard.lineEdit.editingFinished.connect(self._on_subtitle_languages_edited)
+        self.subtitleLanguagesCard.selectionChanged.connect(self._on_subtitle_languages_changed)
         
-        # 嵌入模式
-        self.subtitleEmbedModeCard = InlineComboBoxCard(
+        # 嵌入类型下拉框卡片 (NEW)
+        self.subtitleEmbedTypeCard = EmbedTypeComboCard(
             FluentIcon.VIDEO,
-            "嵌入模式",
-            "字幕嵌入视频的策略",
+            "嵌入类型",
+            "选择字幕的封装方式",
+            default=config.embed_type,
+            parent=self.subtitleGroup,
+        )
+        self.subtitleEmbedTypeCard.valueChanged.connect(self._on_subtitle_embed_type_changed)
+        
+        # 嵌入模式 (询问/总是/从不)
+        self.subtitleEmbedModeCard = InlineComboBoxCard(
+            FluentIcon.CHECKBOX,
+            "嵌入确认",
+            "是否在下载前询问是否嵌入字幕",
             ["总是嵌入", "从不嵌入", "每次询问"],
             parent=self.subtitleGroup,
         )
@@ -857,27 +1070,29 @@ class SettingsPage(ScrollArea):
         )
         self.subtitleFormatCard.comboBox.currentIndexChanged.connect(self._on_subtitle_format_changed)
         
-        # 双语字幕开关
-        self.subtitleBilingualCard = InlineSwitchCard(
-            FluentIcon.SYNC,
-            "启用双语字幕",
-            "合成两种语言的字幕到一个文件（主语言在上，副语言在下）",
+        # 保留外置字幕文件开关（仅软/硬嵌入时有意义）
+        self.subtitleKeepSeparateCard = InlineSwitchCard(
+            FluentIcon.SAVE,
+            "保留外置字幕文件",
+            "嵌入字幕后是否同时保留独立的字幕文件（.srt/.ass 等）",
             parent=self.subtitleGroup,
         )
-        self.subtitleBilingualCard.checkedChanged.connect(self._on_subtitle_bilingual_changed)
+        self.subtitleKeepSeparateCard.checkedChanged.connect(self._on_subtitle_keep_separate_changed)
         
         # 添加卡片到组
         self.subtitleGroup.addSettingCard(self.subtitleEnabledCard)
         self.subtitleGroup.addSettingCard(self.subtitleLanguagesCard)
+        self.subtitleGroup.addSettingCard(self.subtitleEmbedTypeCard)
         self.subtitleGroup.addSettingCard(self.subtitleEmbedModeCard)
         self.subtitleGroup.addSettingCard(self.subtitleFormatCard)
-        self.subtitleGroup.addSettingCard(self.subtitleBilingualCard)
+        self.subtitleGroup.addSettingCard(self.subtitleKeepSeparateCard)
         
         # 缩进依赖项
         self._indent_setting_card(self.subtitleLanguagesCard)
+        self._indent_setting_card(self.subtitleEmbedTypeCard)
         self._indent_setting_card(self.subtitleEmbedModeCard)
         self._indent_setting_card(self.subtitleFormatCard)
-        self._indent_setting_card(self.subtitleBilingualCard)
+        self._indent_setting_card(self.subtitleKeepSeparateCard)
         
         self.expandLayout.addWidget(self.subtitleGroup)
 
@@ -912,10 +1127,12 @@ class SettingsPage(ScrollArea):
         
         self.openLogDirBtn = ToolButton(FluentIcon.FOLDER, self.logCard)
         self.openLogDirBtn.setToolTip("打开日志目录")
+        self.openLogDirBtn.installEventFilter(ToolTipFilter(self.openLogDirBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.openLogDirBtn.clicked.connect(self._on_open_log_dir)
         
         self.cleanLogBtn = ToolButton(FluentIcon.DELETE, self.logCard)
         self.cleanLogBtn.setToolTip("清理所有日志")
+        self.cleanLogBtn.installEventFilter(ToolTipFilter(self.cleanLogBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
         self.cleanLogBtn.clicked.connect(self._on_clean_log_clicked)
         
         self.logCard.hBoxLayout.addWidget(self.viewLogBtn, 0, Qt.AlignmentFlag.AlignRight)
@@ -1110,10 +1327,16 @@ class SettingsPage(ScrollArea):
         self.subtitleEnabledCard.switchButton.setChecked(subtitle_enabled)
         self.subtitleEnabledCard.switchButton.blockSignals(False)
         
-        # Subtitle: languages
-        subtitle_languages = config_manager.get("subtitle_default_languages", ["zh-Hans", "en"])
-        languages_str = ",".join(subtitle_languages) if isinstance(subtitle_languages, list) else str(subtitle_languages)
-        self.subtitleLanguagesCard.lineEdit.setText(languages_str)
+        # Subtitle: languages (NEW - 加载到多选卡片)
+        subtitle_config = config_manager.get_subtitle_config()
+        subtitle_languages = subtitle_config.default_languages if subtitle_config.default_languages else ["zh-Hans", "en"]
+        # 不需要阻塞信号，因为 set_selected_languages 不会触发信号
+        self.subtitleLanguagesCard.set_selected_languages(subtitle_languages)
+        
+        # Subtitle: embed type (NEW)
+        self.subtitleEmbedTypeCard.comboBox.blockSignals(True)
+        self.subtitleEmbedTypeCard.set_value(subtitle_config.embed_type)
+        self.subtitleEmbedTypeCard.comboBox.blockSignals(False)
         
         # Subtitle: embed mode
         embed_mode = str(config_manager.get("subtitle_embed_mode", "always"))
@@ -1129,11 +1352,11 @@ class SettingsPage(ScrollArea):
         self.subtitleFormatCard.comboBox.setCurrentIndex(format_map.get(subtitle_format, 0))
         self.subtitleFormatCard.comboBox.blockSignals(False)
         
-        # Subtitle: bilingual
-        subtitle_bilingual = bool(config_manager.get("subtitle_enable_bilingual", False))
-        self.subtitleBilingualCard.switchButton.blockSignals(True)
-        self.subtitleBilingualCard.switchButton.setChecked(subtitle_bilingual)
-        self.subtitleBilingualCard.switchButton.blockSignals(False)
+        # Subtitle: keep separate file
+        keep_separate = bool(config_manager.get("subtitle_write_separate_file", False))
+        self.subtitleKeepSeparateCard.switchButton.blockSignals(True)
+        self.subtitleKeepSeparateCard.switchButton.setChecked(keep_separate)
+        self.subtitleKeepSeparateCard.switchButton.blockSignals(False)
         
         # Update subtitle settings visibility
         self._update_subtitle_settings_visibility(subtitle_enabled)
@@ -1262,54 +1485,17 @@ class SettingsPage(ScrollArea):
     
     def _show_sponsorblock_categories_dialog(self) -> None:
         """显示 SponsorBlock 类别选择对话框"""
-        from qfluentwidgets import MessageBox
-        from PySide6.QtWidgets import QDialog, QDialogButtonBox
-        
-        # 类别定义
-        sponsorblock_categories = [
-            ("sponsor", "赞助广告", "视频中的付费推广内容"),
-            ("selfpromo", "自我推广", "频道推广、社交媒体链接等"),
-            ("interaction", "互动提醒", "订阅、点赞、评论提醒"),
-            ("intro", "片头", "视频开头的固定片头"),
-            ("outro", "片尾", "视频结尾的固定片尾"),
-            ("preview", "预告", "视频中的预告片段"),
-            ("filler", "填充内容", "与主题无关的闲聊内容"),
-            ("music_offtopic", "非音乐部分", "音乐视频中的非音乐内容"),
-        ]
+        from .components.sponsorblock_dialog import SponsorBlockCategoriesDialog
         
         # 获取当前选中的类别
-        current_categories = set(config_manager.get("sponsorblock_categories", []))
+        current_categories = config_manager.get("sponsorblock_categories", [])
         
-        # 创建对话框
-        dialog = QDialog(self)
-        dialog.setWindowTitle("选择要跳过的片段类型")
-        dialog.setMinimumWidth(400)
+        # 创建并显示对话框
+        dialog = SponsorBlockCategoriesDialog(current_categories, self)
         
-        layout = QVBoxLayout(dialog)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # 创建复选框
-        checkboxes: dict[str, CheckBox] = {}
-        for cat_id, cat_name, cat_desc in sponsorblock_categories:
-            checkbox = CheckBox(f"{cat_name} - {cat_desc}", dialog)
-            checkbox.setChecked(cat_id in current_categories)
-            layout.addWidget(checkbox)
-            checkboxes[cat_id] = checkbox
-        
-        # 添加按钮
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
-            dialog
-        )
-        button_box.accepted.connect(dialog.accept)
-        button_box.rejected.connect(dialog.reject)
-        layout.addWidget(button_box)
-        
-        # 显示对话框
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if dialog.exec():
             # 保存选中的类别
-            selected = [cat_id for cat_id, cb in checkboxes.items() if cb.isChecked()]
+            selected = dialog.selected_categories
             config_manager.set("sponsorblock_categories", selected)
             
             # 更新卡片描述
@@ -2116,11 +2302,28 @@ class SettingsPage(ScrollArea):
         status = 'enabled' if checked else 'disabled'
         InfoBar.success('Subtitle Settings', f'Subtitle download {status}', duration=3000, parent=self)
     
-    def _on_subtitle_languages_edited(self) -> None:
-        text = self.subtitleLanguagesCard.lineEdit.text().strip()
-        languages = [lang.strip() for lang in text.split(',') if lang.strip()] if text else ['zh-Hans', 'en']
+    def _on_subtitle_languages_changed(self, languages: list[str]) -> None:
+        """语言选择改变回调"""
+        if not languages:
+            languages = ['zh-Hans', 'en']
         config_manager.set('subtitle_default_languages', languages)
-        InfoBar.success('Language Settings', f'Default subtitle languages: {", ".join(languages)}', duration=3000, parent=self)
+        InfoBar.success('语言设置', f'已选择字幕语言: {", ".join(languages)}', duration=3000, parent=self)
+    
+    def _on_subtitle_embed_type_changed(self, embed_type: str) -> None:
+        """嵌入类型改变回调"""
+        config = config_manager.get_subtitle_config()
+        config.embed_type = embed_type
+        config_manager.set_subtitle_config(config)
+        type_names = {'soft': '软嵌入', 'external': '外置文件', 'hard': '硬嵌入'}
+        InfoBar.success('嵌入类型', f'字幕嵌入类型: {type_names.get(embed_type, embed_type)}', duration=3000, parent=self)
+        # 嵌入类型变更时联动可见性
+        self._update_keep_separate_visibility()
+    
+    def _on_subtitle_keep_separate_changed(self, checked: bool) -> None:
+        """保留外置字幕文件开关改变"""
+        config_manager.set('subtitle_write_separate_file', checked)
+        status = '保留' if checked else '不保留'
+        InfoBar.success('字幕文件', f'嵌入后{status}外置字幕文件', duration=3000, parent=self)
     
     def _on_subtitle_embed_mode_changed(self, index: int) -> None:
         mode_map = {0: 'always', 1: 'never', 2: 'ask'}
@@ -2134,14 +2337,18 @@ class SettingsPage(ScrollArea):
         config_manager.set('subtitle_format', fmt)
         InfoBar.success('Format Settings', f'Subtitle format: {fmt.upper()}', duration=3000, parent=self)
     
-    def _on_subtitle_bilingual_changed(self, checked: bool) -> None:
-        config_manager.set('subtitle_enable_bilingual', checked)
-        status = 'enabled' if checked else 'disabled'
-        InfoBar.success('Bilingual Subtitles', f'Bilingual subtitle merge {status}', duration=3000, parent=self)
+    def _update_keep_separate_visibility(self) -> None:
+        """根据嵌入类型更新「保留外置字幕文件」开关的可见性"""
+        enabled = self.subtitleEnabledCard.switchButton.isChecked()
+        embed_type = self.subtitleEmbedTypeCard.get_value()
+        # 仅软嵌入/硬嵌入时显示此选项（外置模式下字幕文件本身就是产物）
+        self.subtitleKeepSeparateCard.setVisible(enabled and embed_type in ("soft", "hard"))
     
     def _update_subtitle_settings_visibility(self, enabled: bool) -> None:
         self.subtitleLanguagesCard.setVisible(enabled)
+        self.subtitleEmbedTypeCard.setVisible(enabled)
         self.subtitleEmbedModeCard.setVisible(enabled)
         self.subtitleFormatCard.setVisible(enabled)
-        self.subtitleBilingualCard.setVisible(enabled)
+        # 「保留外置字幕」仅嵌入模式下可见
+        self._update_keep_separate_visibility()
 
