@@ -135,6 +135,8 @@ jobs:
 
       - name: 🔨 验证 PyInstaller 配置
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           # 只验证 PyInstaller 能够解析依赖，不实际构建
           python -c "
