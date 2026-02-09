@@ -1846,6 +1846,21 @@ class SelectionDialog(MessageBoxBase):
                 if sel and sel.get("format"):
                     ydl_opts["format"] = sel["format"]
                     ydl_opts.update(sel.get("extra_opts") or {})
+
+                    # ========== VR 格式检测 ==========
+                    # 检查选择的格式是否包含 VR 专属格式 ID
+                    vr_only_ids = info.get("__vr_only_format_ids") or []
+                    android_vr_ids = info.get("__android_vr_format_ids") or []
+                    if vr_only_ids:
+                        selected_format = sel["format"]
+                        # 检查 format 字符串中是否包含任何 VR 专属 ID
+                        for vr_id in vr_only_ids:
+                            if vr_id in selected_format:
+                                ydl_opts["__fluentytdl_use_android_vr"] = True
+                                ydl_opts["__android_vr_format_ids"] = android_vr_ids
+                                print(f"[DEBUG] get_selected_tasks: VR format {vr_id} detected, enabling android_vr client")
+                                print(f"[DEBUG] get_selected_tasks: android_vr has {len(android_vr_ids)} formats available")
+                                break
                 else:
                     # 修复：即使没有格式选择，也应该使用默认格式
                     print("[DEBUG] get_selected_tasks: No format in selection, using default")

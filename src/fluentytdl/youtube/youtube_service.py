@@ -590,6 +590,188 @@ class YoutubeService:
         except Exception:
             return 0
 
+    # ========== VR 视频智能检测与二次解析 ==========
+
+    # VR 相关关键词 (用于标题/描述检测)
+    _VR_KEYWORDS = (
+        "vr180", "vr360", "vr 180", "vr 360",
+        "180°", "360°", "180vr", "360vr",
+        "3d vr", "vr video", "vr体验", "vr视频",
+        "sbs", "side by side", "over under", "ou3d",
+        "stereoscopic", "immersive",
+    )
+
+    def _is_vr_video(self, info: dict[str, Any]) -> bool:
+        """检测视频是否为 VR180/VR360 内容。
+
+        检测条件:
+        1. 标题/描述含 VR 相关关键词
+        2. 格式列表中包含 'mesh' 标记 (VR 投影格式特征)
+        3. 标题声称 8K 但最高格式 < 4320p (格式异常)
+        """
+        title = str(info.get("title") or "").lower()
+        description = str(info.get("description") or "").lower()
+        text = f"{title} {description}"
+
+        # 检查 VR 关键词
+        for kw in self._VR_KEYWORDS:
+            if kw in text:
+                self._emit_log("info", f"🥽 检测到 VR 关键词: '{kw}'")
+                return True
+
+        # 检查格式是否包含 mesh 标记 (VR 投影)
+        formats = info.get("formats") or []
+        for fmt in formats:
+            format_note = str(fmt.get("format_note") or "").lower()
+            format_id = str(fmt.get("format") or "").lower()
+            if "mesh" in format_note or "mesh" in format_id:
+                self._emit_log("info", "🥽 检测到 VR 投影格式 (mesh)")
+                return True
+
+        # 检查分辨率异常: 标题含 8K 但格式列表最高 < 4320p
+        if "8k" in title:
+            max_height = 0
+            for fmt in formats:
+                h = fmt.get("height") or 0
+                if isinstance(h, int) and h > max_height:
+                    max_height = h
+            if max_height > 0 and max_height < 4320:
+                self._emit_log(
+                    "warning",
+                    f"⚠️ 标题声称 8K 但最高格式仅 {max_height}p，可能是 VR 视频",
+                )
+                return True
+
+        return False
+
+    def _get_max_resolution(self, info: dict[str, Any]) -> int:
+        """获取格式列表中的最高分辨率 (height)"""
+        formats = info.get("formats") or []
+        max_height = 0
+        for fmt in formats:
+            h = fmt.get("height") or 0
+            if isinstance(h, int) and h > max_height:
+                max_height = h
+        return max_height
+
+    def _extract_vr_formats(
+        self,
+        url: str,
+        cancel_event: threading.Event | None = None,
+    ) -> list[dict[str, Any]]:
+        """使用 android_vr 客户端获取 VR 高分辨率格式。
+
+        注意: android_vr 不支持 cookies，因此无法用于年龄验证。
+        此方法仅用于补充 VR 高分辨率格式。
+        """
+        self._emit_log("info", "🔄 使用 android_vr 客户端获取 VR 高分辨率格式...")
+
+        # 构建无 cookies 的 android_vr 解析选项
+        vr_opts: dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "ignoreerrors": False,
+            "skip_download": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android_vr"],
+                }
+            },
+        }
+
+        # FFmpeg location (复用主配置)
+        ffmpeg_path = str(config_manager.get("ffmpeg_path") or "").strip()
+        if ffmpeg_path and Path(ffmpeg_path).exists():
+            vr_opts["ffmpeg_location"] = ffmpeg_path
+        elif is_frozen():
+            bundled_ffmpeg = find_bundled_executable("ffmpeg.exe", "ffmpeg/ffmpeg.exe")
+            if bundled_ffmpeg is not None:
+                vr_opts["ffmpeg_location"] = str(bundled_ffmpeg)
+
+        # JS runtime (复用主配置逻辑)
+        self._maybe_configure_youtube_js_runtime(vr_opts)
+
+        try:
+            info = run_dump_single_json(
+                url,
+                vr_opts,
+                extra_args=["--no-playlist"],
+                cancel_event=cancel_event,
+            )
+            if isinstance(info, dict):
+                formats = info.get("formats") or []
+                self._emit_log(
+                    "info",
+                    f"✅ android_vr 客户端获取到 {len(formats)} 个格式",
+                )
+                return list(formats)
+        except Exception as e:
+            self._emit_log("warning", f"android_vr 解析失败: {e}")
+
+        return []
+
+    def _merge_formats(
+        self,
+        info: dict[str, Any],
+        vr_formats: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """合并首次解析和 VR 解析的格式列表。
+
+        合并策略:
+        - 使用 format_id 去重
+        - VR 格式优先 (通常包含更高分辨率)
+        - 记录 VR 专属格式 ID (仅 android_vr 有，web 没有)
+        - 记录所有 android_vr 可用格式 ID (用于兼容性检查)
+        """
+        if not vr_formats:
+            return info
+
+        existing_formats = info.get("formats") or []
+        existing_ids = {str(f.get("format_id") or "") for f in existing_formats}
+
+        # 记录所有 android_vr 可用的格式 ID (用于下载时兼容性检查)
+        all_vr_format_ids: list[str] = []
+        for vr_fmt in vr_formats:
+            fmt_id = str(vr_fmt.get("format_id") or "")
+            if fmt_id:
+                all_vr_format_ids.append(fmt_id)
+
+        # 添加不重复的 VR 格式，并记录 VR 专属格式 ID
+        added_count = 0
+        vr_only_format_ids: list[str] = []
+        for vr_fmt in vr_formats:
+            fmt_id = str(vr_fmt.get("format_id") or "")
+            if fmt_id and fmt_id not in existing_ids:
+                existing_formats.append(vr_fmt)
+                existing_ids.add(fmt_id)
+                vr_only_format_ids.append(fmt_id)
+                added_count += 1
+
+        if added_count > 0:
+            # 按分辨率排序
+            existing_formats.sort(
+                key=lambda f: (f.get("height") or 0, f.get("width") or 0)
+            )
+            info["formats"] = existing_formats
+
+            # 记录 VR 专属格式 ID (仅 android_vr 有，web 没有)
+            info["__vr_only_format_ids"] = vr_only_format_ids
+            # 记录所有 android_vr 可用格式 ID (用于下载时兼容性检查)
+            info["__android_vr_format_ids"] = all_vr_format_ids
+            self._emit_log(
+                "info",
+                f"✅ 已合并 {added_count} 个 VR 高分辨率格式 (IDs: {', '.join(vr_only_format_ids)})",
+            )
+
+            # 更新最高分辨率信息
+            max_height = self._get_max_resolution(info)
+            if max_height >= 4320:
+                self._emit_log("info", f"🎉 最高可用分辨率: {max_height}p (8K)")
+            elif max_height >= 2160:
+                self._emit_log("info", f"📺 最高可用分辨率: {max_height}p (4K)")
+
+        return info
+
     def extract_info_sync(
         self,
         url: str,
@@ -620,7 +802,19 @@ class YoutubeService:
 
         try:
             self._emit_log("info", f"开始解析 URL: {url}")
-            return _do_extract(ydl_opts)
+            info = _do_extract(ydl_opts)
+
+            # ========== VR 视频智能检测与二次解析 ==========
+            # 检测是否为 VR 视频，如果是则使用 android_vr 客户端补充高分辨率格式
+            try:
+                if self._is_vr_video(info):
+                    vr_formats = self._extract_vr_formats(url, cancel_event)
+                    info = self._merge_formats(info, vr_formats)
+            except Exception as vr_exc:
+                # VR 二次解析失败不影响主流程
+                self._emit_log("warning", f"VR 二次解析过程出错: {vr_exc}")
+
+            return info
         except Exception as exc:
             if isinstance(exc, YtDlpCancelled):
                 raise
@@ -693,7 +887,17 @@ class YoutubeService:
                 extra_args=["--flat-playlist", "--lazy-playlist"],
                 cancel_event=cancel_event,
             )
-            return cast(dict[str, Any], info)
+            info = cast(dict[str, Any], info)
+
+            # VR 视频智能检测 (仅对单视频生效)
+            if info.get("_type") != "playlist" and self._is_vr_video(info):
+                try:
+                    vr_formats = self._extract_vr_formats(url, cancel_event)
+                    info = self._merge_formats(info, vr_formats)
+                except Exception as vr_exc:
+                    self._emit_log("warning", f"VR 二次解析过程出错: {vr_exc}")
+
+            return info
         except Exception as exc:
             if isinstance(exc, YtDlpCancelled):
                 raise

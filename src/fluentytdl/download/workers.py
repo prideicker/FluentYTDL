@@ -216,6 +216,69 @@ class DownloadWorker(QThread):
             logger.info("[SubEmbed] merge_output_fmt = {}", merged.get("merge_output_format"))
             logger.info("[SubEmbed] format           = {}", merged.get("format"))
 
+            # ========== VR 格式专用客户端 ==========
+            # 注意：必须在清除 __fluentytdl_ 前缀选项之前处理！
+            # 如果检测到 VR 专属格式（仅通过 android_vr 客户端可用），
+            # 则注入 android_vr 客户端参数并禁用 cookies（android_vr 不支持 cookies）
+            if merged.pop("__fluentytdl_use_android_vr", False):
+                logger.info("🥽 检测到 VR 专属格式，切换至 android_vr 客户端下载")
+                
+                # 检查格式兼容性：用户选择的所有格式 ID 都必须在 android_vr 中可用
+                android_vr_ids = set(merged.pop("__android_vr_format_ids", []))
+                format_str = merged.get("format", "")
+                
+                if android_vr_ids and format_str:
+                    import re
+                    # 提取格式字符串中的所有格式 ID (如 "571+140-drc" -> ["571", "140-drc"])
+                    # 格式 ID 通常是数字，可能带有后缀如 -drc
+                    format_ids = re.findall(r'\b(\d+(?:-[a-z]+)?)\b', format_str)
+                    
+                    incompatible = []
+                    for fid in format_ids:
+                        # 检查基础 ID (去掉后缀如 -drc)
+                        base_id = fid.split('-')[0]
+                        if base_id not in android_vr_ids and fid not in android_vr_ids:
+                            incompatible.append(fid)
+                    
+                    if incompatible:
+                        logger.warning(
+                            f"⚠️ 格式不兼容: {', '.join(incompatible)} 不在 android_vr 可用列表中"
+                        )
+                        # 自动替换为 android_vr 可用的最佳音频
+                        # 找出 android_vr 中的音频格式 (通常是 139, 140, 141, 249, 250, 251 等)
+                        audio_ids = {'139', '140', '141', '249', '250', '251', '256', '258'}
+                        vr_audio_ids = android_vr_ids & audio_ids
+                        if vr_audio_ids:
+                            # 优先选择高质量音频: 251 > 250 > 140 > 139
+                            priority_order = ['251', '250', '141', '140', '258', '256', '249', '139']
+                            best_audio = None
+                            for aid in priority_order:
+                                if aid in vr_audio_ids:
+                                    best_audio = aid
+                                    break
+                            if best_audio:
+                                # 替换不兼容的音频格式
+                                for bad_id in incompatible:
+                                    if bad_id.split('-')[0] in audio_ids or 'drc' in bad_id:
+                                        new_format = format_str.replace(bad_id, best_audio)
+                                        merged["format"] = new_format
+                                        logger.info(
+                                            f"✅ 自动替换音频: {bad_id} → {best_audio}"
+                                        )
+                                        logger.info(f"📝 新格式选择: {new_format}")
+                                        break
+                
+                # 设置 extractor_args，覆盖默认客户端
+                merged["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android_vr"],
+                    }
+                }
+                # android_vr 不支持 cookies，需要禁用
+                merged.pop("cookiefile", None)
+                merged.pop("cookiesfrombrowser", None)
+                logger.warning("⚠️ android_vr 客户端不支持 Cookies，本次下载将不使用 Cookies")
+
             # Strip internal meta options (never pass to yt-dlp)
             for k in list(merged.keys()):
                 if isinstance(k, str) and k.startswith("__fluentytdl_"):
