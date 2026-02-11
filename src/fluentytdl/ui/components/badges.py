@@ -92,13 +92,14 @@ class QualityCellWidget(QWidget):
         parent: QWidget | None = None,
         *,
         bold_text: bool = False,
+        alignment: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     ):
         super().__init__(parent)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
-        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        layout.setAlignment(alignment)
 
         for badge_text, color in badges_data:
             badge = QualityBadge(badge_text, color, self)
@@ -117,4 +118,5 @@ class QualityCellWidget(QWidget):
             label.setFont(font)
             layout.addWidget(label)
 
-        layout.addStretch(1)
+        if alignment & Qt.AlignmentFlag.AlignLeft:
+            layout.addStretch(1)

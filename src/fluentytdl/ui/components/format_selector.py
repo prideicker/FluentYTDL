@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
+    QLabel,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -20,9 +22,12 @@ from qfluentwidgets import (
     CaptionLabel,
     ComboBox,
     FluentIcon,
+    IconWidget,
     RadioButton,
     ScrollArea,
     SegmentedWidget,
+    StrongBodyLabel,
+    SubtitleLabel,
 )
 
 from .badges import QualityCellWidget
@@ -35,17 +40,24 @@ QTableWidget {
     border: none;
 }
 QTableWidget::item {
-    padding-left: 8px;
+    padding-left: 0px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    margin-top: 3px;
+    margin-bottom: 3px;
+    margin-left: 4px;
+    margin-right: 4px;
+    border-radius: 6px;
 }
 QTableWidget::item:selected {
     background-color: #E8E8E8;
     color: #000000;
-    border: 1px solid #D0D0D0;
+    border: 1px solid #C0C0C0;
     border-radius: 6px;
     font-weight: 600;
 }
 QTableWidget::item:hover {
     background-color: #F3F3F3;
+    border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 6px;
 }
 """
@@ -74,6 +86,42 @@ def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | Non
     if v == "webm" and a == "webm": return "webm"
     if v in {"mp4", "m4v"} and a in {"m4a", "aac", "mp4"}: return "mp4"
     return "mkv"
+
+
+def _analyze_format_tags(r: dict) -> list[tuple[str, str]]:
+    """Generates badge data for format details: [(text, color_style), ...]"""
+    tags = []
+    
+    # 1. HDR
+    dyn = str(r.get("dynamic_range") or "SDR").upper()
+    if dyn != "SDR":
+        # Usually HDR10, HLG, etc.
+        tags.append((dyn, "gold"))
+        
+    # 2. FPS
+    fps = r.get("fps")
+    if fps and fps > 30:
+        tags.append((f"{int(fps)}FPS", "red"))
+        
+    # 3. Codec
+    # Video
+    vc = str(r.get("vcodec") or "none").lower()
+    if "av01" in vc:
+        tags.append(("AV1", "blue"))
+    elif "vp9" in vc:
+        tags.append(("VP9", "green"))
+    elif "avc1" in vc or "h264" in vc:
+        # Gray for older/compatible codec
+        tags.append(("H.264", "gray"))
+        
+    # Audio
+    ac = str(r.get("acodec") or "none").lower()
+    if "opus" in ac:
+        tags.append(("Opus", "green"))
+    elif "mp4a" in ac or "aac" in ac:
+        tags.append(("AAC", "gray"))
+        
+    return tags
 
 
 class SimplePresetWidget(QWidget):
@@ -285,30 +333,69 @@ class VideoFormatSelectorWidget(QWidget):
         )
         adv_layout.addWidget(self.hint_label)
         
-        # Table
-        self.table = QTableWidget(self.advanced_widget)
-        self.table.setStyleSheet(_TABLE_SELECTION_QSS)
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["类型", "质量", "详情"])
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        self.table.cellClicked.connect(self._on_table_clicked)
-        self.table.setShowGrid(False)
-        self.table.setWordWrap(False)
-        try:
-            self.table.verticalHeader().setDefaultSectionSize(32)
-            self.table.horizontalHeader().setStretchLastSection(True)
-        except: pass
+        # --- Tables Area ---
         
+        # 1. Single Table (for modes 1, 2, 3)
+        self.table = self._create_table()
+        self.table.cellClicked.connect(self._on_table_clicked)
         adv_layout.addWidget(self.table)
+        
+        # 2. Split Container (for mode 0)
+        self.split_container = QWidget(self.advanced_widget)
+        split_layout = QVBoxLayout(self.split_container)
+        split_layout.setContentsMargins(0, 0, 0, 0)
+        split_layout.setSpacing(10)
+        
+        # Video Section
+        self.video_container = QFrame(self.split_container)
+        self.video_container.setStyleSheet(".QFrame { background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 8px; }")
+        v_layout = QVBoxLayout(self.video_container)
+        v_layout.setContentsMargins(8, 8, 8, 8)
+        v_layout.addWidget(StrongBodyLabel("视频流", self.video_container))
+        self.video_table = self._create_table()
+        self.video_table.cellClicked.connect(self._on_video_table_clicked)
+        v_layout.addWidget(self.video_table)
+        split_layout.addWidget(self.video_container)
+        
+        # Audio Section
+        self.audio_container = QFrame(self.split_container)
+        self.audio_container.setStyleSheet(".QFrame { background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 8px; }")
+        a_layout = QVBoxLayout(self.audio_container)
+        a_layout.setContentsMargins(8, 8, 8, 8)
+        a_layout.addWidget(StrongBodyLabel("音频流", self.audio_container))
+        self.audio_table = self._create_table()
+        self.audio_table.cellClicked.connect(self._on_audio_table_clicked)
+        a_layout.addWidget(self.audio_table)
+        split_layout.addWidget(self.audio_container)
+        
+        adv_layout.addWidget(self.split_container)
         
         self.selection_label = CaptionLabel("未选择", self.advanced_widget)
         adv_layout.addWidget(self.selection_label)
         
         self.stack.addWidget(self.advanced_widget)
+
+    def _create_table(self):
+        t = QTableWidget(self.advanced_widget)
+        t.setStyleSheet(_TABLE_SELECTION_QSS)
+        t.setColumnCount(3)
+        t.setHorizontalHeaderLabels(["类型", "质量", "详情"])
+        t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        t.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        t.verticalHeader().setVisible(False)
+        t.setAlternatingRowColors(True)
+        t.setShowGrid(False)
+        t.setWordWrap(False)
+        try:
+            t.verticalHeader().setDefaultSectionSize(42)
+            t.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            t.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            t.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            t.setColumnWidth(0, 60)
+            t.setColumnWidth(1, 130)
+        except: pass
+        return t
 
     def _on_mode_changed(self, routeKey: str):
         self._current_mode = routeKey
@@ -366,42 +453,113 @@ class VideoFormatSelectorWidget(QWidget):
             if mode == 2: self._selected_audio_id = None
             else: self._selected_video_id = None
             
-        view_rows = []
-        for r in self._rows:
-            k = r["kind"]
-            if mode == 0:
-                if k in ("video", "audio"): view_rows.append(r)
-            elif mode == 1:
-                if k == "muxed": view_rows.append(r)
-            elif mode == 2:
-                if k == "video": view_rows.append(r)
-            elif mode == 3:
-                if k == "audio": view_rows.append(r)
-                
-        self.table.setRowCount(len(view_rows))
-        self.table.setProperty("_rows", view_rows)
+        if mode == 0:
+            # Split View
+            self.table.hide()
+            self.split_container.show()
+            
+            video_rows = [r for r in self._rows if r["kind"] == "video"]
+            audio_rows = [r for r in self._rows if r["kind"] == "audio"]
+            
+            self._populate_table(self.video_table, video_rows, self._selected_video_id)
+            self._populate_table(self.audio_table, audio_rows, self._selected_audio_id)
+            
+        else:
+            # Single View
+            self.split_container.hide()
+            self.table.show()
+            
+            view_rows = []
+            for r in self._rows:
+                k = r["kind"]
+                if mode == 1:
+                    if k == "muxed": view_rows.append(r)
+                elif mode == 2:
+                    if k == "video": view_rows.append(r)
+                elif mode == 3:
+                    if k == "audio": view_rows.append(r)
+            
+            sel_id = self._selected_muxed_id
+            if mode == 2: sel_id = self._selected_video_id
+            elif mode == 3: sel_id = self._selected_audio_id
+            
+            self._populate_table(self.table, view_rows, sel_id)
+
+        self._update_label()
+        self.selectionChanged.emit()
+
+    def _populate_table(self, table: QTableWidget, rows: list[dict], selected_id: str | None):
+        table.setRowCount(len(rows))
+        table.setProperty("_rows", rows)
         
-        for i, r in enumerate(view_rows):
+        for i, r in enumerate(rows):
             kind = r["kind"]
             
             icon = FluentIcon.VIDEO if kind in ("muxed", "video") else FluentIcon.MUSIC
-            self.table.setItem(i, 0, QTableWidgetItem(icon.icon(), ""))
+            
+            # Use a widget to ensure centering
+            container = QWidget()
+            container.setStyleSheet("background: transparent;")
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            iw = IconWidget(icon)
+            iw.setFixedSize(16, 16)
+            layout.addWidget(iw)
+            
+            item0 = QTableWidgetItem("")
+            table.setItem(i, 0, item0)
+            table.setCellWidget(i, 0, container)
             
             q_text = f"{r.get('height')}p" if r.get("height") else f"{int(r.get('abr') or 0)}kbps"
-            badges = []
+            # Badges for Quality Column (only HDR)
+            q_badges = []
             if r.get("dynamic_range") and "HDR" in str(r.get("dynamic_range")):
-                badges.append(("HDR", "blue"))
+                q_badges.append(("HDR", "blue"))
             
-            q_w = QualityCellWidget(badges, q_text, parent=self.table)
-            self.table.setCellWidget(i, 1, q_w)
+            q_w = QualityCellWidget(q_badges, q_text, parent=table, alignment=Qt.AlignmentFlag.AlignCenter)
+            table.setCellWidget(i, 1, q_w)
+            
+            # Detail Column: Tags + Size/Ext
+            detail_tags = _analyze_format_tags(r)
             
             sz = _format_size(r.get("filesize"))
-            vc = r.get("vcodec") if kind != "audio" else r.get("acodec")
-            detail = f"{r.get('ext')} • {vc} • {sz}"
-            self.table.setItem(i, 2, QTableWidgetItem(detail))
+            ext = r.get("ext")
             
-        self._update_highlight()
-        self.selectionChanged.emit()
+            # Construct main text for details
+            detail_text = f"{ext} • {sz}"
+            
+            # Use QualityCellWidget for Details too
+            # We want left alignment generally for details but user requested centered visuals earlier.
+            # However, for badges flow, Left or Center?
+            # User said "center alignment to achieve visual optimization" previously.
+            # Let's keep Center for consistency.
+            d_w = QualityCellWidget(detail_tags, detail_text, parent=table, alignment=Qt.AlignmentFlag.AlignCenter)
+            
+            item2 = QTableWidgetItem("")
+            table.setItem(i, 2, item2)
+            table.setCellWidget(i, 2, d_w)
+            
+        self._highlight_table_rows(table, {selected_id} if selected_id else set())
+
+    def _highlight_table_rows(self, table: QTableWidget, selected_ids: set[str]):
+        rows = table.property("_rows") or []
+        for i in range(table.rowCount()):
+            # Reset style
+            for j in range(3):
+                it = table.item(i, j)
+                if it: 
+                    it.setBackground(QBrush())
+                    it.setForeground(QBrush()) # Default
+            
+            if i < len(rows):
+                fid = rows[i]["format_id"]
+                if fid in selected_ids and fid:
+                    for j in range(3):
+                        it = table.item(i, j)
+                        if it: 
+                            it.setBackground(QColor("#E8E8E8"))
+                            it.setForeground(QColor(0,0,0))
 
     def _on_table_clicked(self, row, col):
         rows = self.table.property("_rows")
@@ -409,38 +567,35 @@ class VideoFormatSelectorWidget(QWidget):
         
         r = rows[row]
         fid = r["format_id"]
-        kind = r["kind"]
         mode = self.mode_combo.currentIndex()
         
-        if mode == 0:
-            if kind == "video": self._selected_video_id = fid
-            elif kind == "audio": self._selected_audio_id = fid
-        elif mode == 1: self._selected_muxed_id = fid
+        if mode == 1: self._selected_muxed_id = fid
         elif mode == 2: self._selected_video_id = fid
         elif mode == 3: self._selected_audio_id = fid
         
-        self._update_highlight()
+        self._highlight_table_rows(self.table, {fid})
+        self._update_label()
+        self.selectionChanged.emit()
+
+    def _on_video_table_clicked(self, row, col):
+        rows = self.video_table.property("_rows")
+        if not rows or row >= len(rows): return
+        self._selected_video_id = rows[row]["format_id"]
+        self._highlight_table_rows(self.video_table, {self._selected_video_id})
+        self._update_label()
+        self.selectionChanged.emit()
+
+    def _on_audio_table_clicked(self, row, col):
+        rows = self.audio_table.property("_rows")
+        if not rows or row >= len(rows): return
+        self._selected_audio_id = rows[row]["format_id"]
+        self._highlight_table_rows(self.audio_table, {self._selected_audio_id})
+        self._update_label()
         self.selectionChanged.emit()
 
     def _update_highlight(self):
-        rows = self.table.property("_rows") or []
-        selected_ids = {self._selected_video_id, self._selected_audio_id, self._selected_muxed_id}
-        
-        for i in range(self.table.rowCount()):
-            for j in range(3):
-                it = self.table.item(i, j)
-                if it: it.setBackground(QBrush())
-            
-            if i < len(rows):
-                fid = rows[i]["format_id"]
-                if fid in selected_ids and fid:
-                    for j in range(3):
-                        it = self.table.item(i, j)
-                        if it: 
-                            it.setBackground(QColor("#E8E8E8"))
-                            it.setForeground(QColor(0,0,0))
-                            
-        self._update_label()
+        # Deprecated by _highlight_table_rows but kept for safety if called elsewhere (unlikely)
+        pass
 
     def _update_label(self):
         mode = self.mode_combo.currentIndex()

@@ -36,6 +36,7 @@ from qfluentwidgets import (
 
 from .components.download_item_widget import DownloadItemWidget
 from .components.clipboard_monitor import ClipboardMonitor
+from .components.download_config_window import DownloadConfigWindow
 from .parse_page import ParsePage
 from .subtitle_download_page import SubtitleDownloadPage
 from .cover_download_page import CoverDownloadPage
@@ -158,6 +159,9 @@ class MainWindow(FluentWindow):
         desktop = QApplication.screens()[0].availableGeometry()
         w, h = desktop.width(), desktop.height()
         self.move(w // 2 - self.width() // 2, h // 2 - self.height() // 2)
+
+        # 活跃的子窗口列表 (防止GC回收)
+        self._active_sub_windows = []
 
         # === 初始化页面 ===
         # 统一任务列表页面（替代原有的四个分页）
@@ -470,67 +474,52 @@ class MainWindow(FluentWindow):
             self.activateWindow()
         self.show_selection_dialog(url)
 
+    def _show_config_window(self, url: str, mode: str = "default", vr_mode: bool = False):
+        """通用方法：显示非阻塞的任务配置窗口"""
+        try:
+            # 创建新窗口实例
+            window = DownloadConfigWindow(url, self, vr_mode=vr_mode, mode=mode)
+            
+            # 连接信号
+            window.downloadRequested.connect(self.add_tasks)
+            window.windowClosed.connect(self._cleanup_sub_window)
+            
+            # 添加到活跃列表防止GC
+            self._active_sub_windows.append(window)
+            
+            # 显示窗口
+            window.show()
+            window.activateWindow()
+            
+        except Exception as e:
+            logger.error(f"Failed to open config window: {e}")
+            InfoBar.error(
+                title="打开窗口失败",
+                content=str(e),
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+
+    def _cleanup_sub_window(self, window):
+        """清理已关闭的子窗口引用"""
+        if window in self._active_sub_windows:
+            self._active_sub_windows.remove(window)
+            logger.info(f"Closed sub-window. Active windows: {len(self._active_sub_windows)}")
+
     def show_selection_dialog(self, url: str):
-        from .components.selection_dialog import SelectionDialog
-        if getattr(self, "_selection_dialog", None):
-            self._selection_dialog.close()
-            self._selection_dialog = None
-        
-        dlg = SelectionDialog(url, self)
-        self._selection_dialog = dlg
-        if dlg.exec():
-            tasks = dlg.get_selected_tasks()
-            logger.info(f"[DEBUG] get_selected_tasks returned {len(tasks)} tasks: {tasks}")
-            if tasks:
-                self.add_tasks(tasks)
-            else:
-                logger.warning("[DEBUG] No tasks returned from dialog!")
-        self._selection_dialog = None
+        self._show_config_window(url, mode="default")
 
     def show_vr_selection_dialog(self, url: str):
-        from .components.selection_dialog import SelectionDialog
-        if getattr(self, "_selection_dialog", None):
-            self._selection_dialog.close()
-            self._selection_dialog = None
-
-        dlg = SelectionDialog(url, self, vr_mode=True)
-        self._selection_dialog = dlg
-        if dlg.exec():
-            tasks = dlg.get_selected_tasks()
-            logger.info(f"[DEBUG] VR get_selected_tasks returned {len(tasks)} tasks: {tasks}")
-            if tasks:
-                self.add_tasks(tasks)
-            else:
-                logger.warning("[DEBUG] No VR tasks returned from dialog!")
-        self._selection_dialog = None
+        self._show_config_window(url, mode="vr", vr_mode=True)
 
     def show_subtitle_selection_dialog(self, url: str):
-        from .components.selection_dialog import SelectionDialog
-        if getattr(self, "_selection_dialog", None):
-            self._selection_dialog.close()
-            self._selection_dialog = None
-        
-        dlg = SelectionDialog(url, self, mode="subtitle")
-        self._selection_dialog = dlg
-        if dlg.exec():
-            tasks = dlg.get_selected_tasks()
-            if tasks:
-                self.add_tasks(tasks)
-        self._selection_dialog = None
+        self._show_config_window(url, mode="subtitle")
 
     def show_cover_selection_dialog(self, url: str):
-        from .components.selection_dialog import SelectionDialog
-        if getattr(self, "_selection_dialog", None):
-            self._selection_dialog.close()
-            self._selection_dialog = None
-        
-        dlg = SelectionDialog(url, self, mode="cover")
-        self._selection_dialog = dlg
-        if dlg.exec():
-            tasks = dlg.get_selected_tasks()
-            if tasks:
-                self.add_tasks(tasks)
-        self._selection_dialog = None
+        self._show_config_window(url, mode="cover")
 
     def add_tasks(self, tasks):
         """添加下载任务到统一任务列表"""

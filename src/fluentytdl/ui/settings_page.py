@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QThread
-from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout
+from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout, QStackedWidget
 
 from qfluentwidgets import (
     CheckBox,
@@ -30,6 +30,7 @@ from qfluentwidgets import (
     ToolTipFilter,
     ToolTipPosition,
     MessageBox,
+    SegmentedWidget,
 )
 
 from ..core.config_manager import config_manager
@@ -596,8 +597,8 @@ class InlineSwitchCard(SettingCard):
         self.switchButton.checkedChanged.connect(self.checkedChanged)
 
 
-class SettingsPage(ScrollArea):
-    """设置页面：管理下载、网络、核心组件配置"""
+class SettingsPage(QWidget):
+    """设置页面：管理下载、网络、核心组件配置 (重构版 - Pivot导航)"""
 
     clipboardAutoDetectChanged = Signal(bool)
 
@@ -605,33 +606,93 @@ class SettingsPage(ScrollArea):
         super().__init__(parent)
         self.setObjectName("settingsPage")
 
-        self.scrollWidget = QWidget()
-        self.expandLayout = QVBoxLayout(self.scrollWidget)
-        self.setWidget(self.scrollWidget)
-        self.setWidgetResizable(True)
+        # Main Layout
+        self.mainLayout = QVBoxLayout(self)
+        self.mainLayout.setContentsMargins(0, 0, 0, 0)
+        self.mainLayout.setSpacing(0)
 
-        self.scrollWidget.setObjectName("scrollWidget")
+        # Pivot Navigation (SegmentedWidget for smaller text & rounded look)
+        self.pivotContainer = QWidget(self)
+        self.pivotLayout = QVBoxLayout(self.pivotContainer)
+        self.pivot = SegmentedWidget(self)
+        self.pivotLayout.addWidget(self.pivot)
+        self.pivotLayout.setContentsMargins(30, 15, 30, 5) # Align with content margins
+        
+        self.mainLayout.addWidget(self.pivotContainer)
+        
+        # Content Stack
+        self.stackedWidget = QStackedWidget(self)
+        self.mainLayout.addWidget(self.stackedWidget)
         
         # Cookie刷新worker引用（防止垃圾回收）
         self._cookie_worker = None
+        
+        # Init Pages
+        self.generalInterface, self.generalScroll, self.generalLayout = self._create_page("generalInterface")
+        self.featuresInterface, self.featuresScroll, self.featuresLayout = self._create_page("featuresInterface")
+        self.componentsInterface, self.componentsScroll, self.componentsLayout = self._create_page("componentsInterface")
+        self.systemInterface, self.systemScroll, self.systemLayout = self._create_page("systemInterface")
 
-        self.expandLayout.setSpacing(20)
-        self.expandLayout.setContentsMargins(30, 20, 30, 20)
+        # Add pages to stack
+        self.stackedWidget.addWidget(self.generalInterface)
+        self.stackedWidget.addWidget(self.featuresInterface)
+        self.stackedWidget.addWidget(self.componentsInterface)
+        self.stackedWidget.addWidget(self.systemInterface)
+        
+        # Setup Pivot items
+        self.pivot.addItem(routeKey="generalInterface", text="通用", onClick=lambda: self.stackedWidget.setCurrentWidget(self.generalInterface))
+        self.pivot.addItem(routeKey="featuresInterface", text="功能", onClick=lambda: self.stackedWidget.setCurrentWidget(self.featuresInterface))
+        self.pivot.addItem(routeKey="componentsInterface", text="组件", onClick=lambda: self.stackedWidget.setCurrentWidget(self.componentsInterface))
+        self.pivot.addItem(routeKey="systemInterface", text="系统", onClick=lambda: self.stackedWidget.setCurrentWidget(self.systemInterface))
+        
+        self.pivot.setCurrentItem("generalInterface")
+        self.stackedWidget.setCurrentWidget(self.generalInterface)
+        self.stackedWidget.currentChanged.connect(self._on_current_tab_changed)
 
-        self._init_header()
-        self._init_download_group()
-        self._init_network_group()
-        self._init_core_group()
-        self._init_advanced_group()
-        self._init_automation_group()
-        self._init_vr_group()
-        self._init_postprocess_group()
-        self._init_subtitle_group()
-        self._init_behavior_group()
-        self._init_log_group()
-        self._init_about_group()
+        # Init Groups into respective pages
+        # === General Tab ===
+        self._init_download_group(self.generalScroll.widget(), self.generalLayout)
+        self._init_network_group(self.generalScroll.widget(), self.generalLayout)
+        self._init_account_group(self.generalScroll.widget(), self.generalLayout)
+
+        # === Features Tab ===
+        self._init_automation_group(self.featuresScroll.widget(), self.featuresLayout)
+        self._init_postprocess_group(self.featuresScroll.widget(), self.featuresLayout)
+        self._init_subtitle_group(self.featuresScroll.widget(), self.featuresLayout)
+        self._init_vr_group(self.featuresScroll.widget(), self.featuresLayout)
+
+        # === Components Tab ===
+        self._init_component_group(self.componentsScroll.widget(), self.componentsLayout)
+
+        # === System Tab ===
+        self._init_advanced_group(self.systemScroll.widget(), self.systemLayout)
+        self._init_behavior_group(self.systemScroll.widget(), self.systemLayout)
+        self._init_log_group(self.systemScroll.widget(), self.systemLayout)
+        self._init_about_group(self.systemScroll.widget(), self.systemLayout)
 
         self._load_settings_to_ui()
+
+    def _create_page(self, object_name: str):
+        page = QWidget()
+        page.setObjectName(object_name)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll = ScrollArea(page)
+        scroll.setWidgetResizable(True)
+        scroll.setObjectName(f"{object_name}Scroll")
+        scrollWidget = QWidget()
+        scrollWidget.setObjectName(f"{object_name}ScrollWidget")
+        expandLayout = QVBoxLayout(scrollWidget)
+        expandLayout.setSpacing(20)
+        expandLayout.setContentsMargins(30, 20, 30, 20)
+        scroll.setWidget(scrollWidget)
+        layout.addWidget(scroll)
+        return page, scroll, expandLayout
+
+    def _on_current_tab_changed(self, index):
+        widget = self.stackedWidget.widget(index)
+        if widget:
+            self.pivot.setCurrentItem(widget.objectName())
 
     def showEvent(self, event):
         """页面显示时更新Cookie状态"""
@@ -639,12 +700,8 @@ class SettingsPage(ScrollArea):
         # 每次显示设置页面时刷新Cookie状态
         self._update_cookie_status()
 
-    def _init_header(self) -> None:
-        self.titleLabel = SubtitleLabel("设置", self.scrollWidget)
-        self.expandLayout.addWidget(self.titleLabel)
-
-    def _init_download_group(self) -> None:
-        self.downloadGroup = SettingCardGroup("下载选项", self.scrollWidget)
+    def _init_download_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        self.downloadGroup = SettingCardGroup("下载选项", parent_widget)
 
         self.downloadFolderCard = PushSettingCard(
             "选择文件夹",
@@ -656,10 +713,10 @@ class SettingsPage(ScrollArea):
         self.downloadFolderCard.clicked.connect(self._select_download_folder)
 
         self.downloadGroup.addSettingCard(self.downloadFolderCard)
-        self.expandLayout.addWidget(self.downloadGroup)
+        layout.addWidget(self.downloadGroup)
 
-    def _init_network_group(self) -> None:
-        self.networkGroup = SettingCardGroup("网络连接", self.scrollWidget)
+    def _init_network_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        self.networkGroup = SettingCardGroup("网络连接", parent_widget)
 
         self.proxyModeCard = InlineComboBoxCard(
             FluentIcon.GLOBE,
@@ -682,10 +739,83 @@ class SettingsPage(ScrollArea):
 
         self.networkGroup.addSettingCard(self.proxyModeCard)
         self.networkGroup.addSettingCard(self.proxyEditCard)
-        self.expandLayout.addWidget(self.networkGroup)
+        layout.addWidget(self.networkGroup)
 
-    def _init_core_group(self) -> None:
-        self.coreGroup = SettingCardGroup("核心组件", self.scrollWidget)
+    def _init_account_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        """初始化账号与 Cookie 设置组"""
+        self.accountGroup = SettingCardGroup("账号验证 (Cookie)", parent_widget)
+        
+        # === Cookie Sentinel 配置 ===
+        self.cookieModeCard = InlineComboBoxCard(
+            FluentIcon.PEOPLE,
+            "Cookie 验证方式",
+            "选择 Cookie 来源（Cookie 卫士会自动维护生命周期）",
+            ["🚀 自动从浏览器提取", "📄 手动导入 cookies.txt"],
+            self.accountGroup,
+        )
+        self.cookieModeCard.comboBox.currentIndexChanged.connect(self._on_cookie_mode_changed)
+
+        self.browserCard = InlineComboBoxCard(
+            FluentIcon.GLOBE,
+            "选择浏览器",
+            "Chromium 内核需管理员权限，Firefox 内核无需管理员权限",
+            [
+                "Microsoft Edge", "Google Chrome (⚠️不稳定)", "Chromium",
+                "Brave", "Opera", "Opera GX", "Vivaldi", "Arc",
+                "Firefox", "LibreWolf"
+            ],
+            self.accountGroup,
+        )
+        self.browserCard.comboBox.currentIndexChanged.connect(self._on_cookie_browser_changed)
+
+        # 手动刷新按钮
+        self.refreshCookieCard = PushSettingCard(
+            "立即刷新",
+            FluentIcon.SYNC,
+            "手动刷新 Cookie",
+            "从浏览器重新提取 Cookie（可能需要管理员权限）",
+            self.accountGroup,
+        )
+        self.refreshCookieCard.clicked.connect(self._on_refresh_cookie_clicked)
+
+        # Cookie 文件选择
+        self.cookieFileCard = PushSettingCard(
+            "选择文件",
+            FluentIcon.DOCUMENT,
+            "Cookie 文件路径",
+            "未选择",
+            self.accountGroup,
+        )
+        self.cookieFileCard.clicked.connect(self._select_cookie_file)
+        
+        # Cookie 状态显示（带打开位置按钮）
+        self.cookieStatusCard = PushSettingCard(
+            "打开位置",
+            FluentIcon.INFO,
+            "Cookie 文件",
+            "显示当前 Cookie 信息",
+            self.accountGroup,
+        )
+        self.cookieStatusCard.clicked.connect(self._open_cookie_location)
+        self._update_cookie_status()
+
+        self.accountGroup.addSettingCard(self.cookieModeCard)
+        self.accountGroup.addSettingCard(self.browserCard)
+        self.accountGroup.addSettingCard(self.refreshCookieCard)
+        self.accountGroup.addSettingCard(self.cookieStatusCard)
+        self.accountGroup.addSettingCard(self.cookieFileCard)
+        
+        layout.addWidget(self.accountGroup)
+
+        # Make Cookie dependent cards look like "children" of cookie mode card
+        self._indent_setting_card(self.browserCard)
+        self._indent_setting_card(self.refreshCookieCard)
+        self._indent_setting_card(self.cookieFileCard)
+        self._indent_setting_card(self.cookieStatusCard)
+
+    def _init_component_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        """初始化核心组件与更新设置组"""
+        self.coreGroup = SettingCardGroup("核心组件", parent_widget)
 
         # Check Updates on Startup
         self.checkUpdatesOnStartupCard = InlineSwitchCard(
@@ -705,60 +835,6 @@ class SettingsPage(ScrollArea):
             self.coreGroup,
         )
         self.updateSourceCard.comboBox.currentIndexChanged.connect(self._on_update_source_changed)
-
-        # === Cookie Sentinel 配置 ===
-        self.cookieModeCard = InlineComboBoxCard(
-            FluentIcon.PEOPLE,
-            "Cookie 验证方式",
-            "选择 Cookie 来源（Cookie 卫士会自动维护生命周期）",
-            ["🚀 自动从浏览器提取", "📄 手动导入 cookies.txt"],
-            self.coreGroup,
-        )
-        self.cookieModeCard.comboBox.currentIndexChanged.connect(self._on_cookie_mode_changed)
-
-        self.browserCard = InlineComboBoxCard(
-            FluentIcon.GLOBE,
-            "选择浏览器",
-            "Chromium 内核需管理员权限，Firefox 内核无需管理员权限",
-            [
-                "Microsoft Edge", "Google Chrome (⚠️不稳定)", "Chromium",
-                "Brave", "Opera", "Opera GX", "Vivaldi", "Arc",
-                "Firefox", "LibreWolf"
-            ],
-            self.coreGroup,
-        )
-        self.browserCard.comboBox.currentIndexChanged.connect(self._on_cookie_browser_changed)
-
-        # 手动刷新按钮
-        self.refreshCookieCard = PushSettingCard(
-            "立即刷新",
-            FluentIcon.SYNC,
-            "手动刷新 Cookie",
-            "从浏览器重新提取 Cookie（可能需要管理员权限）",
-            self.coreGroup,
-        )
-        self.refreshCookieCard.clicked.connect(self._on_refresh_cookie_clicked)
-
-        # Cookie 文件选择
-        self.cookieFileCard = PushSettingCard(
-            "选择文件",
-            FluentIcon.DOCUMENT,
-            "Cookie 文件路径",
-            "未选择",
-            self.coreGroup,
-        )
-        self.cookieFileCard.clicked.connect(self._select_cookie_file)
-        
-        # Cookie 状态显示（带打开位置按钮）
-        self.cookieStatusCard = PushSettingCard(
-            "打开位置",
-            FluentIcon.INFO,
-            "Cookie 文件",
-            "显示当前 Cookie 信息",
-            self.coreGroup,
-        )
-        self.cookieStatusCard.clicked.connect(self._open_cookie_location)
-        self._update_cookie_status()
 
         # New Component Cards
         self.ytDlpCard = ComponentSettingCard(
@@ -815,27 +891,16 @@ class SettingsPage(ScrollArea):
 
         self.coreGroup.addSettingCard(self.checkUpdatesOnStartupCard)
         self.coreGroup.addSettingCard(self.updateSourceCard)
-        self.coreGroup.addSettingCard(self.cookieModeCard)
-        self.coreGroup.addSettingCard(self.browserCard)
-        self.coreGroup.addSettingCard(self.refreshCookieCard)
-        self.coreGroup.addSettingCard(self.cookieStatusCard)
-        self.coreGroup.addSettingCard(self.cookieFileCard)
         self.coreGroup.addSettingCard(self.ytDlpCard)
         self.coreGroup.addSettingCard(self.ffmpegCard)
         self.coreGroup.addSettingCard(self.denoCard)
         self.coreGroup.addSettingCard(self.potProviderCard)
         self.coreGroup.addSettingCard(self.atomicParsleyCard)
         self.coreGroup.addSettingCard(self.jsRuntimeCard)
-        self.expandLayout.addWidget(self.coreGroup)
+        layout.addWidget(self.coreGroup)
 
-        # Make Cookie dependent cards look like "children" of cookie mode card
-        self._indent_setting_card(self.browserCard)
-        self._indent_setting_card(self.refreshCookieCard)
-        self._indent_setting_card(self.cookieFileCard)
-        self._indent_setting_card(self.cookieStatusCard)
-
-    def _init_advanced_group(self) -> None:
-        self.advancedGroup = SettingCardGroup("高级", self.scrollWidget)
+    def _init_advanced_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        self.advancedGroup = SettingCardGroup("高级", parent_widget)
 
         self.poTokenCard = SmartSettingCard(
             FluentIcon.CODE,
@@ -866,10 +931,10 @@ class SettingsPage(ScrollArea):
 
         self.advancedGroup.addSettingCard(self.poTokenCard)
         self.advancedGroup.addSettingCard(self.jsRuntimePathCard)
-        self.expandLayout.addWidget(self.advancedGroup)
+        layout.addWidget(self.advancedGroup)
 
-    def _init_automation_group(self) -> None:
-        self.automationGroup = SettingCardGroup("自动化", self.scrollWidget)
+    def _init_automation_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        self.automationGroup = SettingCardGroup("自动化", parent_widget)
 
         self.clipboardDetectCard = InlineSwitchCard(
             FluentIcon.EDIT,
@@ -880,11 +945,11 @@ class SettingsPage(ScrollArea):
         self.clipboardDetectCard.checkedChanged.connect(self._on_clipboard_detect_changed)
 
         self.automationGroup.addSettingCard(self.clipboardDetectCard)
-        self.expandLayout.addWidget(self.automationGroup)
+        layout.addWidget(self.automationGroup)
 
-    def _init_vr_group(self) -> None:
+    def _init_vr_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
         """初始化 VR / 360° 设置组"""
-        self.vrGroup = SettingCardGroup("VR / 360°", self.scrollWidget)
+        self.vrGroup = SettingCardGroup("VR / 360°", parent_widget)
 
         # 硬件状态 Banner
         self.vrHardwareStatusCard = SettingCard(
@@ -956,8 +1021,7 @@ class SettingsPage(ScrollArea):
         self.vrGroup.addSettingCard(self.vrMaxResolutionCard)
         self.vrGroup.addSettingCard(self.vrCpuPriorityCard)
         self.vrGroup.addSettingCard(self.vrKeepSourceCard)
-
-        self.expandLayout.addWidget(self.vrGroup)
+        layout.addWidget(self.vrGroup)
         
         # 初始化状态
         self._update_vr_hardware_status()
@@ -1009,8 +1073,8 @@ class SettingsPage(ScrollArea):
             return False, "Token 格式看起来不对（通常包含 'mweb' 或 'visitor'）"
         return True, ""
 
-    def _init_behavior_group(self) -> None:
-        self.behaviorGroup = SettingCardGroup("行为策略", self.scrollWidget)
+    def _init_behavior_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        self.behaviorGroup = SettingCardGroup("行为策略", parent_widget)
 
         self.deletionPolicyCard = InlineComboBoxCard(
             FluentIcon.DELETE,
@@ -1031,11 +1095,11 @@ class SettingsPage(ScrollArea):
 
         self.behaviorGroup.addSettingCard(self.deletionPolicyCard)
         self.behaviorGroup.addSettingCard(self.playlistSkipAuthcheckCard)
-        self.expandLayout.addWidget(self.behaviorGroup)
+        layout.addWidget(self.behaviorGroup)
 
-    def _init_postprocess_group(self) -> None:
+    def _init_postprocess_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
         """初始化后处理设置组（封面嵌入、元数据等）"""
-        self.postprocessGroup = SettingCardGroup("后处理", self.scrollWidget)
+        self.postprocessGroup = SettingCardGroup("后处理", parent_widget)
 
         # 封面嵌入开关
         self.embedThumbnailCard = InlineSwitchCard(
@@ -1092,11 +1156,11 @@ class SettingsPage(ScrollArea):
         # 缩进类别卡片
         self._indent_setting_card(self.sponsorBlockCategoriesCard)
         
-        self.expandLayout.addWidget(self.postprocessGroup)
+        layout.addWidget(self.postprocessGroup)
 
-    def _init_subtitle_group(self) -> None:
+    def _init_subtitle_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
         """初始化字幕配置组"""
-        self.subtitleGroup = SettingCardGroup("字幕下载", self.scrollWidget)
+        self.subtitleGroup = SettingCardGroup("字幕下载", parent_widget)
         
         # 字幕启用开关
         self.subtitleEnabledCard = InlineSwitchCard(
@@ -1174,10 +1238,10 @@ class SettingsPage(ScrollArea):
         self._indent_setting_card(self.subtitleFormatCard)
         self._indent_setting_card(self.subtitleKeepSeparateCard)
         
-        self.expandLayout.addWidget(self.subtitleGroup)
+        layout.addWidget(self.subtitleGroup)
 
-    def _init_about_group(self) -> None:
-        self.aboutGroup = SettingCardGroup("关于", self.scrollWidget)
+    def _init_about_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+        self.aboutGroup = SettingCardGroup("关于", parent_widget)
         self.aboutCard = HyperlinkCard(
             "https://github.com/prideicker/FluentYTDL",
             "访问项目仓库",
@@ -1187,11 +1251,11 @@ class SettingsPage(ScrollArea):
             self.aboutGroup,
         )
         self.aboutGroup.addSettingCard(self.aboutCard)
-        self.expandLayout.addWidget(self.aboutGroup)
+        layout.addWidget(self.aboutGroup)
 
-    def _init_log_group(self) -> None:
+    def _init_log_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
         """初始化日志管理组"""
-        self.logGroup = SettingCardGroup("日志管理", self.scrollWidget)
+        self.logGroup = SettingCardGroup("日志管理", parent_widget)
 
         # 日志管理卡片
         self.logCard = SettingCard(
@@ -1223,7 +1287,7 @@ class SettingsPage(ScrollArea):
         self.logCard.hBoxLayout.addSpacing(16)
         
         self.logGroup.addSettingCard(self.logCard)
-        self.expandLayout.addWidget(self.logGroup)
+        layout.addWidget(self.logGroup)
 
     def _on_view_log_clicked(self):
         """打开日志查看器"""
