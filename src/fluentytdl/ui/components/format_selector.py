@@ -318,10 +318,6 @@ class VideoFormatSelectorWidget(QWidget):
         formats = info.get("formats") or []
         if not isinstance(formats, list): return
 
-        # 获取 VR 专属格式 ID 列表
-        vr_only_ids = set(info.get("__vr_only_format_ids") or [])
-        self._vr_only_format_ids = vr_only_ids
-
         candidates = []
         for f in formats:
             if not isinstance(f, dict): continue
@@ -346,8 +342,7 @@ class VideoFormatSelectorWidget(QWidget):
                 "vcodec": vcodec, "acodec": acodec,
                 "filesize": f.get("filesize") or f.get("filesize_approx"),
                 "fps": f.get("fps"), "abr": f.get("abr"),
-                "dynamic_range": f.get("dynamic_range"),
-                "is_vr_only": fid in vr_only_ids,  # VR 专属格式标记
+                "dynamic_range": f.get("dynamic_range")
             })
             
         # Sort: muxed first, then video, then audio. Within kind, by height desc.
@@ -394,9 +389,6 @@ class VideoFormatSelectorWidget(QWidget):
             
             q_text = f"{r.get('height')}p" if r.get("height") else f"{int(r.get('abr') or 0)}kbps"
             badges = []
-            # VR 专属格式标记 (仅 android_vr 客户端可用)
-            if r.get("is_vr_only"):
-                badges.append(("🥽 VR", "purple"))
             if r.get("dynamic_range") and "HDR" in str(r.get("dynamic_range")):
                 badges.append(("HDR", "blue"))
             

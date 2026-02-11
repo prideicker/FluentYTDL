@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
+from PIL import Image
+
 from PySide6.QtCore import QObject, QUrl, Signal, Qt
-from PySide6.QtGui import QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QPainter, QPainterPath, QPixmap, QImage
 from PySide6.QtNetwork import (
     QNetworkAccessManager,
     QNetworkDiskCache,
@@ -116,13 +119,15 @@ class ImageLoader(QObject):
         url_str: str,
         target_size: tuple[int, int] | None = None,
         radius: int = 0,
+        allow_webp: bool = False,
     ) -> None:
         """开始加载图片。"""
         url_str = str(url_str or "").strip()
         if not url_str:
             return
 
-        url_str = self._force_youtube_webp_to_jpg(url_str)
+        if not allow_webp:
+            url_str = self._force_youtube_webp_to_jpg(url_str)
 
         request = QNetworkRequest(QUrl(url_str))
         
@@ -185,8 +190,22 @@ class ImageLoader(QObject):
             # 3. 尝试解码
             pixmap = QPixmap()
             if not pixmap.loadFromData(data):
-                self.failed.emit(str(original_url))
-                return
+                # 尝试使用 Pillow 降级处理 (针对 WebP 等 Qt 可能不支持的格式)
+                try:
+                    image = Image.open(io.BytesIO(data.data()))
+                    image = image.convert("RGBA")
+                    data_bytes = image.tobytes("raw", "RGBA")
+                    qimage = QImage(
+                        data_bytes,
+                        image.width,
+                        image.height,
+                        QImage.Format.Format_RGBA8888,
+                    )
+                    pixmap = QPixmap.fromImage(qimage)
+                except Exception as e:
+                    logger.warning(f"[ImageLoader] Pillow 解码失败: {e}")
+                    self.failed.emit(str(original_url))
+                    return
 
             # 4. 后处理 (缩放/圆角)
             if target_size:

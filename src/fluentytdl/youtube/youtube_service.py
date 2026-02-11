@@ -654,6 +654,169 @@ class YoutubeService:
                 max_height = h
         return max_height
 
+    def _detect_vr_projection(self, info: dict[str, Any]) -> None:
+        """分析 VR 视频格式的投影类型和立体模式，逐格式标注。
+
+        为每个视频格式注入:
+          __vr_projection:  "equirectangular" | "mesh" | "eac" | "unknown"
+          __vr_stereo_mode: "mono" | "stereo_tb" | "stereo_sbs" | "unknown"
+
+        同时在 info["__vr_projection_summary"] 写入整体概览。
+        """
+        title = str(info.get("title") or "").lower()
+        description = str(info.get("description") or "").lower()
+        text = f"{title} {description}"
+
+        # 标题/描述辅助信号
+        title_hints_sbs = any(
+            kw in text for kw in ("sbs", "side by side", "side-by-side")
+        )
+        title_hints_vr180 = "vr180" in text or "vr 180" in text or "180°" in text
+        title_hints_360 = any(
+            kw in text for kw in ("360°", "vr360", "vr 360", "360vr", "360 video")
+        )
+        title_hints_stereo = any(
+            kw in text
+            for kw in (
+                "3d", "stereo", "stereoscopic", "over under", "over-under",
+                "ou3d", "top bottom", "top-bottom",
+            )
+        )
+
+        formats = info.get("formats") or []
+
+        # 统计
+        projections: dict[str, int] = {}
+        stereo_modes: dict[str, int] = {}
+        has_equi = False
+        has_eac = False
+        has_mesh = False
+        max_height_fmt: dict[str, Any] | None = None
+        max_height = 0
+
+        for fmt in formats:
+            # 跳过纯音频
+            vcodec = str(fmt.get("vcodec") or "none").lower()
+            if vcodec == "none":
+                continue
+
+            width = fmt.get("width") or 0
+            height = fmt.get("height") or 0
+            format_note = str(fmt.get("format_note") or "").lower()
+            format_field = str(fmt.get("format") or "").lower()
+
+            # ---- 投影类型检测 ----
+            projection = "unknown"
+            if "mesh" in format_note or "mesh" in format_field:
+                projection = "mesh"
+            elif width > 0 and height > 0:
+                ratio = width / height
+                # avc1 (H.264) 几乎都是标准 Equirectangular
+                is_legacy_codec = vcodec.startswith("avc1")
+                if is_legacy_codec:
+                    projection = "equirectangular"
+                elif 1.9 <= ratio <= 2.1:
+                    # 2:1 → 标准 Equirectangular
+                    projection = "equirectangular"
+                elif 0.9 <= ratio <= 1.1:
+                    # 1:1 → 通常是 Equirectangular 的 TB 立体
+                    projection = "equirectangular"
+                else:
+                    # 非标准比例 + 高端编码 → 可能是 EAC
+                    # EAC 常见比例: 约 1.5:1 (3840×2560) 或 3:2
+                    if 1.3 <= ratio <= 1.7 and not is_legacy_codec:
+                        projection = "eac"
+                    else:
+                        projection = "unknown"
+
+            # ---- 立体模式检测 ----
+            stereo = "unknown"
+            if projection == "mesh":
+                # Mesh 投影基本都是 VR180 SBS (鱼眼)
+                stereo = "stereo_sbs"
+            elif width > 0 and height > 0:
+                ratio = width / height
+                if 0.9 <= ratio <= 1.1:
+                    # 1:1 宽高比 → Top-Bottom 立体 (上下各一半是 2:1 画面)
+                    stereo = "stereo_tb"
+                elif 1.9 <= ratio <= 2.1:
+                    # 2:1 → 默认是 Mono 360°
+                    # 但标题暗示立体的话，可能是 SBS
+                    if title_hints_sbs or (title_hints_stereo and not title_hints_360):
+                        stereo = "stereo_sbs"
+                    else:
+                        stereo = "mono"
+                elif 3.4 <= ratio <= 3.6:
+                    # 旧标准 SBS (极少见)
+                    stereo = "stereo_sbs"
+                elif projection == "eac":
+                    # EAC 的立体判断需依赖标题
+                    if title_hints_stereo or title_hints_vr180:
+                        stereo = "stereo_tb"
+                    else:
+                        stereo = "mono"
+
+            fmt["__vr_projection"] = projection
+            fmt["__vr_stereo_mode"] = stereo
+
+            # 统计
+            projections[projection] = projections.get(projection, 0) + 1
+            stereo_modes[stereo] = stereo_modes.get(stereo, 0) + 1
+
+            if projection == "equirectangular":
+                has_equi = True
+            if projection == "eac":
+                has_eac = True
+            if projection == "mesh":
+                has_mesh = True
+
+            h = int(height) if isinstance(height, (int, float)) else 0
+            if h > max_height:
+                max_height = h
+                max_height_fmt = fmt
+
+        # 整体概览
+        primary_proj = "unknown"
+        primary_stereo = "unknown"
+        if max_height_fmt is not None:
+            primary_proj = str(max_height_fmt.get("__vr_projection") or "unknown")
+            primary_stereo = str(max_height_fmt.get("__vr_stereo_mode") or "unknown")
+
+        has_stereo_3d = any(
+            k.startswith("stereo") for k in stereo_modes if stereo_modes[k] > 0
+        )
+        has_mono = stereo_modes.get("mono", 0) > 0
+
+        summary = {
+            "primary_stereo": primary_stereo,
+            "primary_projection": primary_proj,
+            "has_stereo_3d": has_stereo_3d,
+            "has_mono_360": has_mono,
+            "has_eac": has_eac,
+            "has_mesh": has_mesh,
+            "has_equi_stream": has_equi,
+            "eac_only": has_eac and not has_equi and not has_mesh,
+            "max_height": max_height,
+        }
+        info["__vr_projection_summary"] = summary
+
+        # 日志
+        stereo_label = {
+            "mono": "2D 全景",
+            "stereo_tb": "3D 立体 (上下)",
+            "stereo_sbs": "3D 立体 (左右/Mesh)",
+        }.get(primary_stereo, "未知")
+        proj_label = {
+            "equirectangular": "Equirectangular",
+            "mesh": "Mesh (鱼眼)",
+            "eac": "EAC (立方体)",
+        }.get(primary_proj, "未知")
+        self._emit_log(
+            "info",
+            f"🥽 [VR] 投影检测: {stereo_label} / {proj_label}"
+            f" (Equi={has_equi}, Mesh={has_mesh}, EAC={has_eac})",
+        )
+
     def _extract_vr_formats(
         self,
         url: str,
@@ -803,17 +966,6 @@ class YoutubeService:
         try:
             self._emit_log("info", f"开始解析 URL: {url}")
             info = _do_extract(ydl_opts)
-
-            # ========== VR 视频智能检测与二次解析 ==========
-            # 检测是否为 VR 视频，如果是则使用 android_vr 客户端补充高分辨率格式
-            try:
-                if self._is_vr_video(info):
-                    vr_formats = self._extract_vr_formats(url, cancel_event)
-                    info = self._merge_formats(info, vr_formats)
-            except Exception as vr_exc:
-                # VR 二次解析失败不影响主流程
-                self._emit_log("warning", f"VR 二次解析过程出错: {vr_exc}")
-
             return info
         except Exception as exc:
             if isinstance(exc, YtDlpCancelled):
@@ -889,14 +1041,6 @@ class YoutubeService:
             )
             info = cast(dict[str, Any], info)
 
-            # VR 视频智能检测 (仅对单视频生效)
-            if info.get("_type") != "playlist" and self._is_vr_video(info):
-                try:
-                    vr_formats = self._extract_vr_formats(url, cancel_event)
-                    info = self._merge_formats(info, vr_formats)
-                except Exception as vr_exc:
-                    self._emit_log("warning", f"VR 二次解析过程出错: {vr_exc}")
-
             return info
         except Exception as exc:
             if isinstance(exc, YtDlpCancelled):
@@ -917,6 +1061,97 @@ class YoutubeService:
                     )
                     return cast(dict[str, Any], info)
             raise
+
+    def extract_vr_info_sync(
+        self,
+        url: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        """VR 专用解析：使用纯 android_vr 客户端提取完整 VR 格式。
+
+        与普通解析不同：
+        - 固定使用 android_vr 客户端
+        - 不使用 Cookies（android_vr 不支持）
+        - 返回的格式包含完整的 SBS/OU/Mesh 投影信息
+        """
+        self._emit_log("info", f"🥽 [VR] 使用 android_vr 客户端解析: {url}")
+
+        try:
+            _ = locate_runtime_tool("yt-dlp.exe", "yt-dlp/yt-dlp.exe", "yt_dlp/yt-dlp.exe")
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。"
+            )
+
+        # 构建 android_vr 专用选项（不使用 cookies）
+        vr_opts: dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "ignoreerrors": False,
+            "skip_download": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android_vr"],
+                }
+            },
+        }
+
+        # FFmpeg location
+        ffmpeg_path = str(config_manager.get("ffmpeg_path") or "").strip()
+        if ffmpeg_path and Path(ffmpeg_path).exists():
+            vr_opts["ffmpeg_location"] = ffmpeg_path
+        elif is_frozen():
+            bundled_ffmpeg = find_bundled_executable("ffmpeg.exe", "ffmpeg/ffmpeg.exe")
+            if bundled_ffmpeg is not None:
+                vr_opts["ffmpeg_location"] = str(bundled_ffmpeg)
+
+        # JS runtime
+        self._maybe_configure_youtube_js_runtime(vr_opts)
+
+        try:
+            info = run_dump_single_json(
+                url,
+                vr_opts,
+                extra_args=["--no-playlist"],
+                cancel_event=cancel_event,
+            )
+            if info is None or info is False:
+                raise RuntimeError(
+                    "VR 解析失败：yt-dlp 未返回有效元数据。"
+                )
+            if not isinstance(info, dict):
+                raise RuntimeError(f"VR yt-dlp returned unexpected type: {type(info)!r}")
+
+            info = cast(dict[str, Any], info)
+            formats = info.get("formats") or []
+            self._emit_log(
+                "info",
+                f"🥽 [VR] android_vr 解析完成: {len(formats)} 个格式",
+            )
+
+            # 标记所有格式为 VR 来源
+            info["__fluentytdl_vr_mode"] = True
+
+            # 最高分辨率
+            max_height = self._get_max_resolution(info)
+            if max_height >= 4320:
+                self._emit_log("info", f"🎉 [VR] 最高可用分辨率: {max_height}p (8K)")
+            elif max_height >= 2160:
+                self._emit_log("info", f"📺 [VR] 最高可用分辨率: {max_height}p (4K)")
+            elif max_height > 0:
+                self._emit_log("info", f"📺 [VR] 最高可用分辨率: {max_height}p")
+
+            # VR 投影类型检测（逐格式标注 + 整体概览）
+            self._detect_vr_projection(info)
+
+            return info
+        except Exception as exc:
+            if isinstance(exc, YtDlpCancelled):
+                raise
+            msg = str(exc)
+            self._emit_log("error", f"🥽 [VR] 解析失败: {msg}")
+            raise RuntimeError(f"VR 解析失败: {msg}") from exc
 
     async def extract_info(self, url: str, options: YoutubeServiceOptions | None = None) -> dict[str, Any]:
         """Async metadata extraction (safe for UI thread)."""

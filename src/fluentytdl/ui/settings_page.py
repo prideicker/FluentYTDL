@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
 
@@ -29,8 +29,6 @@ from qfluentwidgets import (
     ToolButton,
     ToolTipFilter,
     ToolTipPosition,
-    FlowLayout,
-    RadioButton,
     MessageBox,
 )
 
@@ -41,6 +39,7 @@ from ..utils.logger import LOG_DIR
 from .components.smart_setting_card import SmartSettingCard
 from ..core.dependency_manager import dependency_manager
 from ..processing.subtitle_manager import COMMON_SUBTITLE_LANGUAGES
+from ..core.hardware_manager import hardware_manager
 
 
 # ============================================================================
@@ -625,6 +624,7 @@ class SettingsPage(ScrollArea):
         self._init_core_group()
         self._init_advanced_group()
         self._init_automation_group()
+        self._init_vr_group()
         self._init_postprocess_group()
         self._init_subtitle_group()
         self._init_behavior_group()
@@ -882,6 +882,86 @@ class SettingsPage(ScrollArea):
         self.automationGroup.addSettingCard(self.clipboardDetectCard)
         self.expandLayout.addWidget(self.automationGroup)
 
+    def _init_vr_group(self) -> None:
+        """初始化 VR / 360° 设置组"""
+        self.vrGroup = SettingCardGroup("VR / 360°", self.scrollWidget)
+
+        # 硬件状态 Banner
+        self.vrHardwareStatusCard = SettingCard(
+            FluentIcon.INFO,
+            "硬件性能检测",
+            "正在检测系统硬件...",
+            self.vrGroup,
+        )
+        self.vrHardwareStatusCard.hBoxLayout.addSpacing(16)
+        
+        # 刷新按钮
+        self.vrRefreshHardwareBtn = ToolButton(FluentIcon.SYNC, self.vrHardwareStatusCard)
+        self.vrRefreshHardwareBtn.setToolTip("重新检测硬件")
+        self.vrRefreshHardwareBtn.clicked.connect(self._update_vr_hardware_status)
+        self.vrHardwareStatusCard.hBoxLayout.addWidget(self.vrRefreshHardwareBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.vrHardwareStatusCard.hBoxLayout.addSpacing(16)
+
+        # EAC 自动转码开关
+        self.vrEacAutoConvertCard = InlineSwitchCard(
+            FluentIcon.VIDEO,
+            "EAC 自动转码",
+            "检测到 YouTube 专用 EAC 投影格式时，自动转换为通用的 Equirectangular 格式（耗时较长）",
+            parent=self.vrGroup,
+        )
+        self.vrEacAutoConvertCard.checkedChanged.connect(self._on_vr_eac_auto_convert_changed)
+
+        # 硬件加速策略
+        self.vrHwAccelCard = InlineComboBoxCard(
+            FluentIcon.SPEED_HIGH,
+            "硬件加速策略",
+            "选择转码时的硬件加速模式",
+            ["自动 (推荐)", "强制 CPU (慢)", "强制 GPU (快)"],
+            self.vrGroup,
+        )
+        self.vrHwAccelCard.comboBox.currentIndexChanged.connect(self._on_vr_hw_accel_changed)
+
+        # 最大分辨率限制
+        self.vrMaxResolutionCard = InlineComboBoxCard(
+            FluentIcon.ZOOM,
+            "最大转码分辨率",
+            "超过此分辨率的视频将跳过转码（防止内存溢出或死机）",
+            ["4K (2160p) - 安全", "5K/6K - 警告", "8K (4320p) - 高危"],
+            self.vrGroup,
+        )
+        self.vrMaxResolutionCard.comboBox.currentIndexChanged.connect(self._on_vr_max_resolution_changed)
+
+        # CPU 占用限制
+        self.vrCpuPriorityCard = InlineComboBoxCard(
+            FluentIcon.IOT,
+            "转码性能模式",
+            "控制 CPU 占用率和系统响应速度",
+            ["低 (后台不卡顿)", "中 (均衡)", "高 (全速)"],
+            self.vrGroup,
+        )
+        self.vrCpuPriorityCard.comboBox.currentIndexChanged.connect(self._on_vr_cpu_priority_changed)
+
+        # 保留原片
+        self.vrKeepSourceCard = InlineSwitchCard(
+            FluentIcon.SAVE,
+            "转码后保留原片",
+            "防止转码失败导致源文件丢失",
+            parent=self.vrGroup,
+        )
+        self.vrKeepSourceCard.checkedChanged.connect(self._on_vr_keep_source_changed)
+
+        self.vrGroup.addSettingCard(self.vrHardwareStatusCard)
+        self.vrGroup.addSettingCard(self.vrEacAutoConvertCard)
+        self.vrGroup.addSettingCard(self.vrHwAccelCard)
+        self.vrGroup.addSettingCard(self.vrMaxResolutionCard)
+        self.vrGroup.addSettingCard(self.vrCpuPriorityCard)
+        self.vrGroup.addSettingCard(self.vrKeepSourceCard)
+
+        self.expandLayout.addWidget(self.vrGroup)
+        
+        # 初始化状态
+        self._update_vr_hardware_status()
+
     def _indent_setting_card(self, card: QWidget, left: int = 32) -> None:
         """Indent a setting card to visually indicate it depends on another option."""
         try:
@@ -1099,10 +1179,10 @@ class SettingsPage(ScrollArea):
     def _init_about_group(self) -> None:
         self.aboutGroup = SettingCardGroup("关于", self.scrollWidget)
         self.aboutCard = HyperlinkCard(
-            "https://github.com/yt-dlp/yt-dlp",
-            "访问 yt-dlp 仓库",
+            "https://github.com/prideicker/FluentYTDL",
+            "访问项目仓库",
             FluentIcon.GITHUB,
-            "FluentYTDL Pro",
+            "FluentYTDL",
             "基于 PySide6 & Fluent Design 构建",
             self.aboutGroup,
         )
@@ -1357,6 +1437,33 @@ class SettingsPage(ScrollArea):
         self.subtitleKeepSeparateCard.switchButton.blockSignals(True)
         self.subtitleKeepSeparateCard.switchButton.setChecked(keep_separate)
         self.subtitleKeepSeparateCard.switchButton.blockSignals(False)
+
+        # VR Settings
+        self.vrEacAutoConvertCard.switchButton.blockSignals(True)
+        self.vrEacAutoConvertCard.switchButton.setChecked(config_manager.get("vr_eac_auto_convert", False))
+        self.vrEacAutoConvertCard.switchButton.blockSignals(False)
+
+        vr_hw_mode = str(config_manager.get("vr_hw_accel_mode", "auto"))
+        hw_mode_map = {"auto": 0, "cpu": 1, "gpu": 2}
+        self.vrHwAccelCard.comboBox.blockSignals(True)
+        self.vrHwAccelCard.comboBox.setCurrentIndex(hw_mode_map.get(vr_hw_mode, 0))
+        self.vrHwAccelCard.comboBox.blockSignals(False)
+
+        vr_max_res = int(config_manager.get("vr_max_resolution", 2160))
+        res_map = {2160: 0, 3200: 1, 4320: 2}
+        self.vrMaxResolutionCard.comboBox.blockSignals(True)
+        self.vrMaxResolutionCard.comboBox.setCurrentIndex(res_map.get(vr_max_res, 0))
+        self.vrMaxResolutionCard.comboBox.blockSignals(False)
+
+        vr_cpu_pri = str(config_manager.get("vr_cpu_priority", "low"))
+        cpu_map = {"low": 0, "medium": 1, "high": 2}
+        self.vrCpuPriorityCard.comboBox.blockSignals(True)
+        self.vrCpuPriorityCard.comboBox.setCurrentIndex(cpu_map.get(vr_cpu_pri, 0))
+        self.vrCpuPriorityCard.comboBox.blockSignals(False)
+
+        self.vrKeepSourceCard.switchButton.blockSignals(True)
+        self.vrKeepSourceCard.switchButton.setChecked(config_manager.get("vr_keep_source", True))
+        self.vrKeepSourceCard.switchButton.blockSignals(False)
         
         # Update subtitle settings visibility
         self._update_subtitle_settings_visibility(subtitle_enabled)
@@ -2343,6 +2450,67 @@ class SettingsPage(ScrollArea):
         embed_type = self.subtitleEmbedTypeCard.get_value()
         # 仅软嵌入/硬嵌入时显示此选项（外置模式下字幕文件本身就是产物）
         self.subtitleKeepSeparateCard.setVisible(enabled and embed_type in ("soft", "hard"))
+
+    def _update_vr_hardware_status(self) -> None:
+        """更新 VR 硬件状态 Banner"""
+        self.vrHardwareStatusCard.setContent("检测中...")
+        QThread.msleep(100) # Give UI a chance to update
+        
+        # 强制刷新硬件检测缓存，确保能检测到最新的环境变化
+        hardware_manager.refresh_hardware_status()
+        
+        mem_gb = hardware_manager.get_system_memory_gb()
+        has_gpu = hardware_manager.has_dedicated_gpu()
+        encoders = hardware_manager.get_gpu_encoders()
+        
+        status_text = f"内存: {mem_gb} GB"
+        if has_gpu:
+            status_text += f" | GPU 加速: 可用 ({', '.join(encoders)})"
+            desc = "您的硬件支持 VR 硬件转码。"
+            if mem_gb >= 16:
+                desc += " (支持 8K 转码)"
+            else:
+                desc += " (建议限制在 4K/6K)"
+        else:
+            status_text += " | GPU 加速: 不可用"
+            desc = "未检测到硬件编码器，将使用 CPU 转码 (较慢)。"
+            
+        self.vrHardwareStatusCard.setTitle(status_text)
+        self.vrHardwareStatusCard.setContent(desc)
+        # TODO: Update icon if possible, currently SettingCard doesn't support changing icon easily
+        
+    def _on_vr_eac_auto_convert_changed(self, checked: bool) -> None:
+        config_manager.set("vr_eac_auto_convert", checked)
+        if checked:
+            InfoBar.warning(
+                "耗时操作警告",
+                "EAC 转码非常消耗资源。如果没有高性能显卡，8K 视频可能需要数小时。",
+                duration=5000,
+                parent=self,
+            )
+        
+    def _on_vr_hw_accel_changed(self, index: int) -> None:
+        mode_map = {0: "auto", 1: "cpu", 2: "gpu"}
+        config_manager.set("vr_hw_accel_mode", mode_map.get(index, "auto"))
+        
+    def _on_vr_max_resolution_changed(self, index: int) -> None:
+        res_map = {0: 2160, 1: 3200, 2: 4320}
+        val = res_map.get(index, 2160)
+        config_manager.set("vr_max_resolution", val)
+        if val >= 4320:
+            InfoBar.error(
+                "高风险设置",
+                "开启 8K 转码极易导致内存溢出或系统卡死。请确保您有 32GB+ 内存和高端显卡。",
+                duration=5000,
+                parent=self,
+            )
+            
+    def _on_vr_cpu_priority_changed(self, index: int) -> None:
+        pri_map = {0: "low", 1: "medium", 2: "high"}
+        config_manager.set("vr_cpu_priority", pri_map.get(index, "low"))
+
+    def _on_vr_keep_source_changed(self, checked: bool) -> None:
+        config_manager.set("vr_keep_source", checked)
     
     def _update_subtitle_settings_visibility(self, enabled: bool) -> None:
         self.subtitleLanguagesCard.setVisible(enabled)

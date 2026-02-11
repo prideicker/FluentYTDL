@@ -1,6 +1,6 @@
 [project]
 name = "FluentYTDL"
-version = "1.0.23"
+version = "1.0.27"
 description = "Professional YouTube downloader (Stage 1: core architecture)"
 requires-python = ">=3.10"
 dependencies = [
@@ -16,10 +16,12 @@ dependencies = [
 
 [tool.ruff]
 line-length = 100
+exclude = ["src/fluentytdl/utils/spatialmedia/**"]
 
 [tool.pyright]
 pythonVersion = "3.10"
 extraPaths = ["src"]
+exclude = ["src/fluentytdl/utils/spatialmedia"]
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
 reportUnknownVariableType = false

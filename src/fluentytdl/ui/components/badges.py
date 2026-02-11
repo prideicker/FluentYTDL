@@ -38,6 +38,8 @@ def _macaron_bg(color_style: str) -> QColor:
         "blue": "#CFE2FF",
         "purple": "#E0CFFC",
         "green": "#D1E7DD",
+        "orange": "#FFE5D0",
+        "red": "#F8D7DA",
         "gray": "#F8F9FA",
     }.get(color_style, "#F8F9FA")
     return QColor(bg_hex)

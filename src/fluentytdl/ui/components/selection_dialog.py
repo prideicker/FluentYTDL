@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    CardWidget,
     ComboBox,
     ImageLabel,
     IndeterminateProgressRing,
@@ -40,11 +41,15 @@ from qfluentwidgets import (
 )
 
 
-from ...download.workers import EntryDetailWorker, InfoExtractWorker
+from ...download.workers import EntryDetailWorker, InfoExtractWorker, VRInfoExtractWorker
 from ...youtube.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
 from ...utils.image_loader import ImageLoader
+from ...utils.filesystem import sanitize_filename
 from ...processing import subtitle_service
 from .format_selector import VideoFormatSelectorWidget
+from .vr_format_selector import VRFormatSelectorWidget
+from .subtitle_selector import SubtitleSelectorWidget
+from .cover_selector import CoverSelectorWidget
 
 
 # ---- 字幕容器兼容性辅助函数 ----
@@ -586,9 +591,11 @@ class PlaylistFormatDialog(MessageBoxBase):
 class SelectionDialog(MessageBoxBase):
     """智能解析与格式选择弹窗"""
 
-    def __init__(self, url: str, parent=None):
+    def __init__(self, url: str, parent=None, *, vr_mode: bool = False, mode: str = "default"):
         super().__init__(parent)
         self.url = url
+        self._vr_mode = vr_mode or (mode == "vr")
+        self._mode = mode  # default, vr, subtitle, cover
         self.video_info: dict[str, Any] | None = None
         self._is_playlist = False
         self.download_tasks: list[dict[str, Any]] = []
@@ -659,7 +666,10 @@ class SelectionDialog(MessageBoxBase):
         self.loadingLayout.setSpacing(12)
         self.loadingLayout.addStretch(1)
 
-        self.loadingTitleLabel = SubtitleLabel("正在解析链接...", self.loadingWidget)
+        self.loadingTitleLabel = SubtitleLabel(
+            "正在使用 VR 模式解析..." if self._vr_mode else "正在解析链接...",
+            self.loadingWidget,
+        )
         self.loadingTitleLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.loadingLayout.addWidget(self.loadingTitleLabel, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -792,10 +802,16 @@ class SelectionDialog(MessageBoxBase):
         except Exception:
             pass
 
-        self._set_loading_ui("正在解析链接...", show_ring=True)
+        self._set_loading_ui(
+            "正在使用 VR 模式解析..." if self._vr_mode else "正在解析链接...",
+            show_ring=True,
+        )
         # Start with no cookies; user can retry with cookies.
         self._current_options = None
-        w = InfoExtractWorker(self.url, self._current_options)
+        if self._vr_mode:
+            w = VRInfoExtractWorker(self.url)
+        else:
+            w = InfoExtractWorker(self.url, self._current_options)
         w.finished.connect(self.on_parse_success)
         w.error.connect(self.on_parse_error)
         self.worker = w
@@ -977,9 +993,85 @@ class SelectionDialog(MessageBoxBase):
         self.contentLayout.addLayout(h_layout)
         self.contentLayout.addSpacing(12)
 
-        # 2. Format Selector
-        self._format_selector = VideoFormatSelectorWidget(info, self.contentWidget)
-        self.contentLayout.addWidget(self._format_selector)
+        # 2. VR Projection Banner (VR mode only)
+        if self._vr_mode:
+            vr_summary = info.get("__vr_projection_summary") or {}
+            if vr_summary:
+                from qfluentwidgets import CardWidget as _CW
+
+                banner = _CW(self.contentWidget)
+                banner.setStyleSheet(
+                    "CardWidget { background-color: rgba(0, 120, 215, 0.06); "
+                    "border-radius: 8px; border: 1px solid rgba(0, 120, 215, 0.15); }"
+                )
+                b_layout = QVBoxLayout(banner)
+                b_layout.setContentsMargins(16, 12, 16, 12)
+                b_layout.setSpacing(4)
+
+                # Build banner text
+                stereo = vr_summary.get("primary_stereo", "unknown")
+                proj = vr_summary.get("primary_projection", "unknown")
+
+                stereo_map = {
+                    "stereo_tb": "\U0001f453 \u7acb\u4f53 3D \u89c6\u9891 (\u4e0a\u4e0b\u5e03\u5c40)",
+                    "stereo_sbs": "\U0001f453 \u7acb\u4f53 3D \u89c6\u9891 (\u5de6\u53f3\u5e03\u5c40)",
+                    "mono": "\U0001f310 2D \u5168\u666f\u89c6\u9891",
+                }
+                proj_map = {
+                    "equirectangular": "Equirectangular \u6295\u5f71",
+                    "mesh": "Mesh \u6295\u5f71 (\u9c7c\u773c)",
+                    "eac": "EAC \u6295\u5f71 (\u7acb\u65b9\u4f53)",
+                }
+
+                title_text = stereo_map.get(stereo, "\U0001f941 VR \u89c6\u9891")
+                proj_text = proj_map.get(proj, "\u672a\u77e5\u6295\u5f71")
+
+                b_title = BodyLabel(title_text, banner)
+                b_title.setStyleSheet("font-weight: 600; font-size: 14px;")
+                b_layout.addWidget(b_title)
+
+                hint = CaptionLabel(
+                    f"\u6295\u5f71\u7c7b\u578b: {proj_text}  \u2022  "
+                    f"\u64ad\u653e\u65f6\u8bf7\u5728\u64ad\u653e\u5668\u624b\u52a8\u9009\u62e9 VR \u6a21\u5f0f",
+                    banner,
+                )
+                b_layout.addWidget(hint)
+
+                # EAC warning
+                if vr_summary.get("eac_only"):
+                    warn = CaptionLabel(
+                        "\u26a0\ufe0f \u8be5\u89c6\u9891\u4ec5\u6709 EAC \u6295\u5f71\u6d41\uff0c"
+                        "\u666e\u901a\u64ad\u653e\u5668\u53ef\u80fd\u65e0\u6cd5\u6b63\u786e\u663e\u793a\u3002"
+                        "\u5efa\u8bae\u4f7f\u7528 VR \u5934\u663e\u6216\u4e13\u4e1a\u64ad\u653e\u5668\u3002",
+                        banner,
+                    )
+                    warn.setStyleSheet("color: #DC3545;")
+                    b_layout.addWidget(warn)
+
+                self.contentLayout.addWidget(banner)
+                self.contentLayout.addSpacing(8)
+
+        # 3. Format Selector / Mode Specific UI
+        if self._mode == "subtitle":
+            self.yesButton.setText("下载字幕")
+            self._subtitle_selector = SubtitleSelectorWidget(info, self.contentWidget)
+            # 隐藏不需要的选项（如嵌入，因为这是纯字幕下载）
+            self._subtitle_selector.embedCheck.setChecked(False)
+            self._subtitle_selector.embedCheck.hide()
+            self.contentLayout.addWidget(self._subtitle_selector)
+            
+        elif self._mode == "cover":
+            self.yesButton.setText("下载封面")
+            
+            self._cover_selector = CoverSelectorWidget(info, self.contentWidget)
+            self.contentLayout.addWidget(self._cover_selector)
+            
+        elif self._vr_mode:
+            self._format_selector = VRFormatSelectorWidget(info, self.contentWidget)
+            self.contentLayout.addWidget(self._format_selector)
+        else:
+            self._format_selector = VideoFormatSelectorWidget(info, self.contentWidget)
+            self.contentLayout.addWidget(self._format_selector)
 
     # =========================
     # Playlist UI
@@ -1836,6 +1928,80 @@ class SelectionDialog(MessageBoxBase):
             
             ydl_opts: dict[str, Any] = {}
             
+            # Mode specific handling
+            if self._mode == "subtitle":
+                if hasattr(self, "_subtitle_selector"):
+                    opts = self._subtitle_selector.get_opts()
+                    ydl_opts.update(opts)
+                
+                # Force subtitle download only
+                ydl_opts["skip_download"] = True
+                ydl_opts["writethumbnail"] = False
+                ydl_opts["embedthumbnail"] = False
+                ydl_opts["addmetadata"] = False
+                ydl_opts["embedsubtitles"] = False
+                
+                # Disable SponsorBlock and other video-specific processing
+                ydl_opts["sponsorblock_remove"] = None
+                ydl_opts["sponsorblock_mark"] = None
+                ydl_opts["postprocessors"] = []
+                
+                tasks.append((f"[字幕] {title}", url, ydl_opts, thumb))
+                return tasks
+                
+            elif self._mode == "cover":
+                # Cover specific handling
+                if hasattr(self, "_cover_selector"):
+                    url = self._cover_selector.get_selected_url() or url
+                    # If we have a specific URL, we use it.
+                    # Note: We must ensure download_manager can handle it.
+                    # Usually if it's a direct image link, yt-dlp works but might need generic extractor.
+                    # Or we treat it as a direct download.
+                    
+                    # Also, we might want to set a specific filename.
+                    ext = self._cover_selector.get_selected_ext()
+                    
+                    # Use "outtmpl" to name the file properly (Title.jpg)
+                    # We rely on yt-dlp to download the file at 'url'
+                    
+                    # If 'url' is the image URL, yt-dlp might download it as a generic file.
+                    # We need to make sure we don't try to extract info from it again if possible,
+                    # or just let yt-dlp handle the generic file download.
+                    
+                    # Force overwrite the task URL to the image URL
+                    
+                    # Options for direct file download
+                    ydl_opts["skip_download"] = False # We WANT to download the image file
+                    ydl_opts["writethumbnail"] = False # We are downloading the image itself
+                    ydl_opts["embedthumbnail"] = False
+                    ydl_opts["addmetadata"] = False
+                    ydl_opts["embedsubtitles"] = False
+                    
+                    # Disable SponsorBlock
+                    ydl_opts["sponsorblock_remove"] = None
+                    ydl_opts["sponsorblock_mark"] = None
+                    ydl_opts["postprocessors"] = []
+                    
+                    # Set output template to use video title
+                    # Note: We rely on sanitize_filename to make it safe
+                    safe_title = sanitize_filename(title)
+                    ydl_opts["outtmpl"] = f"{safe_title}.%(ext)s"
+                else:
+                    # Fallback to default behavior (best cover)
+                    ydl_opts["skip_download"] = True
+                    ydl_opts["writethumbnail"] = True
+                    ydl_opts["embedthumbnail"] = False
+                    ydl_opts["addmetadata"] = False
+                    ydl_opts["embedsubtitles"] = False
+                    
+                    # Disable SponsorBlock
+                    ydl_opts["sponsorblock_remove"] = None
+                    ydl_opts["sponsorblock_mark"] = None
+                    ydl_opts["postprocessors"] = []
+                
+                tasks.append((f"[封面] {title}", url, ydl_opts, thumb))
+                return tasks
+            
             # Delegate to the format selector component
             has_selector = hasattr(self, "_format_selector")
             print(f"[DEBUG] get_selected_tasks: has_format_selector={has_selector}")
@@ -1861,6 +2027,11 @@ class SelectionDialog(MessageBoxBase):
                                 print(f"[DEBUG] get_selected_tasks: VR format {vr_id} detected, enabling android_vr client")
                                 print(f"[DEBUG] get_selected_tasks: android_vr has {len(android_vr_ids)} formats available")
                                 break
+
+                    # VR 模式：始终使用 android_vr 客户端
+                    if self._vr_mode:
+                        ydl_opts["__fluentytdl_use_android_vr"] = True
+                        print("[DEBUG] get_selected_tasks: VR mode, forcing android_vr client")
                 else:
                     # 修复：即使没有格式选择，也应该使用默认格式
                     print("[DEBUG] get_selected_tasks: No format in selection, using default")

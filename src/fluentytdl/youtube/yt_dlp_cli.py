@@ -209,6 +209,8 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     if isinstance(extractor_args, dict):
         # Example (python API):
         # {"youtube": {"player_client": ["android,ios"], "player_skip": ["js,configs,hls"]}}
+        from loguru import logger
+        logger.debug("[CLI] extractor_args 输入: {}", extractor_args)
         for ie_key, ie_args in extractor_args.items():
             if not ie_key:
                 continue
@@ -229,9 +231,13 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
                 if not val:
                     continue
                 parts.append(f"{k}={val}")
+                logger.debug("[CLI] ie_key={}, k={}, v={}, val={}", ie_key, k, v, val)
+            logger.debug("[CLI] ie_key={}, parts={}", ie_key, parts)
             if parts:
                 # See yt-dlp CLI: --extractor-args IE_KEY:ARGS, where ARGS is semicolon-separated.
-                args += ["--extractor-args", f"{ie_key}:{';'.join(parts)}"]
+                extractor_arg = f"{ie_key}:{';'.join(parts)}"
+                logger.debug("[CLI] 添加参数: --extractor-args {}", extractor_arg)
+                args += ["--extractor-args", extractor_arg]
 
     outtmpl = ydl_opts.get("outtmpl")
     if isinstance(outtmpl, str) and outtmpl:
@@ -382,6 +388,10 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     # 嵌入章节
     if ydl_opts.get("embed_chapters"):
         args += ["--embed-chapters"]
+
+    # 跳过下载（仅获取元数据/字幕/封面等）
+    if ydl_opts.get("skip_download"):
+        args += ["--skip-download"]
 
     # NOTE: POT Token / POT Provider 的 extractor_args 已在 youtube_service.build_ydl_options() 中统一处理
     # 无需在此处再次添加

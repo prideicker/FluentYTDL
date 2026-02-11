@@ -51,26 +51,41 @@ class EnvironmentChecker:
             "gpu": self.check_gpu_encoders(),
         }
         return results
+
+    def refresh(self) -> None:
+        """强制刷新环境检测缓存"""
+        self._ffmpeg_exe = None
+        self._ffprobe_exe = None
+        self._encoders = []
+        self.check_all()
     
     def check_ffmpeg(self) -> bool:
-        """检查 FFmpeg 是否可用，返回最优引用方式"""
+        """检查 FFmpeg 是否可用，返回最优引用方式 (优先使用内置)"""
         import shutil
         
-        # 1. 检查 PATH (最通用且便携的方式)
-        path = shutil.which("ffmpeg")
-        if path:
-            # 如果在 PATH 中，直接使用命令名 'ffmpeg' 是最便携的
-            # 这避免了硬编码打包机器或开发环境的绝对路径
-            self._ffmpeg_exe = "ffmpeg"
-            return True
-            
-        # 2. 检查应用根目录下的 bin 或 tools (常见打包结构)
+        # 1. 优先检查应用内置目录 (bin, tools, assets/bin)
+        # 这确保了如果应用自带了 Full 版本，会优先使用它，而不是系统 PATH 中可能的 Essentials 版本
         app_root = Path(sys.argv[0]).parent
-        for sub in ["bin", "tools", "."]:
-            p = app_root / sub / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+        search_paths = [
+            app_root / "bin", 
+            app_root / "tools", 
+            app_root / "assets" / "bin",
+            app_root
+        ]
+        
+        for folder in search_paths:
+            p = folder / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
             if p.exists():
                 self._ffmpeg_exe = str(p.absolute())
+                logger.info(f"使用内置 FFmpeg: {self._ffmpeg_exe}")
                 return True
+
+        # 2. 最后检查 PATH (最通用且便携的方式)
+        path = shutil.which("ffmpeg")
+        if path:
+            self._ffmpeg_exe = "ffmpeg"
+            logger.info(f"使用系统 FFmpeg: {path}")
+            return True
                 
         return False
     

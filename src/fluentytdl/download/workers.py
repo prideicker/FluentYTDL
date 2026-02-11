@@ -17,6 +17,8 @@ from ..processing.thumbnail_embedder import thumbnail_embedder
 from ..utils.paths import locate_runtime_tool
 from ..utils.logger import logger
 from ..utils.translator import translate_error
+from ..utils.spatialmedia import metadata_utils
+from ..core.hardware_manager import hardware_manager, RiskLevel
 
 
 class DownloadCancelled(Exception):
@@ -58,6 +60,33 @@ class InfoExtractWorker(QThread):
             return
         except Exception as exc:
             logger.exception("解析失败: {}", self.url)
+            self.error.emit(translate_error(exc))
+
+
+class VRInfoExtractWorker(QThread):
+    """VR 解析工人：使用 android_vr 客户端获取 VR 视频元数据"""
+
+    finished = Signal(dict)
+    error = Signal(dict)
+
+    def __init__(self, url: str):
+        super().__init__()
+        self.url = url
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    def run(self) -> None:
+        try:
+            info = youtube_service.extract_vr_info_sync(self.url, cancel_event=self._cancel_event)
+            if self._cancel_event.is_set():
+                return
+            self.finished.emit(info)
+        except YtDlpCancelled:
+            return
+        except Exception as exc:
+            logger.exception("VR 解析失败: {}", self.url)
             self.error.emit(translate_error(exc))
 
 
@@ -216,68 +245,38 @@ class DownloadWorker(QThread):
             logger.info("[SubEmbed] merge_output_fmt = {}", merged.get("merge_output_format"))
             logger.info("[SubEmbed] format           = {}", merged.get("format"))
 
-            # ========== VR 格式专用客户端 ==========
-            # 注意：必须在清除 __fluentytdl_ 前缀选项之前处理！
-            # 如果检测到 VR 专属格式（仅通过 android_vr 客户端可用），
-            # 则注入 android_vr 客户端参数并禁用 cookies（android_vr 不支持 cookies）
-            if merged.pop("__fluentytdl_use_android_vr", False):
-                logger.info("🥽 检测到 VR 专属格式，切换至 android_vr 客户端下载")
+            logger.info("[SubEmbed] format           = {}", merged.get("format"))
+
+            # [VR Fix] 将内部 VR 标记转换为标准的 extractor_args
+            if merged.get("__fluentytdl_use_android_vr"):
+                logger.info("[VR] 正在配置 android_vr 客户端参数...")
+                ext_args = merged.get("extractor_args")
+                if not isinstance(ext_args, dict):
+                    ext_args = {}
                 
-                # 检查格式兼容性：用户选择的所有格式 ID 都必须在 android_vr 中可用
-                android_vr_ids = set(merged.pop("__android_vr_format_ids", []))
-                format_str = merged.get("format", "")
+                # VR 模式下，移除 POT Provider 相关的 extractor_args（不兼容）
+                if "youtubepot-bgutilhttp" in ext_args:
+                    logger.warning("[VR] 移除 POT Provider 配置（android_vr 客户端不兼容 POT）")
+                    ext_args.pop("youtubepot-bgutilhttp", None)
                 
-                if android_vr_ids and format_str:
-                    import re
-                    # 提取格式字符串中的所有格式 ID (如 "571+140-drc" -> ["571", "140-drc"])
-                    # 格式 ID 通常是数字，可能带有后缀如 -drc
-                    format_ids = re.findall(r'\b(\d+(?:-[a-z]+)?)\b', format_str)
-                    
-                    incompatible = []
-                    for fid in format_ids:
-                        # 检查基础 ID (去掉后缀如 -drc)
-                        base_id = fid.split('-')[0]
-                        if base_id not in android_vr_ids and fid not in android_vr_ids:
-                            incompatible.append(fid)
-                    
-                    if incompatible:
-                        logger.warning(
-                            f"⚠️ 格式不兼容: {', '.join(incompatible)} 不在 android_vr 可用列表中"
-                        )
-                        # 自动替换为 android_vr 可用的最佳音频
-                        # 找出 android_vr 中的音频格式 (通常是 139, 140, 141, 249, 250, 251 等)
-                        audio_ids = {'139', '140', '141', '249', '250', '251', '256', '258'}
-                        vr_audio_ids = android_vr_ids & audio_ids
-                        if vr_audio_ids:
-                            # 优先选择高质量音频: 251 > 250 > 140 > 139
-                            priority_order = ['251', '250', '141', '140', '258', '256', '249', '139']
-                            best_audio = None
-                            for aid in priority_order:
-                                if aid in vr_audio_ids:
-                                    best_audio = aid
-                                    break
-                            if best_audio:
-                                # 替换不兼容的音频格式
-                                for bad_id in incompatible:
-                                    if bad_id.split('-')[0] in audio_ids or 'drc' in bad_id:
-                                        new_format = format_str.replace(bad_id, best_audio)
-                                        merged["format"] = new_format
-                                        logger.info(
-                                            f"✅ 自动替换音频: {bad_id} → {best_audio}"
-                                        )
-                                        logger.info(f"📝 新格式选择: {new_format}")
-                                        break
+                # VR 模式下，移除 cookies（android_vr 客户端需要纯净环境）
+                if merged.get("cookiefile"):
+                    logger.warning("[VR] 移除 Cookie 配置（android_vr 客户端使用模拟环境）")
+                    merged.pop("cookiefile", None)
                 
-                # 设置 extractor_args，覆盖默认客户端
-                merged["extractor_args"] = {
-                    "youtube": {
-                        "player_client": ["android_vr"],
-                    }
-                }
-                # android_vr 不支持 cookies，需要禁用
-                merged.pop("cookiefile", None)
-                merged.pop("cookiesfrombrowser", None)
-                logger.warning("⚠️ android_vr 客户端不支持 Cookies，本次下载将不使用 Cookies")
+                # 确保 youtube 键存在
+                yt_args = ext_args.get("youtube")
+                if not isinstance(yt_args, dict):
+                    yt_args = {}
+                
+                # 设置 player_client
+                yt_args["player_client"] = "android_vr"
+                
+                ext_args["youtube"] = yt_args
+                merged["extractor_args"] = ext_args
+                
+                # 调试日志：输出最终的 extractor_args
+                logger.info("[VR] extractor_args 已设置: {}", merged.get("extractor_args"))
 
             # Strip internal meta options (never pass to yt-dlp)
             for k in list(merged.keys()):
@@ -304,6 +303,23 @@ class DownloadWorker(QThread):
             from ..core.config_manager import config_manager as cfg_mgr
             if cfg_mgr.get("enable_resume", True):
                 merged["continuedl"] = True  # 继续下载部分文件
+
+            # ========== VR 格式专用客户端 ==========
+            # VR 模式下所有格式来自 android_vr 客户端，无需格式兼容性检查
+            if merged.pop("__fluentytdl_use_android_vr", False):
+                logger.info("🥽 VR 模式: 使用 android_vr 客户端下载")
+                # 清理不需要的内部标记
+                merged.pop("__android_vr_format_ids", None)
+                # 设置 extractor_args，覆盖默认客户端
+                merged["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android_vr"],
+                    }
+                }
+                # android_vr 不支持 cookies，需要禁用
+                merged.pop("cookiefile", None)
+                merged.pop("cookiesfrombrowser", None)
+                logger.warning("⚠️ android_vr 客户端不支持 Cookies，本次下载将不使用 Cookies")
 
 
             try:
@@ -366,22 +382,39 @@ class DownloadWorker(QThread):
         logger.info("[SubEmbed] === 最终 yt-dlp 命令 ===")
         # 分行输出关键字幕/容器参数
         cmd_str = ' '.join(cmd)
+        
+        # 特殊处理 --extractor-args，可能有多个
+        extractor_args_indices = [i for i, x in enumerate(cmd) if x == '--extractor-args']
+        if extractor_args_indices:
+            for idx in extractor_args_indices:
+                val = cmd[idx + 1] if idx + 1 < len(cmd) else '?'
+                logger.info("[SubEmbed] CLI: --extractor-args {}", val)
+        
+        # 处理其他参数
         for flag in ['--embed-subs', '--write-sub', '--write-auto-sub', '--sub-langs',
-                      '--convert-subs', '--merge-output-format', '-f']:
+                      '--convert-subs', '--merge-output-format', '-f', '--cookies']:
             if flag in cmd_str:
                 idx = cmd.index(flag) if flag in cmd else -1
                 if idx >= 0:
                     # 带参数的 flag
-                    if flag in ('-f', '--sub-langs', '--convert-subs', '--merge-output-format'):
+                    if flag in ('-f', '--sub-langs', '--convert-subs', '--merge-output-format', '--cookies'):
                         val = cmd[idx + 1] if idx + 1 < len(cmd) else '?'
                         logger.info("[SubEmbed] CLI: {} {}", flag, val)
                     else:
                         logger.info("[SubEmbed] CLI: {}", flag)
+        
         has_embed = '--embed-subs' in cmd
         has_merge = '--merge-output-format' in cmd
-        logger.info("[SubEmbed] --embed-subs 存在: {}  --merge-output-format 存在: {}", has_embed, has_merge)
+        has_extractor_args = '--extractor-args' in cmd
+        has_cookies = '--cookies' in cmd
+        logger.info("[SubEmbed] --embed-subs: {}  --merge-output-format: {}  --extractor-args: {} (数量: {})  --cookies: {}", 
+                    has_embed, has_merge, has_extractor_args, len(extractor_args_indices), has_cookies)
         if not has_embed:
             logger.warning("[SubEmbed] ⚠️ 命令中没有 --embed-subs！字幕将不会被嵌入到视频中！")
+        if not has_extractor_args:
+            logger.warning("[VR] ⚠️ 命令中没有 --extractor-args！可能使用了错误的客户端！")
+        elif not any('youtube:' in cmd[idx+1] for idx in extractor_args_indices if idx+1 < len(cmd)):
+            logger.warning("[VR] ⚠️ 命令中没有 youtube 的 extractor-args！VR 客户端未配置！")
         logger.debug("yt-dlp full command: {}", cmd_str)
 
         env = prepare_yt_dlp_env()
@@ -442,6 +475,32 @@ class DownloadWorker(QThread):
                 continue
 
             tail.append(line)
+
+            # 捕获字幕下载信息 (当 skip_download=True 时尤为重要)
+            if "Writing video subtitles to:" in line:
+                self.status_msg.emit("正在下载字幕...")
+                try:
+                    # 格式通常为: [info] Writing video subtitles to: <filename>
+                    parts = line.split(":", 1)
+                    if len(parts) > 1:
+                        path = parts[1].strip()
+                        if path:
+                            self.dest_paths.add(path)
+                            self.output_path_ready.emit(path)
+                            # 模拟进度更新，让 UI 显示活跃状态
+                            self.progress.emit({
+                                "status": "downloading",
+                                "filename": os.path.basename(path),
+                                "downloaded_bytes": 100,
+                                "total_bytes": 100,
+                                "percent": 100.0
+                            })
+                except Exception:
+                    pass
+
+            # 捕获字幕转换信息
+            if "[FFmpegSubtitlesConvertor]" in line:
+                self.status_msg.emit("正在转换字幕格式...")
 
             if self.is_cancelled:
                 try:
@@ -747,6 +806,9 @@ class DownloadWorker(QThread):
         
         # 执行字幕后处理（验证、双语合并）
         self._subtitle_postprocess(merged_opts)
+
+        # 执行 VR 后处理（EAC 转码 + 元数据注入）
+        self._vr_postprocess(merged_opts)
         
         # 清理遗留的缩略图文件
         self._cleanup_thumbnail_files(merged_opts)
@@ -1121,7 +1183,6 @@ class DownloadWorker(QThread):
         deleted_count = 0
         
         for path in paths_to_check:
-            base_path = os.path.splitext(path)[0]
             parent_dir = os.path.dirname(path)
             stem = os.path.splitext(os.path.basename(path))[0]
             
@@ -1168,7 +1229,7 @@ class DownloadWorker(QThread):
                 logger.info("字幕后处理成功: {}", result.message)
                 
                 if result.merged_file:
-                    self.status_msg.emit(f"[字幕处理] ✓ 双语字幕已生成")
+                    self.status_msg.emit("[字幕处理] ✓ 双语字幕已生成")
                     logger.info("双语字幕文件: {}", result.merged_file)
                 
                 if result.processed_files:
@@ -1179,4 +1240,299 @@ class DownloadWorker(QThread):
         except Exception as e:
             logger.exception("字幕后处理异常: {}", e)
             # 不阻塞主流程，只记录错误
+
+    def _check_ffmpeg_v360_support(self, ffmpeg_exe: str) -> bool:
+        """检查 FFmpeg 是否支持 v360 滤镜"""
+        try:
+            creation_flags = hardware_manager.get_ffmpeg_creation_flags()
+            startupinfo = None
+            if os.name == "nt":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
+                
+            # 使用 -filters 检查 v360 支持
+            result = subprocess.run(
+                [ffmpeg_exe, "-filters"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=creation_flags,
+                startupinfo=startupinfo,
+                encoding="utf-8",
+                errors="replace",
+                check=False
+            )
+            return "v360" in result.stdout
+        except Exception as e:
+            logger.warning("检查 FFmpeg v360 支持失败: {}", e)
+            return False
+
+    def _vr_postprocess(self, opts: dict[str, Any]) -> None:
+        """VR 后处理：EAC 转码 + 元数据注入 (带分级防御体系)"""
+        proj = str(opts.get("__vr_projection") or "").lower()
+        convert_eac = bool(opts.get("__vr_convert_eac") or False)
+        
+        # 1. 检查是否需要处理
+        needs_inject = proj and proj != "unknown"
+        # 强制开启检测：如果全局设置开了，也检查（虽然 UI 上通常是绑定的）
+        global_convert = config_manager.get("vr_eac_auto_convert", False)
+        needs_convert = (convert_eac or global_convert) and proj == "eac"
+        
+        if not needs_inject and not needs_convert:
+            # 增加对 Mesh 格式的提示，避免用户疑惑为何没转码
+            if (convert_eac or global_convert) and proj == "mesh":
+                logger.warning("[VR] 无法自动转换 Mesh 投影，跳过转码")
+                self.status_msg.emit("⚠️ 源视频为 Mesh 格式，暂不支持自动转码")
+            return
+
+        logger.info("[VR] 开始 VR 后处理: Proj={}, ConvertEAC={}", proj, needs_convert)
+
+        # 找到最终文件
+        final_file = self._find_final_merged_file() or self.output_path
+        if not final_file or not os.path.exists(final_file):
+            logger.warning("[VR] 无法找到最终文件，跳过 VR 后处理")
+            return
+
+        # 准备 ffmpeg 路径
+        ffmpeg_exe = opts.get("ffmpeg_location") or "ffmpeg"
+        if os.path.isdir(ffmpeg_exe):
+             ffmpeg_exe = os.path.join(ffmpeg_exe, "ffmpeg.exe")
+
+        # 2. EAC 转码 (核心防御逻辑)
+        if needs_convert:
+            # 2.0 前置检查
+            if not self._check_ffmpeg_v360_support(ffmpeg_exe):
+                logger.warning("[VR] FFmpeg 不支持 v360 滤镜，跳过转码")
+                self.status_msg.emit("⚠️ FFmpeg 版本过旧，不支持 VR 转码")
+                needs_convert = False
+            
+            # 2.1 风险评估
+            # 获取视频分辨率高度 (从 info 或 ffprobe)
+            video_height = 0
+            try:
+                # 尝试从 opts/info 中获取
+                if opts.get("height"):
+                    video_height = int(opts.get("height"))
+                # 如果没有，可以用 ffprobe (暂时跳过，假设 yt-dlp 提供了)
+            except Exception:
+                pass
+            
+            # 如果没有高度信息，为了安全起见，假设它是 4K (中等风险)
+            if video_height == 0:
+                video_height = 2160
+            
+            # 读取设置
+            max_res_setting = int(config_manager.get("vr_max_resolution", 2160))
+            if video_height > max_res_setting:
+                logger.warning("[VR] 视频分辨率 {}p 超过设置限制 {}p，跳过转码", video_height, max_res_setting)
+                self.status_msg.emit(f"⚠️ 跳过 VR 转码: 分辨率过高 ({video_height}p)")
+                needs_convert = False # 降级为仅注入
+            
+            # 硬件资源评估
+            risk = hardware_manager.assess_transcode_risk(video_height)
+            if risk == RiskLevel.CRITICAL:
+                # 除非用户强制开启了 8K 允许，否则拦截
+                if max_res_setting < 4320:
+                    logger.warning("[VR] 系统资源不足 (Critical Risk)，强制跳过转码")
+                    self.status_msg.emit("⚠️ 系统资源不足，已取消高风险转码")
+                    needs_convert = False
+
+        if needs_convert:
+            self.status_msg.emit("正在进行 VR 投影转换 (EAC -> Equi)...")
+            logger.info("[VR] 执行 EAC 转码...")
+            
+            ext = os.path.splitext(final_file)[1]
+            output_converted = os.path.splitext(final_file)[0] + "_equi" + ext
+            
+            # 2.2 硬件加速策略
+            hw_mode = config_manager.get("vr_hw_accel_mode", "auto") # auto, cpu, gpu
+            encoders = hardware_manager.get_gpu_encoders()
+            use_gpu = False
+            gpu_encoder = ""
+            
+            if hw_mode == "gpu" or (hw_mode == "auto" and encoders):
+                if "h264_nvenc" in encoders:
+                    gpu_encoder = "h264_nvenc"
+                    use_gpu = True
+                elif "h264_qsv" in encoders:
+                    gpu_encoder = "h264_qsv"
+                    use_gpu = True
+                elif "h264_amf" in encoders:
+                    gpu_encoder = "h264_amf"
+                    use_gpu = True
+            
+            if hw_mode == "gpu" and not use_gpu:
+                logger.warning("[VR] 强制 GPU 模式但未检测到编码器，回退到 CPU")
+            
+            # 2.3 构建命令
+            cmd = [ffmpeg_exe, "-y", "-i", final_file, "-vf", "v360=eac:e"]
+            
+            if use_gpu:
+                # GPU 编码参数
+                cmd.extend(["-c:v", gpu_encoder])
+                if gpu_encoder == "h264_nvenc":
+                    cmd.extend(["-preset", "p4", "-cq", "20"]) # 平衡画质
+                elif gpu_encoder == "h264_qsv":
+                    cmd.extend(["-global_quality", "20"])
+                logger.info(f"[VR] 使用 GPU 加速: {gpu_encoder}")
+            else:
+                # CPU 编码参数
+                cmd.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"])
+                # 线程控制
+                cpu_priority = config_manager.get("vr_cpu_priority", "low")
+                threads = hardware_manager.get_optimal_ffmpeg_threads(is_cpu_mode=True)
+                if cpu_priority == "low":
+                    threads = max(1, threads - 1) # 进一步降低
+                elif cpu_priority == "high":
+                    threads = 0 # 自动 (全速)
+                
+                if threads > 0:
+                    cmd.extend(["-threads", str(threads)])
+                logger.info(f"[VR] 使用 CPU 编码 (Threads={threads})")
+
+            cmd.extend(["-c:a", "copy", output_converted])
+            
+            # 2.4 低优先级运行
+            creation_flags = hardware_manager.get_ffmpeg_creation_flags()
+            
+            # 获取视频总时长用于进度计算
+            total_duration = 0.0
+            try:
+                total_duration = float(opts.get("duration") or 0)
+            except Exception:
+                pass
+
+            if self._run_simple_ffmpeg(cmd, creation_flags=creation_flags, total_duration=total_duration):
+                # 成功，处理文件
+                keep_source = config_manager.get("vr_keep_source", True)
+                try:
+                    if not keep_source:
+                        os.remove(final_file)
+                        os.rename(output_converted, final_file)
+                        logger.info("[VR] EAC 转码成功，文件已替换")
+                    else:
+                        # 如果保留原片，我们将转码后的文件作为"最终文件"进行后续元数据注入
+                        # 但原文件保留在原地 (通常会被重命名为 .orig 或类似，这里我们不重命名原文件，
+                        # 而是把 output_converted 视为新的 final_file)
+                        # 为了逻辑简单，我们交换文件名：
+                        # final_file (EAC) -> final_file.eac.mp4
+                        # output_converted (Equi) -> final_file
+                        backup_file = os.path.splitext(final_file)[0] + ".eac" + ext
+                        if os.path.exists(backup_file):
+                            os.remove(backup_file)
+                        os.rename(final_file, backup_file)
+                        os.rename(output_converted, final_file)
+                        logger.info("[VR] EAC 转码成功，源文件已备份为 {}", backup_file)
+                        
+                    proj = "equirectangular" # 更新状态
+                except Exception as e:
+                    logger.error("[VR] 替换文件失败: {}", e)
+            else:
+                self.status_msg.emit("⚠️ VR 转码失败，保留原格式")
+                if os.path.exists(output_converted):
+                    os.remove(output_converted)
+
+        # 3. 元数据注入
+        ext = os.path.splitext(final_file)[1].lower()
+        if ext not in (".mp4", ".mov"):
+            logger.info("[VR] 跳过元数据注入: 容器 {} 不支持", ext)
+            if ext == ".mkv":
+                self.status_msg.emit("⚠️ MKV 格式不支持 VR 标记，建议使用 MP4")
+            else:
+                self.status_msg.emit(f"⚠️ {ext} 格式不支持 VR 标记")
+            return
+
+        self.status_msg.emit("正在注入 VR 元数据...")
+        
+        # 参数映射
+        md = metadata_utils.Metadata()
+        stereo = str(opts.get("__vr_stereo_mode") or "").lower()
+        
+        if stereo == "stereo_tb":
+            md.stereo_mode = "top-bottom"
+        elif stereo == "stereo_sbs":
+            md.stereo_mode = "left-right"
+        elif stereo == "mono":
+            md.stereo_mode = "none"
+            
+        if proj == "equirectangular":
+            md.projection = "equirectangular"
+        elif proj == "eac":
+             pass
+        elif proj == "mesh":
+             pass
+             
+        if not md.stereo_mode and not md.projection:
+             logger.info("[VR] 无需注入元数据")
+             return
+
+        temp_injected = final_file + ".temp_vr.mp4"
+        try:
+            logger.info("[VR] 注入元数据: Stereo={}, Proj={}", md.stereo_mode, md.projection)
+            metadata_utils.inject_metadata(final_file, temp_injected, md, lambda x: logger.debug("[SpatialMedia] {}", x))
+            
+            if os.path.exists(temp_injected):
+                os.remove(final_file)
+                os.rename(temp_injected, final_file)
+                self.status_msg.emit("VR 元数据注入成功")
+                logger.info("[VR] 元数据注入完成")
+            else:
+                logger.warning("[VR] 注入未生成文件")
+        except Exception as e:
+            logger.error("[VR] 元数据注入异常: {}", e)
+            if os.path.exists(temp_injected):
+                os.remove(temp_injected)
+
+    def _run_simple_ffmpeg(self, cmd: list[str], creation_flags: int = 0, total_duration: float = 0.0) -> bool:
+        """运行 ffmpeg 命令并捕获输出"""
+        try:
+            startupinfo = None
+            if os.name == "nt":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                creationflags=creation_flags,
+                encoding="utf-8",
+                errors="replace"
+            )
+            
+            while True:
+                line = proc.stdout.readline()
+                if not line and proc.poll() is not None:
+                    break
+                if line:
+                    line = line.strip()
+                    if "time=" in line:
+                        try:
+                            # Parse time=HH:MM:SS.mm
+                            time_str = line[line.find("time=") + 5 :].split(" ")[0]
+                            
+                            if total_duration > 0:
+                                current_seconds = 0.0
+                                parts = time_str.split(':')
+                                if len(parts) == 3:
+                                    current_seconds = float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+                                elif len(parts) == 2:
+                                    current_seconds = float(parts[0]) * 60 + float(parts[1])
+                                else:
+                                    current_seconds = float(time_str)
+                                
+                                percent = min(99.9, (current_seconds / total_duration) * 100)
+                                self.status_msg.emit(f"正在进行 VR 投影转换... {percent:.1f}% ({time_str})")
+                            else:
+                                self.status_msg.emit(f"正在进行 VR 投影转换... {time_str}")
+                        except Exception:
+                            pass
+            
+            return proc.returncode == 0
+        except Exception as e:
+            logger.error("FFmpeg 运行失败: {}", e)
+            return False
 

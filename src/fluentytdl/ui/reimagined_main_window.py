@@ -37,6 +37,9 @@ from qfluentwidgets import (
 from .components.download_item_widget import DownloadItemWidget
 from .components.clipboard_monitor import ClipboardMonitor
 from .parse_page import ParsePage
+from .subtitle_download_page import SubtitleDownloadPage
+from .cover_download_page import CoverDownloadPage
+from .vr_parse_page import VRParsePage
 from .pages.history_page import HistoryPage
 from .settings_page import SettingsPage
 from .unified_task_list_page import UnifiedTaskListPage
@@ -162,6 +165,9 @@ class MainWindow(FluentWindow):
         self.history_page = HistoryPage(self)
         
         self.parse_page = ParsePage(self)
+        self.vr_parse_page = VRParsePage(self)
+        self.subtitle_page = SubtitleDownloadPage(self)
+        self.cover_page = CoverDownloadPage(self)
         self.settings_interface = SettingsPage(self)
 
         # === 初始化导航 ===
@@ -183,6 +189,9 @@ class MainWindow(FluentWindow):
 
         # 信号连接
         self.parse_page.parse_requested.connect(self.show_selection_dialog)
+        self.vr_parse_page.parse_requested.connect(self.show_vr_selection_dialog)
+        self.subtitle_page.parse_requested.connect(self.show_subtitle_selection_dialog)
+        self.cover_page.parse_requested.connect(self.show_cover_selection_dialog)
         self.settings_interface.clipboardAutoDetectChanged.connect(self.set_clipboard_monitor_enabled)
         
         # 统一任务列表页面信号
@@ -212,7 +221,31 @@ class MainWindow(FluentWindow):
             position=NavigationItemPosition.TOP
         )
         
-        # 2. 任务列表（统一页面，内部使用 Pivot 过滤）
+        # 2. VR 下载
+        self.addSubInterface(
+            self.vr_parse_page,
+            FluentIcon.GAME,
+            "VR 下载",
+            position=NavigationItemPosition.TOP
+        )
+
+        # 2.1 字幕下载
+        self.addSubInterface(
+            self.subtitle_page,
+            FluentIcon.FONT,
+            "字幕下载",
+            position=NavigationItemPosition.TOP
+        )
+
+        # 2.2 封面下载
+        self.addSubInterface(
+            self.cover_page,
+            FluentIcon.PHOTO,
+            "封面下载",
+            position=NavigationItemPosition.TOP
+        )
+
+        # 3. 任务列表（统一页面，内部使用 Pivot 过滤）
         self.addSubInterface(
             self.task_page,
             FluentIcon.DOWNLOAD,
@@ -220,7 +253,7 @@ class MainWindow(FluentWindow):
             position=NavigationItemPosition.TOP
         )
 
-        # 3. 下载历史
+        # 4. 下载历史
         self.addSubInterface(
             self.history_page,
             FluentIcon.HISTORY,
@@ -452,6 +485,51 @@ class MainWindow(FluentWindow):
                 self.add_tasks(tasks)
             else:
                 logger.warning("[DEBUG] No tasks returned from dialog!")
+        self._selection_dialog = None
+
+    def show_vr_selection_dialog(self, url: str):
+        from .components.selection_dialog import SelectionDialog
+        if getattr(self, "_selection_dialog", None):
+            self._selection_dialog.close()
+            self._selection_dialog = None
+
+        dlg = SelectionDialog(url, self, vr_mode=True)
+        self._selection_dialog = dlg
+        if dlg.exec():
+            tasks = dlg.get_selected_tasks()
+            logger.info(f"[DEBUG] VR get_selected_tasks returned {len(tasks)} tasks: {tasks}")
+            if tasks:
+                self.add_tasks(tasks)
+            else:
+                logger.warning("[DEBUG] No VR tasks returned from dialog!")
+        self._selection_dialog = None
+
+    def show_subtitle_selection_dialog(self, url: str):
+        from .components.selection_dialog import SelectionDialog
+        if getattr(self, "_selection_dialog", None):
+            self._selection_dialog.close()
+            self._selection_dialog = None
+        
+        dlg = SelectionDialog(url, self, mode="subtitle")
+        self._selection_dialog = dlg
+        if dlg.exec():
+            tasks = dlg.get_selected_tasks()
+            if tasks:
+                self.add_tasks(tasks)
+        self._selection_dialog = None
+
+    def show_cover_selection_dialog(self, url: str):
+        from .components.selection_dialog import SelectionDialog
+        if getattr(self, "_selection_dialog", None):
+            self._selection_dialog.close()
+            self._selection_dialog = None
+        
+        dlg = SelectionDialog(url, self, mode="cover")
+        self._selection_dialog = dlg
+        if dlg.exec():
+            tasks = dlg.get_selected_tasks()
+            if tasks:
+                self.add_tasks(tasks)
         self._selection_dialog = None
 
     def add_tasks(self, tasks):
