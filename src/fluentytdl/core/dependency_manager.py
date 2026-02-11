@@ -5,11 +5,18 @@ import shutil
 import subprocess
 import zipfile
 import re
+import time
 import requests
 import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 from .config_manager import config_manager
 from ..utils.paths import frozen_app_dir, is_frozen
@@ -17,10 +24,11 @@ from ..utils.logger import logger
 
 
 class ComponentInfo:
-    def __init__(self, key: str, name: str, exe_name: str):
+    def __init__(self, key: str, name: str, exe_name: str, extra_exes: list[str] = None):
         self.key = key          # internal key: 'yt-dlp', 'ffmpeg', 'deno'
         self.name = name        # Display name
         self.exe_name = exe_name # executable name (e.g., yt-dlp.exe)
+        self.extra_exes = extra_exes or [] # Additional executables to update (e.g. ffprobe.exe for ffmpeg)
         self.current_version: str | None = None
         self.latest_version: str | None = None
         self.download_url: str | None = None
@@ -49,7 +57,7 @@ class DependencyManager(QObject):
         # Define known components
         self.components = {
             "yt-dlp": ComponentInfo("yt-dlp", "yt-dlp", "yt-dlp.exe"),
-            "ffmpeg": ComponentInfo("ffmpeg", "FFmpeg", "ffmpeg.exe"),
+            "ffmpeg": ComponentInfo("ffmpeg", "FFmpeg", "ffmpeg.exe", extra_exes=["ffprobe.exe"]),
             "deno": ComponentInfo("deno", "JS Runtime (Deno)", "deno.exe"),
             "pot-provider": ComponentInfo("pot-provider", "POT Provider", "bgutil-pot-provider.exe"),
             "ytarchive": ComponentInfo("ytarchive", "ytarchive", "ytarchive.exe"),
@@ -363,6 +371,11 @@ class DownloaderWorker(QThread):
         self.key = key
         self.url = url
         self.target_exe = target_exe
+        self.extra_exes: list[str] = []
+        
+        # Inject extra_exes if available
+        if dependency_manager.components.get(key):
+            self.extra_exes = dependency_manager.components[key].extra_exes
 
     def run(self):
         try:
@@ -382,6 +395,9 @@ class DownloaderWorker(QThread):
                 fd, tmp_path = tempfile.mkstemp()
                 os.close(fd)
                 
+                last_emit_time = 0
+                last_emit_percent = -1
+                
                 with open(tmp_path, 'wb') as f:
                     downloaded = 0
                     for chunk in r.iter_content(chunk_size=8192):
@@ -390,7 +406,13 @@ class DownloaderWorker(QThread):
                             downloaded += len(chunk)
                             if total_length > 0:
                                 percent = int(downloaded * 100 / total_length)
-                                self.progress_signal.emit(self.key, percent)
+                                current_time = time.time()
+                                # Throttle: emit only if percent changed AND (>= 1% diff OR > 100ms passed)
+                                if percent != last_emit_percent:
+                                    if (percent - last_emit_percent >= 1) or (current_time - last_emit_time > 0.1) or percent == 100:
+                                        self.progress_signal.emit(self.key, percent)
+                                        last_emit_percent = percent
+                                        last_emit_time = current_time
 
             # 2. Extract or Move
             # Kill processes first? Ideally UI should ensure nothing is running.
@@ -421,56 +443,152 @@ class DownloaderWorker(QThread):
                 except: pass
 
     def _handle_exe(self, tmp_path):
-        # Rename old file to .old (in case it's locked, though we should try to kill it)
-        if self.target_exe.exists():
-            old_file = self.target_exe.with_suffix(".exe.old")
-            if old_file.exists():
-                try: os.remove(old_file)
-                except: pass # Maybe locked
-            
-            try:
-                self.target_exe.replace(old_file)
-            except OSError:
-                # If replace fails (file locked), try moving temp directly (unlikely to work if locked)
-                pass
-
-        # Move new file
-        shutil.move(tmp_path, self.target_exe)
-        
-        # Cleanup .old
-        old_file = self.target_exe.with_suffix(".exe.old")
-        if old_file.exists():
-            try: os.remove(old_file)
-            except: pass
-
+        self._safe_install(tmp_path, self.target_exe)
 
     def _handle_zip(self, zip_path, dest_dir):
         # Extract specific file from zip
         with zipfile.ZipFile(zip_path, 'r') as z:
-            # Find the exe inside zip
-            target_name = self.target_exe.name # e.g. ffmpeg.exe or deno.exe
-            found_member = None
+            # Prepare list of files to extract: main exe + extra exes
+            targets = [(self.target_exe.name, self.target_exe)]
             
-            for name in z.namelist():
-                if name.endswith(f"/{target_name}") or name == target_name:
-                    found_member = name
-                    break
+            for extra in self.extra_exes:
+                targets.append((extra, dest_dir / extra))
             
-            if not found_member:
-                # Deno zip usually just has deno.exe at root
-                # FFmpeg zip usually has ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe
-                # Heuristic search
+            for target_name, target_path in targets:
+                found_member = None
+                
+                # 1. Try exact match or path ending with target_name
                 for name in z.namelist():
-                    if name.lower().endswith(target_name.lower()):
+                    if name.endswith(f"/{target_name}") or name == target_name:
                         found_member = name
                         break
-            
-            if not found_member:
-                raise FileNotFoundError(f"Could not find {target_name} inside the downloaded archive.")
+                
+                # 2. Heuristic search (case insensitive)
+                if not found_member:
+                    for name in z.namelist():
+                        if name.lower().endswith(target_name.lower()):
+                            found_member = name
+                            break
+                
+                if not found_member:
+                    # Only raise error for the main executable
+                    if target_name == self.target_exe.name:
+                        raise FileNotFoundError(f"Could not find {target_name} inside the downloaded archive.")
+                    else:
+                        logger.warning(f"Could not find extra component {target_name} in archive. Skipping.")
+                        continue
 
-            # Extract to temp, then move
-            with z.open(found_member) as source, open(self.target_exe, "wb") as target:
-                shutil.copyfileobj(source, target)
+                # Extract to a temporary file first
+                with z.open(found_member) as source:
+                    # Create a temp file for the extracted exe
+                    fd, extracted_tmp_path = tempfile.mkstemp()
+                    os.close(fd)
+                    
+                    try:
+                        with open(extracted_tmp_path, "wb") as target:
+                            shutil.copyfileobj(source, target)
+                        
+                        # Install securely
+                        self._safe_install(extracted_tmp_path, target_path)
+                    finally:
+                        if os.path.exists(extracted_tmp_path):
+                            try: os.remove(extracted_tmp_path)
+                            except: pass
+
+    def _safe_install(self, source_path: str | Path, target_path: Path):
+        """
+        Safely install a file, handling existing files and potential locks.
+        """
+        source_path = Path(source_path)
+        
+        # 1. If target doesn't exist, just move
+        if not target_path.exists():
+            shutil.move(source_path, target_path)
+            return
+
+        # 2. Try to kill processes locking the file
+        self._kill_locking_processes(target_path)
+        
+        # 3. Try to replace with retries
+        old_file = target_path.with_suffix(".exe.old")
+        
+        # Clean up previous .old if exists
+        if old_file.exists():
+            try: os.remove(old_file)
+            except Exception as e:
+                logger.warning(f"Could not remove existing backup {old_file}: {e}")
+
+        max_retries = 3
+        for i in range(max_retries):
+            try:
+                # Try to rename current to .old
+                target_path.replace(old_file)
+                break
+            except OSError as e:
+                if i == max_retries - 1:
+                    logger.error(f"Failed to replace {target_path} after {max_retries} attempts: {e}")
+                    # Last ditch effort: try to move source to target directly (will fail if locked)
+                    # But maybe replace failed due to permission on old_file?
+                    pass
+                else:
+                    logger.warning(f"Replace attempt {i+1} failed for {target_path}: {e}. Retrying...")
+                    time.sleep(1)
+                    # Try killing processes again
+                    self._kill_locking_processes(target_path)
+        
+        # 4. Move new file to target
+        try:
+            shutil.move(source_path, target_path)
+        except OSError as e:
+            # If move failed, try to restore old file if we successfully renamed it
+            if old_file.exists() and not target_path.exists():
+                try: old_file.replace(target_path)
+                except: pass
+            raise OSError(f"Failed to install new file to {target_path}. Please ensure the file is not in use. Error: {e}")
+
+        # 5. Cleanup .old (best effort)
+        if old_file.exists():
+            try: os.remove(old_file)
+            except: pass
+
+    def _kill_locking_processes(self, file_path: Path):
+        """
+        Kill processes that have the file open.
+        """
+        if not HAS_PSUTIL:
+            # Fallback: try to kill by name if it matches known components
+            name = file_path.name.lower()
+            try:
+                subprocess.run(["taskkill", "/F", "/IM", name], 
+                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            except:
+                pass
+            return
+
+        file_path_str = str(file_path.resolve()).lower()
+        
+        for proc in psutil.process_iter(['pid', 'name', 'open_files']):
+            try:
+                # Check open files
+                open_files = proc.info.get('open_files')
+                if open_files:
+                    for f in open_files:
+                        if f.path and str(Path(f.path).resolve()).lower() == file_path_str:
+                            logger.info(f"Killing process {proc.info['name']} ({proc.info['pid']}) locking {file_path}")
+                            proc.kill()
+                            break
+                
+                # Also check if the process executable itself is the file
+                try:
+                    exe = proc.exe()
+                    if exe and str(Path(exe).resolve()).lower() == file_path_str:
+                        logger.info(f"Killing process {proc.info['name']} ({proc.info['pid']}) running from {file_path}")
+                        proc.kill()
+                except (psutil.AccessDenied, psutil.NoSuchProcess):
+                    pass
+                    
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
 
 # Global instance

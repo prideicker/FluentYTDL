@@ -232,6 +232,7 @@ class Builder:
             "yt-dlp/yt-dlp.exe",
             "ffmpeg/ffmpeg.exe",
             "deno/deno.exe",
+            "pot-provider/bgutil-pot-provider.exe",
             "atomicparsley/AtomicParsley.exe",
         ]
         missing = [t for t in required if not (ASSETS_BIN / t).exists()]

@@ -323,6 +323,37 @@ def fetch_atomicparsley(dest_dir: Path) -> None:
     print(f"  ✓ AtomicParsley {tag} 已安装到 {dest_dir}")
 
 
+def fetch_pot_provider(dest_dir: Path) -> None:
+    """获取 POT Provider (bgutil-ytdlp-pot-provider-rs)"""
+    print("\n🔧 获取 POT Provider...")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    release = github_api("/repos/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest")
+    tag = release.get("tag_name", "unknown")
+    print(f"  最新版本: {tag}")
+
+    # 查找 Windows exe
+    # 通常命名为: bgutil-pot-windows-x86_64.exe
+    exe_asset = next(
+        (a for a in release["assets"] if "windows" in a["name"].lower() and a["name"].endswith(".exe")),
+        None
+    )
+    if not exe_asset:
+        raise RuntimeError("未找到 POT Provider Windows exe 资产")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        exe_path = tmp_path / "bgutil-pot-provider.exe"
+
+        download_file(exe_asset["browser_download_url"], exe_path)
+
+        # 移动到目标
+        final_path = dest_dir / "bgutil-pot-provider.exe"
+        shutil.move(str(exe_path), str(final_path))
+
+    print(f"  ✓ POT Provider {tag} 已安装到 {dest_dir}")
+
+
 # ============================================================================
 # 主入口
 # ============================================================================
@@ -346,6 +377,7 @@ def main():
         TARGET_DIR / "yt-dlp" / "yt-dlp.exe",
         TARGET_DIR / "ffmpeg" / "ffmpeg.exe",
         TARGET_DIR / "deno" / "deno.exe",
+        TARGET_DIR / "pot-provider" / "bgutil-pot-provider.exe",
         TARGET_DIR / "atomicparsley" / "AtomicParsley.exe",
     ]
 
@@ -366,6 +398,7 @@ def main():
         fetch_yt_dlp(TARGET_DIR / "yt-dlp")
         fetch_ffmpeg(TARGET_DIR / "ffmpeg")
         fetch_deno(TARGET_DIR / "deno")
+        fetch_pot_provider(TARGET_DIR / "pot-provider")
         fetch_atomicparsley(TARGET_DIR / "atomicparsley")
     except Exception as e:
         print(f"\n❌ 下载失败: {e}")
