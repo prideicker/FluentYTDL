@@ -180,7 +180,7 @@ def ensure_space_available(
     """
     result = check_disk_space(output_dir, required_bytes)
     if not result.sufficient:
-        raise IOError(result.message)
+        raise OSError(result.message)
 
 
 def _format_size(size_bytes: int) -> str:

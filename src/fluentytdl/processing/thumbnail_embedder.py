@@ -14,10 +14,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
 
 from ..utils.logger import logger
 from ..utils.paths import frozen_app_dir, is_frozen
@@ -37,7 +37,7 @@ class EmbedTool(Enum):
 class EmbedResult:
     """封面嵌入结果"""
     success: bool
-    tool_used: Optional[EmbedTool]
+    tool_used: EmbedTool | None
     message: str
     skipped: bool = False  # 是否因不支持而跳过
 
@@ -62,9 +62,9 @@ class ThumbnailEmbedder:
     UNSUPPORTED_FORMATS = {"wav", "aiff", "ts", "m2ts", "vob", "rm", "rmvb", "flv"}
     
     def __init__(self):
-        self._atomicparsley_path: Optional[Path] = None
-        self._ffmpeg_path: Optional[Path] = None
-        self._mutagen_available: Optional[bool] = None
+        self._atomicparsley_path: Path | None = None
+        self._ffmpeg_path: Path | None = None
+        self._mutagen_available: bool | None = None
     
     def _get_bin_dir(self) -> Path:
         """获取 bin 目录路径"""
@@ -73,7 +73,7 @@ class ThumbnailEmbedder:
         else:
             return Path(__file__).parents[3] / "assets" / "bin"
     
-    def _find_atomicparsley(self) -> Optional[Path]:
+    def _find_atomicparsley(self) -> Path | None:
         """查找 AtomicParsley 可执行文件"""
         if self._atomicparsley_path:
             return self._atomicparsley_path
@@ -98,7 +98,7 @@ class ThumbnailEmbedder:
         
         return None
     
-    def _find_ffmpeg(self) -> Optional[Path]:
+    def _find_ffmpeg(self) -> Path | None:
         """查找 FFmpeg 可执行文件"""
         if self._ffmpeg_path:
             return self._ffmpeg_path
@@ -123,8 +123,9 @@ class ThumbnailEmbedder:
             return self._mutagen_available
         
         try:
-            import mutagen
-            self._mutagen_available = True
+            import importlib.util
+
+            self._mutagen_available = importlib.util.find_spec("mutagen") is not None
         except ImportError:
             self._mutagen_available = False
         
@@ -143,7 +144,7 @@ class ThumbnailEmbedder:
         status = self.get_tool_status()
         return any(status.values())
     
-    def get_recommended_tool(self, extension: str) -> Optional[EmbedTool]:
+    def get_recommended_tool(self, extension: str) -> EmbedTool | None:
         """根据文件格式获取推荐的嵌入工具"""
         ext = extension.lower().lstrip(".")
         
@@ -182,7 +183,7 @@ class ThumbnailEmbedder:
         self,
         video_path: str | Path,
         thumbnail_path: str | Path,
-        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> EmbedResult:
         """
         嵌入封面到视频/音频文件
@@ -239,7 +240,7 @@ class ThumbnailEmbedder:
         self,
         video_path: Path,
         thumbnail_path: Path,
-        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> EmbedResult:
         """使用 AtomicParsley 嵌入封面"""
         ap_path = self._find_atomicparsley()
@@ -290,7 +291,7 @@ class ThumbnailEmbedder:
         self,
         video_path: Path,
         thumbnail_path: Path,
-        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> EmbedResult:
         """使用 FFmpeg 嵌入封面"""
         ffmpeg_path = self._find_ffmpeg()
@@ -303,7 +304,8 @@ class ThumbnailEmbedder:
         ext = video_path.suffix.lower()
         
         # 创建临时输出文件
-        temp_fd, temp_path = tempfile.mkstemp(suffix=ext)
+        # 指定 dir=video_path.parent 确保临时文件在同一驱动器，避免 os.replace 跨盘移动失败 (WinError 17)
+        temp_fd, temp_path = tempfile.mkstemp(suffix=ext, dir=video_path.parent)
         os.close(temp_fd)
         
         try:
@@ -370,14 +372,14 @@ class ThumbnailEmbedder:
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except:
+                except Exception:
                     pass
     
     def _embed_with_mutagen(
         self,
         video_path: Path,
         thumbnail_path: Path,
-        progress_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> EmbedResult:
         """使用 mutagen 嵌入封面（用于音频文件）"""
         if not self._check_mutagen():
@@ -410,7 +412,7 @@ class ThumbnailEmbedder:
         """嵌入 MP3 封面"""
         try:
             # 类型检查器可能对 mutagen 的导出有警告，但运行时是正常的
-            from mutagen.id3 import ID3, APIC, ID3NoHeaderError  # type: ignore
+            from mutagen.id3 import APIC, ID3, ID3NoHeaderError  # type: ignore
             from mutagen.mp3 import MP3
             
             try:
@@ -468,10 +470,11 @@ class ThumbnailEmbedder:
     def _embed_ogg(self, file_path: Path, thumbnail_data: bytes) -> EmbedResult:
         """嵌入 OGG/Opus 封面"""
         try:
+            import base64
+
+            from mutagen.flac import Picture
             from mutagen.oggopus import OggOpus
             from mutagen.oggvorbis import OggVorbis
-            from mutagen.flac import Picture
-            import base64
             
             ext = file_path.suffix.lower()
             

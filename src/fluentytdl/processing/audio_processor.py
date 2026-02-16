@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from ..core.config_manager import config_manager
-from ..utils.paths import locate_runtime_tool, find_bundled_executable, is_frozen
 from ..utils.logger import logger
+from ..utils.paths import find_bundled_executable, is_frozen, locate_runtime_tool
 
 
 @dataclass
@@ -154,9 +154,9 @@ class AudioProcessor:
     - 音量标准化
     """
     
-    _instance: "AudioProcessor | None" = None
+    _instance: AudioProcessor | None = None
     
-    def __new__(cls) -> "AudioProcessor":
+    def __new__(cls) -> AudioProcessor:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance

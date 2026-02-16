@@ -11,7 +11,7 @@ from ..utils.paths import config_path, legacy_config_path
 class ConfigManager:
     """配置管理单例（JSON 持久化）。"""
 
-    _instance: "ConfigManager | None" = None
+    _instance: ConfigManager | None = None
 
     DEFAULT_CONFIG: dict[str, Any] = {
         "download_dir": str(Path.home() / "Downloads" / "FluentYTDL"),
@@ -118,7 +118,7 @@ class ConfigManager:
         "subtitle_max_languages": 2,  # 最多下载字幕数量
     }
 
-    def __new__(cls) -> "ConfigManager":
+    def __new__(cls) -> ConfigManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._init()

@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -27,9 +26,9 @@ from qfluentwidgets import (
 )
 
 from ...core.section_download import (
-    parse_time_range,
-    build_section_opts,
     TimeRange,
+    build_section_opts,
+    parse_time_range,
 )
 
 

@@ -9,11 +9,10 @@ FluentYTDL 动态限速控制组件
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -26,7 +25,6 @@ from qfluentwidgets import (
 )
 
 from ...core.config_manager import config_manager
-
 
 # 限速预设值 (bytes/s), 0 表示不限速
 RATE_LIMIT_PRESETS = [

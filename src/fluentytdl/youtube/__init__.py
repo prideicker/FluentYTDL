@@ -4,6 +4,7 @@ FluentYTDL YouTube 服务域
 包含 YouTube 视频信息提取、yt-dlp 封装、PO Token 管理等功能。
 """
 
+from .pot_manager import POTManager, pot_manager
 from .youtube_service import YoutubeService, YoutubeServiceOptions, youtube_service
 from .yt_dlp_cli import (
     YtDlpCancelled,
@@ -11,7 +12,6 @@ from .yt_dlp_cli import (
     resolve_yt_dlp_exe,
     ydl_opts_to_cli_args,
 )
-from .pot_manager import POTManager, pot_manager
 
 __all__ = [
     # YouTube 服务

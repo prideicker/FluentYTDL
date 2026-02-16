@@ -15,9 +15,9 @@ from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
 
-from .config_manager import config_manager
-from .yt_dlp_cli import resolve_yt_dlp_exe, _win_hide_console_kwargs, prepare_yt_dlp_env
 from ..utils.logger import logger
+from ..youtube.yt_dlp_cli import _win_hide_console_kwargs, prepare_yt_dlp_env, resolve_yt_dlp_exe
+from .config_manager import config_manager
 
 if TYPE_CHECKING:
     pass
@@ -37,7 +37,7 @@ class CookieSyncManager:
     - 实现启动时自动同步和报错时自愈逻辑
     """
     
-    _instance: "CookieSyncManager | None" = None
+    _instance: CookieSyncManager | None = None
     _lock = Lock()
 
     # 浏览器进程名映射
@@ -50,7 +50,7 @@ class CookieSyncManager:
         "vivaldi": ["vivaldi.exe"],
     }
 
-    def __new__(cls) -> "CookieSyncManager":
+    def __new__(cls) -> CookieSyncManager:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -181,7 +181,7 @@ class CookieSyncManager:
                 
                 # 验证文件格式 (简单检查)
                 try:
-                    with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+                    with open(target_path, encoding="utf-8", errors="ignore") as f:
                         header = f.read(100)
                     if not header.startswith("#") and "youtube" not in header.lower():
                         logger.warning("Cookie 文件格式可能不标准，但仍尝试使用")

@@ -7,19 +7,14 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
-
 from qfluentwidgets import (
-    BodyLabel,
     CaptionLabel,
     CardWidget,
     FluentIcon,
-    InfoBar,
-    InfoBarPosition,
     StrongBodyLabel,
     ToolTipFilter,
     ToolTipPosition,
@@ -30,14 +25,17 @@ from ...storage.history_service import HistoryRecord
 from ...utils.image_loader import ImageLoader
 
 
-def _format_bytes(b: int) -> str:
-    if b <= 0:
+def _format_bytes(b: int | float) -> str:
+    size = float(b)
+    if size <= 0:
         return "0 B"
     for unit in ("B", "KB", "MB", "GB"):
-        if b < 1024:
-            return f"{b:.1f} {unit}" if isinstance(b, float) else f"{b} {unit}"
-        b /= 1024
-    return f"{b:.1f} TB"
+        if size < 1024:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 def _format_time_ago(ts: float) -> str:

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from qfluentwidgets import MessageBoxBase
 
-from .help_window import WelcomeGuideWidget
 from ..core.config_manager import config_manager
+from .help_window import WelcomeGuideWidget
+
 
 class WelcomeWizardDialog(MessageBoxBase):
     """

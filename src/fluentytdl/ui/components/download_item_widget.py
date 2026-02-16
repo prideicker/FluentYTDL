@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
 import os
 import subprocess
+from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
-
 from qfluentwidgets import (
     CaptionLabel,
     CardWidget,
@@ -15,10 +14,10 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     ProgressBar,
+    StrongBodyLabel,
     ToolTipFilter,
     ToolTipPosition,
     TransparentToolButton,
-    StrongBodyLabel,
 )
 
 from ...download.workers import DownloadWorker
@@ -209,18 +208,18 @@ class DownloadItemWidget(CardWidget):
         """Bind signals from a worker to this widget."""
         self.worker = worker
         try:
-            worker.progress.connect(self.on_progress)
-            worker.status_msg.connect(self.update_status)
-            worker.completed.connect(self.on_finished)
-            worker.error.connect(self.on_error)
-            worker.cancelled.connect(self.on_cancelled)
+            worker.progress.connect(self.on_progress, Qt.ConnectionType.UniqueConnection)
+            worker.status_msg.connect(self.update_status, Qt.ConnectionType.UniqueConnection)
+            worker.completed.connect(self.on_finished, Qt.ConnectionType.UniqueConnection)
+            worker.error.connect(self.on_error, Qt.ConnectionType.UniqueConnection)
+            worker.cancelled.connect(self.on_cancelled, Qt.ConnectionType.UniqueConnection)
             
             # Track files
-            worker.output_path_ready.connect(self._record_path)
-            worker.progress.connect(self._check_filename_in_progress)
+            worker.output_path_ready.connect(self._record_path, Qt.ConnectionType.UniqueConnection)
+            worker.progress.connect(self._check_filename_in_progress, Qt.ConnectionType.UniqueConnection)
             
             # 封面嵌入警告
-            worker.thumbnail_embed_warning.connect(self._on_thumbnail_embed_warning)
+            worker.thumbnail_embed_warning.connect(self._on_thumbnail_embed_warning, Qt.ConnectionType.UniqueConnection)
         except Exception:
             pass
     
@@ -423,8 +422,10 @@ class DownloadItemWidget(CardWidget):
             # Fix: DownloadWorker uses .stop(), not .cancel()
             if hasattr(self.worker, "stop"):
                 self.worker.stop()
-            elif hasattr(self.worker, "cancel"):
-                self.worker.cancel()
+            else:
+                cancel = getattr(self.worker, "cancel", None)
+                if callable(cancel):
+                    cancel()
         elif self._state in {"paused", "error", "queued"}:
             self.resume_requested.emit(self)
         
@@ -439,7 +440,7 @@ class DownloadItemWidget(CardWidget):
     def _write_history(self) -> None:
         """下载完成后写入历史记录"""
         try:
-            from ...storage.history_service import history_service, extract_video_id
+            from ...storage.history_service import extract_video_id, history_service
 
             output = self._output_path or getattr(self.worker, "output_path", None) or ""
             # 找到最终合并后的文件

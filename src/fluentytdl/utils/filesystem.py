@@ -2,7 +2,7 @@
 FluentYTDL 文件系统安全模块
 
 提供文件名清洗、路径安全检查等功能，解决 Windows 文件系统限制问题：
-- 非法字符替换 (<>:"/\|?*)
+- 非法字符替换 (<>:"/\\|?*)
 - 长路径截断 (MAX_PATH 260 限制)
 - 保留名称检测 (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 import unicodedata
 from pathlib import Path
-
 
 # Windows 非法文件名字符
 ILLEGAL_CHARS = r'[<>:"/\\|?*]'

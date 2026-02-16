@@ -11,19 +11,17 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
-    ComboBox,
     CheckBox,
+    ComboBox,
     TableWidget,
-    PrimaryPushButton,
 )
 
 from ...processing.subtitle_manager import (
-    extract_subtitle_tracks,
     SubtitleTrack,
+    extract_subtitle_tracks,
 )
 
 
@@ -194,6 +192,8 @@ class SubtitleSelectorWidget(QFrame):
             cbs = cell_widget.findChildren(CheckBox)
             if cbs and cbs[0].isChecked():
                 item = self.table.item(row, 1)
+                if item is None:
+                    continue
                 track = item.data(Qt.ItemDataRole.UserRole)
                 if track:
                     selected.append(track)

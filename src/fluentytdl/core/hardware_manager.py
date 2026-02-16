@@ -17,6 +17,7 @@ import psutil
 
 from .environment_checker import EnvironmentChecker
 
+
 class RiskLevel(Enum):
     SAFE = "safe"
     WARNING = "warning"

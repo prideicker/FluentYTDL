@@ -1,30 +1,32 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
-import zipfile
-import re
-import time
-import requests
+import sys
 import tempfile
+import time
+import zipfile
 from pathlib import Path
 
+import requests
 from PySide6.QtCore import QObject, QThread, Signal
 
 try:
     import psutil
     HAS_PSUTIL = True
 except ImportError:
+    psutil = None
     HAS_PSUTIL = False
 
-from .config_manager import config_manager
-from ..utils.paths import frozen_app_dir, is_frozen
 from ..utils.logger import logger
+from ..utils.paths import frozen_app_dir, is_frozen
+from .config_manager import config_manager
 
 
 class ComponentInfo:
-    def __init__(self, key: str, name: str, exe_name: str, extra_exes: list[str] = None):
+    def __init__(self, key: str, name: str, exe_name: str, extra_exes: list[str] | None = None):
         self.key = key          # internal key: 'yt-dlp', 'ffmpeg', 'deno'
         self.name = name        # Display name
         self.exe_name = exe_name # executable name (e.g., yt-dlp.exe)
@@ -223,26 +225,31 @@ class UpdateCheckerWorker(QThread):
             elif key == "deno":
                 # deno 1.38.0 (release, x86_64-pc-windows-msvc) ...
                 m = re.search(r"deno (\d+\.\d+\.\d+)", out)
-                if m: return m.group(1)
+                if m:
+                    return m.group(1)
             elif key == "ffmpeg":
                 # ffmpeg version 6.1-essentials_build-www.gyan.dev ...
                 # or ffmpeg version n6.1 ...
                 line = out.splitlines()[0]
                 m = re.search(r"ffmpeg version ([^\s]+)", line)
-                if m: return m.group(1)
+                if m:
+                    return m.group(1)
             elif key == "pot-provider":
                 # bgutil-ytdlp-pot-provider-rs
                 # Output: something like "bgutil-pot-provider 0.1.5" or just version
                 m = re.search(r"(\d+\.\d+\.\d+)", out)
-                if m: return m.group(1)
+                if m:
+                    return m.group(1)
             elif key == "ytarchive":
                 # ytarchive outputs: "ytarchive v0.4.0" or similar
                 m = re.search(r"v?(\d+\.\d+\.\d+)", out)
-                if m: return m.group(1)
+                if m:
+                    return m.group(1)
             elif key == "atomicparsley":
                 # AtomicParsley outputs: "AtomicParsley version: 20240608.083822.1ed9031" or similar
                 m = re.search(r"(\d{8}\.\d+\.\w+)", out)
-                if m: return m.group(1)
+                if m:
+                    return m.group(1)
                 
             return "installed" # Fallback if parsing fails
         except Exception:
@@ -378,6 +385,7 @@ class DownloaderWorker(QThread):
             self.extra_exes = dependency_manager.components[key].extra_exes
 
     def run(self):
+        tmp_path: str | None = None
         try:
             # 1. Download to temp file
             proxies = {}
@@ -438,9 +446,11 @@ class DownloaderWorker(QThread):
         except Exception as e:
             logger.error(f"Install failed for {self.key}: {e}")
             self.error_signal.emit(self.key, str(e))
-            if 'tmp_path' in locals() and os.path.exists(tmp_path):
-                try: os.remove(tmp_path)
-                except: pass
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
     def _handle_exe(self, tmp_path):
         self._safe_install(tmp_path, self.target_exe)
@@ -492,8 +502,10 @@ class DownloaderWorker(QThread):
                         self._safe_install(extracted_tmp_path, target_path)
                     finally:
                         if os.path.exists(extracted_tmp_path):
-                            try: os.remove(extracted_tmp_path)
-                            except: pass
+                            try:
+                                os.remove(extracted_tmp_path)
+                            except Exception:
+                                pass
 
     def _safe_install(self, source_path: str | Path, target_path: Path):
         """
@@ -514,7 +526,8 @@ class DownloaderWorker(QThread):
         
         # Clean up previous .old if exists
         if old_file.exists():
-            try: os.remove(old_file)
+            try:
+                os.remove(old_file)
             except Exception as e:
                 logger.warning(f"Could not remove existing backup {old_file}: {e}")
 
@@ -542,14 +555,20 @@ class DownloaderWorker(QThread):
         except OSError as e:
             # If move failed, try to restore old file if we successfully renamed it
             if old_file.exists() and not target_path.exists():
-                try: old_file.replace(target_path)
-                except: pass
-            raise OSError(f"Failed to install new file to {target_path}. Please ensure the file is not in use. Error: {e}")
+                try:
+                    old_file.replace(target_path)
+                except Exception:
+                    pass
+            raise OSError(
+                f"Failed to install new file to {target_path}. Please ensure the file is not in use. Error: {e}"
+            ) from e
 
         # 5. Cleanup .old (best effort)
         if old_file.exists():
-            try: os.remove(old_file)
-            except: pass
+            try:
+                os.remove(old_file)
+            except Exception:
+                pass
 
     def _kill_locking_processes(self, file_path: Path):
         """
@@ -561,13 +580,14 @@ class DownloaderWorker(QThread):
             try:
                 subprocess.run(["taskkill", "/F", "/IM", name], 
                                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-            except:
+            except Exception:
                 pass
             return
 
         file_path_str = str(file_path.resolve()).lower()
+        import psutil as psutil_mod
         
-        for proc in psutil.process_iter(['pid', 'name', 'open_files']):
+        for proc in psutil_mod.process_iter(['pid', 'name', 'open_files']):
             try:
                 # Check open files
                 open_files = proc.info.get('open_files')
@@ -584,10 +604,10 @@ class DownloaderWorker(QThread):
                     if exe and str(Path(exe).resolve()).lower() == file_path_str:
                         logger.info(f"Killing process {proc.info['name']} ({proc.info['pid']}) running from {file_path}")
                         proc.kill()
-                except (psutil.AccessDenied, psutil.NoSuchProcess):
+                except (psutil_mod.AccessDenied, psutil_mod.NoSuchProcess):
                     pass
                     
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+            except (psutil_mod.NoSuchProcess, psutil_mod.AccessDenied):
                 continue
 
 

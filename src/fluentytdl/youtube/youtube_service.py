@@ -5,15 +5,16 @@ import http.cookiejar
 import os
 import shutil
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from fluentytdl.utils.logger import get_logger
 from fluentytdl.utils.paths import find_bundled_executable, is_frozen, locate_runtime_tool
+
 from ..core.config_manager import config_manager
 from .yt_dlp_cli import YtDlpCancelled, run_dump_single_json, run_version
-
 
 LogCallback = Callable[[str, str], None]
 
@@ -65,10 +66,10 @@ class YoutubeService:
     - Async API via asyncio.to_thread (UI thread must never block)
     """
 
-    _instance: "YoutubeService | None" = None
+    _instance: YoutubeService | None = None
     _lock = threading.Lock()
 
-    def __new__(cls) -> "YoutubeService":
+    def __new__(cls) -> YoutubeService:
         if cls._instance is not None:
             return cls._instance
         with cls._lock:
@@ -948,8 +949,10 @@ class YoutubeService:
 
         try:
             _ = locate_runtime_tool("yt-dlp.exe", "yt-dlp/yt-dlp.exe", "yt_dlp/yt-dlp.exe")
-        except FileNotFoundError:
-            raise FileNotFoundError("未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                "未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。"
+            ) from e
 
         def _do_extract(opts: dict[str, Any]) -> dict[str, Any]:
             self._emit_log("info", f"[EXE] 开始解析 URL: {url}")
@@ -1029,8 +1032,10 @@ class YoutubeService:
 
         try:
             _ = locate_runtime_tool("yt-dlp.exe", "yt-dlp/yt-dlp.exe", "yt_dlp/yt-dlp.exe")
-        except FileNotFoundError:
-            raise FileNotFoundError("未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                "未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。"
+            ) from e
 
         try:
             info = run_dump_single_json(
@@ -1079,10 +1084,10 @@ class YoutubeService:
 
         try:
             _ = locate_runtime_tool("yt-dlp.exe", "yt-dlp/yt-dlp.exe", "yt_dlp/yt-dlp.exe")
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             raise FileNotFoundError(
                 "未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。"
-            )
+            ) from e
 
         # 构建 android_vr 专用选项（不使用 cookies）
         vr_opts: dict[str, Any] = {
@@ -1207,10 +1212,10 @@ class YoutubeService:
         try:
             try:
                 _ = locate_runtime_tool("yt-dlp.exe", "yt-dlp/yt-dlp.exe", "yt_dlp/yt-dlp.exe")
-            except FileNotFoundError:
+            except FileNotFoundError as e:
                 raise FileNotFoundError(
                     "未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。"
-                )
+                ) from e
 
             try:
                 info = run_dump_single_json(

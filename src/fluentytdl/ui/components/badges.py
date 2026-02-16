@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable, cast
+from collections.abc import Iterable
+from typing import cast
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
@@ -18,14 +19,14 @@ def _with_alpha(c: QColor, alpha: int) -> QColor:
 
 
 def _hsl_adjust(c: QColor, *, hue_shift: float = 0.0, sat_mul: float = 1.0, light_mul: float = 1.0) -> QColor:
-    h, s, l, a = cast(tuple[float, float, float, float], c.getHslF())
+    h, s, light, a = cast(tuple[float, float, float, float], c.getHslF())
     if h < 0:
         h = 0.0
     h = (h + hue_shift) % 1.0
     s = max(0.0, min(1.0, s * sat_mul))
-    l = max(0.0, min(1.0, l * light_mul))
+    light = max(0.0, min(1.0, light * light_mul))
     out = QColor()
-    out.setHslF(h, s, l, a)
+    out.setHslF(h, s, light, a)
     return out
 
 

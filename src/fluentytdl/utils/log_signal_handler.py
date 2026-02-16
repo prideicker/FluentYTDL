@@ -5,10 +5,8 @@
 """
 from __future__ import annotations
 
-from typing import Callable
-from PySide6.QtCore import QObject, Signal
-
 from loguru import logger
+from PySide6.QtCore import QObject, Signal
 
 
 class LogSignalHandler(QObject):
@@ -26,9 +24,9 @@ class LogSignalHandler(QObject):
     # 信号: (时间, 级别, 模块, 消息)
     log_received = Signal(str, str, str, str)
     
-    _instance: "LogSignalHandler | None" = None
+    _instance: LogSignalHandler | None = None
     
-    def __new__(cls) -> "LogSignalHandler":
+    def __new__(cls) -> LogSignalHandler:
         """单例模式"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)

@@ -275,7 +275,7 @@ class BuildGUI(QMainWindow):
         self.btn_gen_checksums.clicked.connect(lambda: self._run_script("checksums.py"))
         self.btn_open_release.clicked.connect(self._open_release_dir)
     
-    def _log(self, text: str, color: str = None):
+    def _log(self, text: str, color: str | None = None):
         """添加日志"""
         if color:
             text = f'<span style="color:{color}">{text}</span>'

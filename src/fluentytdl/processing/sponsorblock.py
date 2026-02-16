@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 # SponsorBlock 片段类型
 SPONSOR_CATEGORIES = {
     "sponsor": ("赞助广告", "跳过赞助商内容"),

@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget
-)
-
+from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    FluentWindow, SubtitleLabel, NavigationItemPosition,
-    FluentIcon, CardWidget, BodyLabel, PrimaryPushButton,
-    ImageLabel, ScrollArea,
-    SettingCardGroup, SettingCard
+    BodyLabel,
+    CardWidget,
+    FluentIcon,
+    FluentWindow,
+    ImageLabel,
+    NavigationItemPosition,
+    PrimaryPushButton,
+    ScrollArea,
+    SettingCard,
+    SettingCardGroup,
+    SubtitleLabel,
 )
-
 
 from ..utils.paths import resource_path
 
@@ -241,8 +243,8 @@ class WelcomeGuideWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.v_layout = QVBoxLayout(self)
+        self.v_layout.setContentsMargins(40, 40, 40, 40)
         
         # Stack for steps
         self.stack = QStackedWidget(self)
@@ -295,7 +297,7 @@ class WelcomeGuideWidget(QWidget):
         self.stack.addWidget(self.step_cookies)
         self.stack.addWidget(self.step4)
         
-        self.layout.addWidget(self.stack, 1)
+        self.v_layout.addWidget(self.stack, 1)
         
         # Navigation Buttons
         btn_layout = QHBoxLayout()
@@ -315,7 +317,7 @@ class WelcomeGuideWidget(QWidget):
         btn_layout.addWidget(self.prev_btn)
         btn_layout.addWidget(self.next_btn)
         
-        self.layout.addLayout(btn_layout)
+        self.v_layout.addLayout(btn_layout)
 
     def _prev_step(self):
         idx = self.stack.currentIndex()

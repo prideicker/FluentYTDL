@@ -11,19 +11,17 @@ from typing import Any
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QHeaderView,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
-    PrimaryPushButton,
     ImageLabel,
     TableWidget,
 )
@@ -138,8 +136,8 @@ class CoverSelectorWidget(QFrame):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         
         # 填充表格
@@ -147,7 +145,7 @@ class CoverSelectorWidget(QFrame):
         for i, t in enumerate(self._thumbnails):
             # 分辨率
             res_item = QTableWidgetItem(t["res"])
-            res_item.setTextAlignment(Qt.AlignCenter)
+            res_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 0, res_item)
             
             # ID
@@ -156,7 +154,7 @@ class CoverSelectorWidget(QFrame):
             
             # 格式
             ext_item = QTableWidgetItem(t["ext"].upper())
-            ext_item.setTextAlignment(Qt.AlignCenter)
+            ext_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 2, ext_item)
             
         contentLayout.addWidget(self.table, stretch=1)
@@ -173,7 +171,7 @@ class CoverSelectorWidget(QFrame):
         
         self.previewInfo = CaptionLabel("预览加载中...", previewContainer)
         self.previewInfo.setWordWrap(True)
-        self.previewInfo.setAlignment(Qt.AlignCenter)
+        self.previewInfo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         previewLayout.addWidget(self.previewLabel, alignment=Qt.AlignmentFlag.AlignHCenter)
         previewLayout.addWidget(self.previewInfo, alignment=Qt.AlignmentFlag.AlignHCenter)

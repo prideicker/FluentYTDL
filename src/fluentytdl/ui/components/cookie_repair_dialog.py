@@ -7,14 +7,14 @@ Cookie 修复对话框
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout
 from qfluentwidgets import (
-    PushButton,
-    PrimaryPushButton,
     BodyLabel,
-    StrongBodyLabel,
     InfoBar,
     InfoBarPosition,
+    PrimaryPushButton,
+    PushButton,
+    StrongBodyLabel,
 )
 
 

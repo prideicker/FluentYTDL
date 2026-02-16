@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import io
-from PIL import Image
 
-from PySide6.QtCore import QObject, QUrl, Signal, Qt
-from PySide6.QtGui import QPainter, QPainterPath, QPixmap, QImage
+from PIL import Image
+from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtGui import QImage, QPainter, QPainterPath, QPixmap
 from PySide6.QtNetwork import (
     QNetworkAccessManager,
     QNetworkDiskCache,

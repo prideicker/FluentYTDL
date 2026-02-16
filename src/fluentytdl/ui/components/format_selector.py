@@ -10,14 +10,12 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
-    QLabel,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
-
 from qfluentwidgets import (
     CaptionLabel,
     ComboBox,
@@ -27,11 +25,9 @@ from qfluentwidgets import (
     ScrollArea,
     SegmentedWidget,
     StrongBodyLabel,
-    SubtitleLabel,
 )
 
 from .badges import QualityCellWidget
-
 
 _TABLE_SELECTION_QSS = """
 QTableWidget {
@@ -82,9 +78,12 @@ def _format_size(value: Any) -> str:
 def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | None) -> str | None:
     v = str(video_ext or "").strip().lower()
     a = str(audio_ext or "").strip().lower()
-    if not v or not a: return None
-    if v == "webm" and a == "webm": return "webm"
-    if v in {"mp4", "m4v"} and a in {"m4a", "aac", "mp4"}: return "mp4"
+    if not v or not a:
+        return None
+    if v == "webm" and a == "webm":
+        return "webm"
+    if v in {"mp4", "m4v"} and a in {"m4a", "aac", "mp4"}:
+        return "mp4"
     return "mkv"
 
 
@@ -258,7 +257,8 @@ class SimplePresetWidget(QWidget):
 
     def get_current_selection(self) -> dict:
         btn = self.btn_group.checkedButton()
-        if not btn: return {}
+        if not btn:
+            return {}
         return {
             "format": btn.property("format_str"),
             "extra": btn.property("extra_args"),
@@ -394,7 +394,8 @@ class VideoFormatSelectorWidget(QWidget):
             t.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
             t.setColumnWidth(0, 60)
             t.setColumnWidth(1, 130)
-        except: pass
+        except Exception:
+            pass
         return t
 
     def _on_mode_changed(self, routeKey: str):
@@ -403,13 +404,16 @@ class VideoFormatSelectorWidget(QWidget):
 
     def _build_rows(self, info: dict[str, Any]):
         formats = info.get("formats") or []
-        if not isinstance(formats, list): return
+        if not isinstance(formats, list):
+            return
 
         candidates = []
         for f in formats:
-            if not isinstance(f, dict): continue
+            if not isinstance(f, dict):
+                continue
             fid = str(f.get("format_id") or "").strip()
-            if not fid: continue
+            if not fid:
+                continue
             
             vcodec = str(f.get("vcodec") or "none")
             acodec = str(f.get("acodec") or "none")
@@ -417,12 +421,17 @@ class VideoFormatSelectorWidget(QWidget):
             height = int(f.get("height") or 0)
             
             kind = "unknown"
-            if vcodec != "none" and acodec != "none": kind = "muxed"
-            elif vcodec != "none" and acodec == "none": kind = "video"
-            elif vcodec == "none" and acodec != "none": kind = "audio"
-            else: continue
+            if vcodec != "none" and acodec != "none":
+                kind = "muxed"
+            elif vcodec != "none" and acodec == "none":
+                kind = "video"
+            elif vcodec == "none" and acodec != "none":
+                kind = "audio"
+            else:
+                continue
             
-            if kind in ("muxed", "video") and height and height < 144: continue
+            if kind in ("muxed", "video") and height and height < 144:
+                continue
             
             candidates.append({
                 "kind": kind, "format_id": fid, "ext": ext, "height": height,
@@ -444,14 +453,17 @@ class VideoFormatSelectorWidget(QWidget):
         self.hint_label.setVisible(mode == 0)
         
         # Clear incompatible selections
-        if mode == 0: self._selected_muxed_id = None
-        if mode == 1: 
+        if mode == 0:
+            self._selected_muxed_id = None
+        if mode == 1:
             self._selected_video_id = None
             self._selected_audio_id = None
-        if mode in (2, 3): 
+        if mode in (2, 3):
             self._selected_muxed_id = None
-            if mode == 2: self._selected_audio_id = None
-            else: self._selected_video_id = None
+            if mode == 2:
+                self._selected_audio_id = None
+            else:
+                self._selected_video_id = None
             
         if mode == 0:
             # Split View
@@ -473,15 +485,20 @@ class VideoFormatSelectorWidget(QWidget):
             for r in self._rows:
                 k = r["kind"]
                 if mode == 1:
-                    if k == "muxed": view_rows.append(r)
+                    if k == "muxed":
+                        view_rows.append(r)
                 elif mode == 2:
-                    if k == "video": view_rows.append(r)
+                    if k == "video":
+                        view_rows.append(r)
                 elif mode == 3:
-                    if k == "audio": view_rows.append(r)
+                    if k == "audio":
+                        view_rows.append(r)
             
             sel_id = self._selected_muxed_id
-            if mode == 2: sel_id = self._selected_video_id
-            elif mode == 3: sel_id = self._selected_audio_id
+            if mode == 2:
+                sel_id = self._selected_video_id
+            elif mode == 3:
+                sel_id = self._selected_audio_id
             
             self._populate_table(self.table, view_rows, sel_id)
 
@@ -563,33 +580,39 @@ class VideoFormatSelectorWidget(QWidget):
 
     def _on_table_clicked(self, row, col):
         rows = self.table.property("_rows")
-        if not rows or row >= len(rows): return
+        if not rows or row >= len(rows):
+            return
         
         r = rows[row]
         fid = r["format_id"]
         mode = self.mode_combo.currentIndex()
         
-        if mode == 1: self._selected_muxed_id = fid
-        elif mode == 2: self._selected_video_id = fid
-        elif mode == 3: self._selected_audio_id = fid
+        if mode == 1:
+            self._selected_muxed_id = fid
+        elif mode == 2:
+            self._selected_video_id = fid
+        elif mode == 3:
+            self._selected_audio_id = fid
         
-        self._highlight_table_rows(self.table, {fid})
+        self._highlight_table_rows(self.table, {fid} if fid else set())
         self._update_label()
         self.selectionChanged.emit()
 
     def _on_video_table_clicked(self, row, col):
         rows = self.video_table.property("_rows")
-        if not rows or row >= len(rows): return
+        if not rows or row >= len(rows):
+            return
         self._selected_video_id = rows[row]["format_id"]
-        self._highlight_table_rows(self.video_table, {self._selected_video_id})
+        self._highlight_table_rows(self.video_table, {self._selected_video_id} if self._selected_video_id else set())
         self._update_label()
         self.selectionChanged.emit()
 
     def _on_audio_table_clicked(self, row, col):
         rows = self.audio_table.property("_rows")
-        if not rows or row >= len(rows): return
+        if not rows or row >= len(rows):
+            return
         self._selected_audio_id = rows[row]["format_id"]
-        self._highlight_table_rows(self.audio_table, {self._selected_audio_id})
+        self._highlight_table_rows(self.audio_table, {self._selected_audio_id} if self._selected_audio_id else set())
         self._update_label()
         self.selectionChanged.emit()
 
@@ -622,7 +645,8 @@ class VideoFormatSelectorWidget(QWidget):
         # Fix: Use self._current_mode instead of accessing routeKey() on items directly
         if getattr(self, "_current_mode", "simple") == "simple":
             sel = self.simple_widget.get_current_selection()
-            if not sel: return {}
+            if not sel:
+                return {}
             return {"format": sel["format"], "extra_opts": sel["extra"]}
         else:
             # Advanced
@@ -639,15 +663,19 @@ class VideoFormatSelectorWidget(QWidget):
                 vext = next((r["ext"] for r in self._rows if r["format_id"]==v), "mp4")
                 aext = next((r["ext"] for r in self._rows if r["format_id"]==a), "m4a")
                 merge = _choose_lossless_merge_container(vext, aext)
-                if merge: opts["merge_output_format"] = merge
+                if merge:
+                    opts["merge_output_format"] = merge
             elif v:
                 opts["format"] = v
             elif a:
                 opts["format"] = a
             else:
-                return {} # Nothing
-                
-            return {"format": opts["format"], "extra_opts": opts.get("merge_output_format") and {"merge_output_format": opts["merge_output_format"]} or {}}
+                return {}
+
+            extra_opts = {}
+            if "merge_output_format" in opts:
+                extra_opts["merge_output_format"] = opts["merge_output_format"]
+            return {"format": opts["format"], "extra_opts": extra_opts}
 
     def get_summary_text(self) -> str:
         """Returns a human-readable summary of the current selection."""

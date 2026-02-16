@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ try:
     import rookiepy
     HAS_ROOKIEPY = True
 except ImportError:
+    rookiepy = None
     HAS_ROOKIEPY = False
     logger.warning("rookiepy 未安装，Cookie 自动提取功能不可用")
 
@@ -137,7 +138,7 @@ class CookieManager:
             return cookies
             
         except Exception as e:
-            raise RuntimeError(f"Cookie 提取失败: {e}")
+            raise RuntimeError(f"Cookie 提取失败: {e}") from e
     
     def to_netscape_file(
         self,
@@ -332,7 +333,7 @@ class CookieManager:
             return
         
         try:
-            with open(self._profiles_path, "r", encoding="utf-8") as f:
+            with open(self._profiles_path, encoding="utf-8") as f:
                 data = json.load(f)
             for p_data in data.get("profiles", []):
                 profile = AuthProfile.from_dict(p_data)

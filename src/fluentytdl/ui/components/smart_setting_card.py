@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
-
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QFileDialog
 from pathlib import Path
 
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFileDialog, QWidget
 from qfluentwidgets import CaptionLabel, PushButton, SettingCard
 
 from ...core.config_manager import config_manager
@@ -28,8 +26,8 @@ class SmartSettingCard(SettingCard):
         content: str | None,
         config_key: str,
         parent: QWidget | None = None,
-        validator: Optional[Validator] = None,
-        fixer: Optional[Fixer] = None,
+        validator: Validator | None = None,
+        fixer: Fixer | None = None,
         prefer_multiline: bool = False,
         empty_text: str = "未设置",
         dialog_content: str | None = None,

@@ -5,9 +5,9 @@ FluentYTDL 下载功能域
 """
 
 from .download_manager import DownloadManager, download_manager
-from .workers import DownloadWorker
-from .task_queue import TaskQueue
 from .resume_manager import ResumeManager
+from .task_queue import TaskQueue
+from .workers import DownloadWorker
 
 __all__ = [
     "DownloadManager",

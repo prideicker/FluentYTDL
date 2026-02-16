@@ -10,13 +10,10 @@ FluentYTDL 字幕管理模块
 
 from __future__ import annotations
 
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-
 
 # 常见字幕语言代码映射
 LANGUAGE_NAMES = {
@@ -272,7 +269,7 @@ def convert_subtitle(
         )
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg 转换失败: {result.stderr}")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("字幕转换超时")
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("字幕转换超时") from e
     
     return output_path

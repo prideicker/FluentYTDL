@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class ThumbnailEmbedSupport(Enum):
@@ -102,7 +101,7 @@ def can_embed_thumbnail(extension: str) -> bool:
     return info.support != ThumbnailEmbedSupport.NONE
 
 
-def get_unsupported_formats_warning(extension: str) -> Optional[str]:
+def get_unsupported_formats_warning(extension: str) -> str | None:
     """获取不支持封面嵌入格式的警告信息
     
     Args:

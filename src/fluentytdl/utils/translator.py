@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 

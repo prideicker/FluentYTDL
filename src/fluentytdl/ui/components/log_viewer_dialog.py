@@ -6,26 +6,22 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from collections import deque
 
-from PySide6.QtCore import Qt, Slot, QTimer
+from PySide6.QtCore import Slot
+from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QVBoxLayout,
     QHBoxLayout,
-    QWidget,
     QPlainTextEdit,
     QSizePolicy,
+    QWidget,
 )
-from PySide6.QtGui import QFont, QTextCharFormat, QColor, QTextCursor
-
 from qfluentwidgets import (
-    MessageBoxBase,
-    SubtitleLabel,
     ComboBox,
-    SearchLineEdit,
-    PushButton,
     FluentIcon,
+    MessageBoxBase,
+    SearchLineEdit,
+    SubtitleLabel,
     ToolButton,
     ToolTipFilter,
     ToolTipPosition,
@@ -33,7 +29,6 @@ from qfluentwidgets import (
 
 from ...utils.log_signal_handler import log_signal_handler
 from ...utils.logger import LOG_DIR
-
 
 # 日志级别颜色映射
 LEVEL_COLORS = {
@@ -76,7 +71,7 @@ class LogViewerDialog(MessageBoxBase):
             
             if os.path.exists(log_file):
                 # 只加载最后 500 行避免过长
-                with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                with open(log_file, encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
                     
                 # 取最后 500 行

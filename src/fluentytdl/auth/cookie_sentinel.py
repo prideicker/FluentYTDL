@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..utils.logger import logger
-from .auth_service import auth_service, AuthSourceType
+from .auth_service import AuthSourceType, auth_service
 
 
 class CookieSentinel:
@@ -121,7 +121,6 @@ class CookieSentinel:
             source: 来源标识（如 "edge", "firefox", "file"）
             cookie_count: Cookie 数量
         """
-        import json
         meta = {
             "source": source,
             "extracted_at": datetime.now().isoformat(),
@@ -334,7 +333,7 @@ class CookieSentinel:
                     if self.exists and actual_source:
                         self._using_fallback = True
                         self._fallback_warning = f"导入失败，继续使用 {self._get_source_display(actual_source)} 的 Cookie"
-                        return False, f"导入失败（保留旧 Cookie）"
+                        return False, "导入失败（保留旧 Cookie）"
                     return False, "手动导入的 Cookie 文件不存在或无效"
             
             # 浏览器来源：强制刷新（允许 UAC）

@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
-import re
-
 import os
+import re
 import subprocess
+from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
-from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -18,17 +15,16 @@ from qfluentwidgets import (
     FluentIcon,
     InfoBar,
     InfoBarPosition,
+    MessageBox,
     ProgressBar,
     ToolTipFilter,
     ToolTipPosition,
     TransparentToolButton,
-    MessageBox,
 )
 
 from ...download.download_manager import download_manager
 from ...download.workers import DownloadWorker
 from ...utils.image_loader import ImageLoader
-
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -215,22 +211,22 @@ class DownloadItemCard(CardWidget):
 
     def _bind_worker(self, worker: DownloadWorker) -> None:
         self.worker = worker
-        self.worker.progress.connect(self.update_progress)
-        self.worker.status_msg.connect(self.update_status)
-        self.worker.completed.connect(self.on_finished)
-        self.worker.error.connect(self.on_error)
+        self.worker.progress.connect(self.update_progress, Qt.ConnectionType.UniqueConnection)
+        self.worker.status_msg.connect(self.update_status, Qt.ConnectionType.UniqueConnection)
+        self.worker.completed.connect(self.on_finished, Qt.ConnectionType.UniqueConnection)
+        self.worker.error.connect(self.on_error, Qt.ConnectionType.UniqueConnection)
         try:
-            self.worker.output_path_ready.connect(self._on_output_path_ready)
+            self.worker.output_path_ready.connect(self._on_output_path_ready, Qt.ConnectionType.UniqueConnection)
         except Exception:
             pass
         # Cookie 错误检测
         try:
-            self.worker.cookie_error_detected.connect(self._on_cookie_error)
+            self.worker.cookie_error_detected.connect(self._on_cookie_error, Qt.ConnectionType.UniqueConnection)
         except Exception:
             pass
         # Also forward to MainWindow if it provides a structured error dialog.
         try:
-            self.worker.error.connect(self._forward_error_to_window)
+            self.worker.error.connect(self._forward_error_to_window, Qt.ConnectionType.UniqueConnection)
         except Exception:
             pass
 
@@ -250,8 +246,8 @@ class DownloadItemCard(CardWidget):
         弹出修复对话框，引导用户修复 Cookie
         """
         try:
-            from .cookie_repair_dialog import CookieRepairDialog
             from ...auth.cookie_sentinel import cookie_sentinel
+            from .cookie_repair_dialog import CookieRepairDialog
             
             # 创建修复对话框
             dialog = CookieRepairDialog(error_message, parent=self.window())
@@ -273,8 +269,9 @@ class DownloadItemCard(CardWidget):
                 # 打开设置页面的验证选项卡
                 try:
                     main_win = self.window()
-                    if hasattr(main_win, "switch_to_settings"):
-                        main_win.switch_to_settings()
+                    handler = getattr(main_win, "switch_to_settings", None)
+                    if callable(handler):
+                        handler()
                         InfoBar.info(
                             "请在设置页面导入 Cookie 文件",
                             "导入完成后可重试下载",
@@ -293,6 +290,40 @@ class DownloadItemCard(CardWidget):
         except Exception as e:
             from ...utils.logger import logger
             logger.error(f"显示 Cookie 修复对话框失败: {e}", exc_info=True)
+
+    def _retry_download(self) -> None:
+        try:
+            download_manager.remove_worker(self.worker)
+        except Exception:
+            pass
+
+        new_worker = download_manager.create_worker(self.url, self.opts)
+        self._bind_worker(new_worker)
+        started = download_manager.start_worker(new_worker)
+
+        try:
+            self.progressBar.setValue(0)
+        except Exception:
+            pass
+        if hasattr(self.progressBar, "setError"):
+            try:
+                self.progressBar.setError(False)
+            except Exception:
+                pass
+        try:
+            self.folderBtn.setEnabled(False)
+        except Exception:
+            pass
+        try:
+            self.actionBtn.setIcon(FluentIcon.PAUSE)
+            self.actionBtn.setToolTip("暂停任务")
+        except Exception:
+            pass
+        try:
+            self.statusLabel.setText("正在重试..." if started else "排队中...")
+        except Exception:
+            pass
+        self.set_state("running" if started else "queued")
 
     def update_progress(self, d: dict[str, Any]) -> None:
         if d.get("status") == "downloading":

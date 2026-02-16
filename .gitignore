@@ -37,6 +37,7 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+pyright_output.json
 
 # ==============================================================================
 # 构建产物 / 打包输出
@@ -133,6 +134,9 @@ crash_reports/
 # Gemini AI
 .gemini/
 
+# Trae IDE
+.trae/
+
 # ==============================================================================
 # 系统文件
 # ==============================================================================
@@ -153,6 +157,9 @@ $RECYCLE.BIN/
 # 废弃/归档的代码
 rabbish/
 
+# 本地下载目录
+/download/
+
 # 测试输出
 tests/output/
 test_*.mp4
@@ -164,6 +171,7 @@ check_all_icons.py
 
 # 记录历史 (包含用户下载历史)
 record_history.json
+download_history.json
 
 # 本地调试文件
 *_debug_*.txt

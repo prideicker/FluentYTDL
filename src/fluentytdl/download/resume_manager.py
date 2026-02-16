@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ..core.config_manager import config_manager
-from ..utils.paths import config_path
 from ..utils.logger import logger
+from ..utils.paths import config_path
 
 
 @dataclass
@@ -41,7 +41,7 @@ class ResumeTask:
         return asdict(self)
     
     @classmethod
-    def from_dict(cls, data: dict) -> "ResumeTask":
+    def from_dict(cls, data: dict) -> ResumeTask:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
@@ -54,9 +54,9 @@ class ResumeManager:
     - 清理已完成任务的缓存
     """
     
-    _instance: "ResumeManager | None" = None
+    _instance: ResumeManager | None = None
     
-    def __new__(cls) -> "ResumeManager":
+    def __new__(cls) -> ResumeManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._init()

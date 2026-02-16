@@ -10,17 +10,16 @@ FluentYTDL 身份验证卡片组件
 
 from __future__ import annotations
 
-
-from PySide6.QtCore import Signal, QTimer
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QVBoxLayout,
 )
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    CardWidget,
     ComboBox,
     FluentIcon,
     IconWidget,
@@ -28,9 +27,8 @@ from qfluentwidgets import (
     InfoBarPosition,
     PrimaryPushButton,
     PushButton,
-    SwitchButton,
-    CardWidget,
     StrongBodyLabel,
+    SwitchButton,
 )
 
 from ...auth.auth_service import (
@@ -213,7 +211,7 @@ class AuthenticationCard(CardWidget):
     
     def _startup_refresh(self):
         """启动时自动刷新 Cookie"""
-        from ..utils.admin_utils import is_admin
+        from ...utils.admin_utils import is_admin
         
         current_source = auth_service.current_source
         

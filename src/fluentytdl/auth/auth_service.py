@@ -16,7 +16,7 @@ import ctypes
 import json
 import sys
 import tempfile
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -29,6 +29,7 @@ try:
     import rookiepy
     HAS_ROOKIEPY = True
 except ImportError:
+    rookiepy = None
     HAS_ROOKIEPY = False
     logger.warning("rookiepy 未安装，浏览器 Cookie 自动提取功能不可用")
 
@@ -404,7 +405,7 @@ class AuthService:
                     f"{browser_display} v130+ 使用了 App-Bound 加密。\n"
                     "需要以管理员身份重新启动程序才能提取 Cookie。\n\n"
                     "建议：使用 Edge 浏览器可避免此问题。"
-                )
+                ) from e
             else:
                 # 非 App-Bound 错误，直接抛出
                 raise
@@ -561,7 +562,7 @@ class AuthService:
             return
         
         try:
-            with open(self._config_path, "r", encoding="utf-8") as f:
+            with open(self._config_path, encoding="utf-8") as f:
                 data = json.load(f)
             source_value = data.get("source", "edge")  # 默认 edge
             # 如果是 none，自动切换为 edge
@@ -677,7 +678,7 @@ class AuthService:
         if not self._profiles_path.exists():
             return
         try:
-            with open(self._profiles_path, "r", encoding="utf-8") as f:
+            with open(self._profiles_path, encoding="utf-8") as f:
                 data = json.load(f)
             for p_data in data.get("profiles", []):
                 profile = AuthProfile.from_dict(p_data)

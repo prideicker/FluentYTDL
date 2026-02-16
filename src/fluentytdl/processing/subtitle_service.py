@@ -15,7 +15,6 @@ from ..models.subtitle_config import SubtitleConfig
 from .subtitle_manager import (
     extract_subtitle_tracks,
     get_subtitle_languages,
-    SubtitleTrack,
 )
 
 
@@ -294,9 +293,9 @@ class SubtitleService:
     提供字幕下载的统一入口，管理配置和策略选择。
     """
     
-    _instance: "SubtitleService | None" = None
+    _instance: SubtitleService | None = None
     
-    def __new__(cls) -> "SubtitleService":
+    def __new__(cls) -> SubtitleService:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance

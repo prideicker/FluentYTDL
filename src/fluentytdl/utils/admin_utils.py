@@ -2,9 +2,9 @@
 管理员权限工具
 提供检查、请求、重启等管理员权限相关功能
 """
-import sys
-import os
 import ctypes
+import os
+import sys
 
 
 def is_admin() -> bool:

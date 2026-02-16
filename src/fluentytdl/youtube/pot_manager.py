@@ -15,10 +15,9 @@ import atexit
 import socket
 import subprocess
 import sys
-import time
 import threading
+import time
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
 
@@ -28,13 +27,13 @@ from ..utils.paths import find_bundled_executable, frozen_app_dir
 class POTManager:
     """PO Token 服务管理器（单例）"""
     
-    _instance: Optional["POTManager"] = None
+    _instance: POTManager | None = None
     
     # 端口范围
     DEFAULT_PORT = 4416
     PORT_RANGE = 10
     
-    def __new__(cls) -> "POTManager":
+    def __new__(cls) -> POTManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -45,10 +44,10 @@ class POTManager:
             return
         self._initialized = True
         
-        self._process: Optional[subprocess.Popen] = None
+        self._process: subprocess.Popen | None = None
         self._active_port: int = 0
         self._is_running: bool = False
-        self._job_handle = None  # Windows Job Object
+        self._job_handle: int | None = None  # Windows Job Object
         self._lock = threading.Lock()
         
         # 注册退出清理
@@ -63,17 +62,20 @@ class POTManager:
         try:
             import win32job
             
-            self._job_handle = win32job.CreateJobObject(None, "FluentYTDL_POT_Job")
+            job_handle = win32job.CreateJobObject(None, "FluentYTDL_POT_Job")
+            if job_handle is None:
+                raise RuntimeError("CreateJobObject returned None")
             info = win32job.QueryInformationJobObject(
-                self._job_handle, 
+                job_handle, 
                 win32job.JobObjectExtendedLimitInformation
             )
             info['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
             win32job.SetInformationJobObject(
-                self._job_handle, 
+                job_handle, 
                 win32job.JobObjectExtendedLimitInformation, 
                 info
             )
+            self._job_handle = job_handle
             logger.debug("POT Manager: Windows Job Object 已创建")
         except Exception as e:
             logger.warning(f"POT Manager: 创建 Job Object 失败: {e}")
@@ -93,7 +95,7 @@ class POTManager:
             s.bind(('', 0))
             return s.getsockname()[1]
     
-    def _find_pot_executable(self) -> Optional[Path]:
+    def _find_pot_executable(self) -> Path | None:
         """查找 POT Provider 可执行文件"""
         candidates = [
             "pot-provider/bgutil-pot-provider.exe",
@@ -189,9 +191,9 @@ class POTManager:
                 # Windows: 关联到 Job Object
                 if self._job_handle and sys.platform == "win32":
                     try:
-                        import win32job
                         import win32api
                         import win32con
+                        import win32job
                         
                         handle = win32api.OpenProcess(
                             win32con.PROCESS_ALL_ACCESS, 
@@ -237,21 +239,22 @@ class POTManager:
                 logger.debug("POT Manager: 服务未运行，跳过停止操作")
                 return
             
-            if self._process:
+            proc = self._process
+            if proc is not None:
                 try:
                     # 检查进程是否已经终止
-                    if self._process.poll() is not None:
+                    if proc.poll() is not None:
                         logger.debug("POT Manager: 进程已终止，跳过停止操作")
                         self._process = None
                         self._is_running = False
                         self._active_port = 0
                         return
                     
-                    self._process.terminate()
-                    self._process.wait(timeout=2)
+                    proc.terminate()
+                    proc.wait(timeout=2)
                 except Exception:
                     try:
-                        self._process.kill()
+                        proc.kill()
                     except Exception:
                         pass
                 finally:
@@ -270,7 +273,7 @@ class POTManager:
             return False
         return True
     
-    def get_extractor_args(self) -> Optional[str]:
+    def get_extractor_args(self) -> str | None:
         """获取 yt-dlp 的 extractor-args 参数"""
         if not self.is_running():
             return None

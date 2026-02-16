@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from PySide6.QtWidgets import QWidget
-
 from qfluentwidgets import (
     CaptionLabel,
     LineEdit,
@@ -34,8 +33,8 @@ class ValidatedEditDialog(MessageBoxBase):
         title: str,
         content: str,
         initial_value: str = "",
-        validator: Optional[Validator] = None,
-        fixer: Optional[Fixer] = None,
+        validator: Validator | None = None,
+        fixer: Fixer | None = None,
         parent: QWidget | None = None,
         prefer_multiline: bool = False,
         min_width: int = 420,

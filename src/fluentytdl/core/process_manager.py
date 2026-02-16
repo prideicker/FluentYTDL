@@ -13,7 +13,7 @@ import atexit
 import os
 import signal
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 from ..utils.logger import logger
 
@@ -22,6 +22,7 @@ try:
     import psutil
     HAS_PSUTIL = True
 except ImportError:
+    psutil = None
     HAS_PSUTIL = False
     logger.warning("psutil 未安装，进程清理功能受限")
 
@@ -154,30 +155,31 @@ class ProcessManager:
                 self._child_pids.discard(pid)
                 return False
         
+        import psutil as psutil_mod
         try:
-            proc = psutil.Process(pid)
+            proc = psutil_mod.Process(pid)
             
             # 先尝试优雅终止
             proc.terminate()
             
             try:
                 proc.wait(timeout=3)
-            except psutil.TimeoutExpired:
+            except psutil_mod.TimeoutExpired:
                 # 超时则强制杀死
                 proc.kill()
                 try:
                     proc.wait(timeout=1)
-                except psutil.TimeoutExpired:
+                except psutil_mod.TimeoutExpired:
                     pass
             
             self._child_pids.discard(pid)
             return True
             
-        except psutil.NoSuchProcess:
+        except psutil_mod.NoSuchProcess:
             # 进程已不存在
             self._child_pids.discard(pid)
             return False
-        except psutil.AccessDenied:
+        except psutil_mod.AccessDenied:
             logger.warning(f"无权限终止进程 {pid}")
             return False
         except Exception as e:
@@ -188,12 +190,14 @@ class ProcessManager:
         """按进程名清理由本程序启动的子进程"""
         if not HAS_PSUTIL:
             return 0
+
+        import psutil as psutil_mod
         
         killed = 0
         my_pid = os.getpid()
         
         try:
-            for proc in psutil.process_iter(['pid', 'name', 'ppid']):
+            for proc in psutil_mod.process_iter(['pid', 'name', 'ppid']):
                 try:
                     info = proc.info
                     name = info.get('name', '').lower()
@@ -206,7 +210,7 @@ class ProcessManager:
                             if self._kill_pid(pid):
                                 killed += 1
                                 
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil_mod.NoSuchProcess, psutil_mod.AccessDenied):
                     continue
                     
         except Exception as e:
@@ -224,17 +228,19 @@ class ProcessManager:
         if not HAS_PSUTIL:
             return [{"pid": pid, "name": "unknown", "status": "unknown"} 
                     for pid in self._child_pids]
+
+        import psutil as psutil_mod
         
         result = []
         for pid in list(self._child_pids):
             try:
-                proc = psutil.Process(pid)
+                proc = psutil_mod.Process(pid)
                 result.append({
                     "pid": pid,
                     "name": proc.name(),
                     "status": proc.status(),
                 })
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+            except (psutil_mod.NoSuchProcess, psutil_mod.AccessDenied):
                 self._child_pids.discard(pid)
         
         return result

@@ -10,7 +10,6 @@ FluentYTDL 账户管理 UI 组件
 
 from __future__ import annotations
 
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -18,7 +17,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -38,10 +36,10 @@ from qfluentwidgets import (
     ToolTipPosition,
 )
 
-from ...core.cookie_manager import (
+from ...auth.cookie_manager import (
+    SUPPORTED_BROWSERS,
     AuthProfile,
     CookieManager,
-    SUPPORTED_BROWSERS,
     cookie_manager,
 )
 from ...utils.logger import logger

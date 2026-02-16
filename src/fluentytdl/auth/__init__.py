@@ -5,13 +5,13 @@ FluentYTDL 认证功能域
 """
 
 from .auth_service import (
+    ADMIN_REQUIRED_BROWSERS,
+    BROWSER_SOURCES,
+    AuthProfile,
     AuthService,
-    auth_service,
     AuthSourceType,
     AuthStatus,
-    AuthProfile,
-    BROWSER_SOURCES,
-    ADMIN_REQUIRED_BROWSERS,
+    auth_service,
     is_admin,
 )
 from .cookie_manager import CookieManager, cookie_manager

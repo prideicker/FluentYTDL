@@ -108,7 +108,7 @@ def parse_time_input(text: str) -> float:
     try:
         return float(text)
     except ValueError:
-        raise ValueError(f"无法解析时间: {text}")
+        raise ValueError(f"无法解析时间: {text}") from None
 
 
 def parse_time_range(start: str, end: str | None = None) -> TimeRange:
@@ -245,8 +245,8 @@ def lossless_cut(
         )
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg 剪切失败: {result.stderr}")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("剪切操作超时")
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("剪切操作超时") from e
     
     return output_path
 
@@ -297,8 +297,8 @@ def extract_frame(
         )
         if result.returncode != 0:
             raise RuntimeError(f"抓帧失败: {result.stderr}")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("抓帧操作超时")
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("抓帧操作超时") from e
     
     return output_path
 
@@ -340,7 +340,7 @@ def get_video_duration(
             raise RuntimeError(f"获取时长失败: {result.stderr}")
         return float(result.stdout.strip())
     except (subprocess.TimeoutExpired, ValueError) as e:
-        raise RuntimeError(f"获取视频时长失败: {e}")
+        raise RuntimeError(f"获取视频时长失败: {e}") from e
 
 
 def generate_preview_frames(

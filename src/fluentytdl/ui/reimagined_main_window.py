@@ -2,54 +2,54 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QIcon, QPixmap, QColor
+from PySide6.QtGui import QAction, QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QFrame,
     QHBoxLayout,
     QMenu,
     QScrollArea,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
-    QFrame,
-    QCheckBox,
 )
-
 from qfluentwidgets import (
-    FluentWindow,
     FluentIcon,
+    FluentWindow,
+    InfoBar,
+    InfoBarPosition,
+    MessageBox,
     NavigationItemPosition,
+    PrimaryPushButton,
+    PushButton,
+    SplashScreen,
     SubtitleLabel,
     ToolTipFilter,
     ToolTipPosition,
     TransparentToolButton,
-    PrimaryPushButton,
-    PushButton,
-    SplashScreen,
-    MessageBox,
-    InfoBar,
-    InfoBarPosition,
 )
 
-from .components.download_item_widget import DownloadItemWidget
-from .components.clipboard_monitor import ClipboardMonitor
-from .components.download_config_window import DownloadConfigWindow
-from .parse_page import ParsePage
-from .subtitle_download_page import SubtitleDownloadPage
-from .cover_download_page import CoverDownloadPage
-from .vr_parse_page import VRParsePage
-from .pages.history_page import HistoryPage
-from .settings_page import SettingsPage
-from .unified_task_list_page import UnifiedTaskListPage
-from .welcome_wizard import WelcomeWizardDialog
-from .help_window import HelpWindow
-from ..download.download_manager import download_manager
 from ..core.config_manager import config_manager
+from ..download.download_manager import download_manager
 from ..utils.logger import logger
 from ..utils.paths import resource_path
+from .components.clipboard_monitor import ClipboardMonitor
+from .components.download_config_window import DownloadConfigWindow
+from .components.download_item_widget import DownloadItemWidget
+from .cover_download_page import CoverDownloadPage
+from .help_window import HelpWindow
+from .pages.history_page import HistoryPage
+from .parse_page import ParsePage
+from .settings_page import SettingsPage
+from .subtitle_download_page import SubtitleDownloadPage
+from .unified_task_list_page import UnifiedTaskListPage
+from .vr_parse_page import VRParsePage
+from .welcome_wizard import WelcomeWizardDialog
 
 
 class TaskListPage(QWidget):
@@ -79,7 +79,7 @@ class TaskListPage(QWidget):
         # === 列表区域 ===
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setStyleSheet("background: transparent;")
         
         self.scroll_widget = QWidget()
@@ -108,8 +108,9 @@ class TaskListPage(QWidget):
             item = self.scroll_layout.itemAt(i)
             if item and item.widget():
                 w = item.widget()
-                if hasattr(w, "set_selection_mode"):
-                    w.set_selection_mode(enabled)
+                set_selection_mode = getattr(w, "set_selection_mode", None)
+                if callable(set_selection_mode):
+                    set_selection_mode(enabled)
 
     def get_selected_cards(self) -> list[QWidget]:
         selected = []
@@ -117,7 +118,8 @@ class TaskListPage(QWidget):
             item = self.scroll_layout.itemAt(i)
             if item and item.widget():
                 w = item.widget()
-                if hasattr(w, "is_selected") and w.is_selected():
+                is_selected = getattr(w, "is_selected", None)
+                if callable(is_selected) and is_selected():
                     selected.append(w)
         return selected
 
@@ -126,16 +128,20 @@ class TaskListPage(QWidget):
             item = self.scroll_layout.itemAt(i)
             if item and item.widget():
                 w = item.widget()
-                if hasattr(w, "selectBox"):
-                    w.selectBox.setChecked(True)
+                select_box = getattr(w, "selectBox", None)
+                set_checked = getattr(select_box, "setChecked", None)
+                if callable(set_checked):
+                    set_checked(True)
 
     def deselect_all(self):
         for i in range(self.scroll_layout.count()):
             item = self.scroll_layout.itemAt(i)
             if item and item.widget():
                 w = item.widget()
-                if hasattr(w, "selectBox"):
-                    w.selectBox.setChecked(False)
+                select_box = getattr(w, "selectBox", None)
+                set_checked = getattr(select_box, "setChecked", None)
+                if callable(set_checked):
+                    set_checked(False)
 
 
 
@@ -440,7 +446,7 @@ class MainWindow(FluentWindow):
         self.tray_icon.activated.connect(self._on_tray_icon_activated)
 
     def _on_tray_icon_activated(self, reason):
-        if reason == QSystemTrayIcon.Trigger:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.showNormal()
             self.activateWindow()
 
@@ -469,27 +475,50 @@ class MainWindow(FluentWindow):
 
     def on_youtube_url_detected(self, url: str):
         if not self.isVisible():
-            self.tray_icon.showMessage("检测到视频链接", "点击处理", QSystemTrayIcon.Information, 2000)
+            self.tray_icon.showMessage(
+                "检测到视频链接",
+                "点击处理",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
             self.showNormal()
             self.activateWindow()
-        self.show_selection_dialog(url)
+            
+        action = config_manager.get("clipboard_action_mode", "smart")
+        
+        if action == "vr":
+            self.show_vr_selection_dialog(url)
+        elif action == "subtitle":
+            self.show_subtitle_selection_dialog(url)
+        elif action == "cover":
+            self.show_cover_selection_dialog(url)
+        elif action == "standard":
+            self.show_selection_dialog(url, smart_detect=False)
+        else: # smart
+            self.show_selection_dialog(url, smart_detect=True)
 
-    def _show_config_window(self, url: str, mode: str = "default", vr_mode: bool = False):
+    def _show_config_window(self, url: str, mode: str = "default", vr_mode: bool = False, smart_detect: bool = False):
         """通用方法：显示非阻塞的任务配置窗口"""
         try:
             # 创建新窗口实例
-            window = DownloadConfigWindow(url, self, vr_mode=vr_mode, mode=mode)
+            window = DownloadConfigWindow(url, self, vr_mode=vr_mode, mode=mode, smart_detect=smart_detect)
             
             # 连接信号
             window.downloadRequested.connect(self.add_tasks)
             window.windowClosed.connect(self._cleanup_sub_window)
+            window.request_vr_switch.connect(self.handle_vr_switch_request)
+            window.request_normal_switch.connect(self.handle_normal_switch_request)
             
             # 添加到活跃列表防止GC
             self._active_sub_windows.append(window)
             
             # 显示窗口
             window.show()
-            window.activateWindow()
+            
+            # 根据配置决定是否置顶
+            if config_manager.get("clipboard_window_to_front", True):
+                window.activateWindow()
+                window.raise_()
             
         except Exception as e:
             logger.error(f"Failed to open config window: {e}")
@@ -509,11 +538,21 @@ class MainWindow(FluentWindow):
             self._active_sub_windows.remove(window)
             logger.info(f"Closed sub-window. Active windows: {len(self._active_sub_windows)}")
 
-    def show_selection_dialog(self, url: str):
-        self._show_config_window(url, mode="default")
+    def show_selection_dialog(self, url: str, smart_detect: bool = False):
+        self._show_config_window(url, mode="default", smart_detect=smart_detect)
 
-    def show_vr_selection_dialog(self, url: str):
-        self._show_config_window(url, mode="vr", vr_mode=True)
+    def show_vr_selection_dialog(self, url: str, smart_detect: bool = True):
+        self._show_config_window(url, mode="vr", vr_mode=True, smart_detect=smart_detect)
+
+    def handle_vr_switch_request(self, url: str):
+        """响应智能检测的 VR 切换请求"""
+        logger.info(f"Switching to VR mode for URL: {url}")
+        self.show_vr_selection_dialog(url, smart_detect=True)
+
+    def handle_normal_switch_request(self, url: str):
+        """响应智能检测的普通模式切换请求"""
+        logger.info(f"Switching to Normal mode for URL: {url}")
+        self.show_selection_dialog(url, smart_detect=True)
 
     def show_subtitle_selection_dialog(self, url: str):
         self._show_config_window(url, mode="subtitle")
@@ -576,12 +615,15 @@ class MainWindow(FluentWindow):
                 try:
                     if hasattr(card.worker, "stop"):
                         card.worker.stop()
-                    elif hasattr(card.worker, "cancel"):
-                        card.worker.cancel()
+                    else:
+                        cancel = getattr(card.worker, "cancel", None)
+                        if callable(cancel):
+                            cancel()
                     
                     # Force kill process tree
-                    if hasattr(card.worker, "force_kill"):
-                        card.worker.force_kill()
+                    force_kill = getattr(card.worker, "force_kill", None)
+                    if callable(force_kill):
+                        force_kill()
                     
                     # If it's still running, force terminate QThread
                     if hasattr(card.worker, "isRunning") and card.worker.isRunning():
@@ -695,7 +737,6 @@ class MainWindow(FluentWindow):
 
     def _delete_files_best_effort(self, paths: list[str], success_title: str = "已删除文件"):
         """Try to delete a list of files/dirs, reporting results via InfoBar."""
-        import time
         success_count = 0
         errors = []
         for path in paths:
@@ -809,28 +850,6 @@ class MainWindow(FluentWindow):
         box = MessageBox(title, f"即将删除 {len(paths)} 个源文件，是否继续？", self)
         return bool(box.exec())
 
-    def _delete_files_best_effort(self, paths: list[str], success_title: str) -> None:
-        deleted_count = 0
-        for p in paths:
-            if not p or not os.path.exists(p):
-                continue
-            
-            # Retry a few times for file locks
-            for _ in range(3):
-                try:
-                    os.remove(p)
-                    deleted_count += 1
-                    break
-                except PermissionError:
-                    time.sleep(0.5)
-                except Exception:
-                    break
-        
-        if deleted_count > 0:
-            InfoBar.success(success_title, f"已清理 {deleted_count} 个文件", parent=self)
-        elif paths:
-            InfoBar.warning(success_title, "未能删除文件，可能被占用或权限不足", parent=self)
-
     def on_resume_card(self, card: DownloadItemWidget):
         # 重启任务逻辑
         # 需要重新创建 worker
@@ -844,14 +863,14 @@ class MainWindow(FluentWindow):
         download_manager.start_worker(new_worker)
         card.set_state("running")
 
-    def on_batch_start(self, page: TaskListPage):
+    def on_batch_start(self, page: Any):
         cards = page.get_selected_cards()
         for card in cards:
             if isinstance(card, DownloadItemWidget):
                 if card.state() in {"paused", "error", "queued"}:
                     self.on_resume_card(card)
 
-    def on_batch_pause(self, page: TaskListPage):
+    def on_batch_pause(self, page: Any):
         cards = page.get_selected_cards()
         for card in cards:
             if isinstance(card, DownloadItemWidget):
@@ -860,13 +879,15 @@ class MainWindow(FluentWindow):
                     try:
                         if hasattr(card.worker, "stop"):
                             card.worker.stop()
-                        elif hasattr(card.worker, "cancel"):
-                            card.worker.cancel()
+                        else:
+                            cancel = getattr(card.worker, "cancel", None)
+                            if callable(cancel):
+                                cancel()
                     except Exception:
                         # Best-effort; ignore errors to avoid blocking batch operations
                         pass
 
-    def on_batch_delete(self, page: TaskListPage):
+    def on_batch_delete(self, page: Any):
         cards = page.get_selected_cards()
         if not cards:
             return
@@ -883,37 +904,24 @@ class MainWindow(FluentWindow):
                 self.on_remove_card(card)
 
     def on_start_all(self):
-        # Start all in Downloading (if any are paused/queued) and Paused page
-        # Iterate Downloading Page
-        for i in range(self.downloading_page.count()):
-            item = self.downloading_page.scroll_layout.itemAt(i)
-            if item and item.widget():
-                card = item.widget()
-                if isinstance(card, DownloadItemWidget) and card.state() != "running":
-                    self.on_resume_card(card)
-        
-        # Iterate Paused Page (move them to Downloading)
-        paused_cards = []
-        for i in range(self.paused_page.count()):
-            item = self.paused_page.scroll_layout.itemAt(i)
-            if item and item.widget():
-                paused_cards.append(item.widget())
-        
-        for card in paused_cards:
-            self.on_resume_card(card)
+        for card in list(self.task_page._cards):
+            if isinstance(card, DownloadItemWidget) and card.state() in {"paused", "error", "queued"}:
+                self.on_resume_card(card)
 
     def on_pause_all(self):
         download_manager.stop_all()
 
     def on_clear_completed(self):
-        if self.completed_page.count() == 0:
+        completed_cards = [
+            c for c in list(self.task_page._cards)
+            if isinstance(c, DownloadItemWidget) and c.state() == "completed"
+        ]
+        if not completed_cards:
             return
         if MessageBox("清空记录", "确定要清空所有已完成任务记录吗？\n(不会删除本地文件)", self).exec():
-            # Remove all widgets
-            while self.completed_page.scroll_layout.count():
-                item = self.completed_page.scroll_layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
+            for card in completed_cards:
+                self.task_page.remove_card(card)
+                card.deleteLater()
 
     def on_open_download_dir(self):
         # 打开默认下载目录
@@ -941,7 +949,12 @@ class MainWindow(FluentWindow):
         layout = self.titleBar.layout()
         # Insert the help button to the left of the system buttons (min/max/close)
         # Assuming system buttons are the last three widgets in the title bar layout
-        layout.insertWidget(layout.count() - 3, self.help_btn, 0, Qt.AlignmentFlag.AlignRight)
+        insert_widget = getattr(layout, "insertWidget", None) if layout else None
+        count = getattr(layout, "count", None) if layout else None
+        if callable(insert_widget) and callable(count):
+            count_value = count()
+            if isinstance(count_value, int):
+                insert_widget(count_value - 3, self.help_btn, 0, Qt.AlignmentFlag.AlignRight)
         
         # 给 help_btn 设置右边距，让它离系统按钮远一点
         self.help_btn.setContentsMargins(0, 0, 10, 0)
@@ -981,8 +994,8 @@ class MainWindow(FluentWindow):
     
     def on_admin_mode_cookie_refresh(self):
         """管理员模式启动后自动刷新Cookie"""
+        from ..auth.auth_service import AuthSourceType, auth_service
         from ..auth.cookie_sentinel import cookie_sentinel
-        from ..auth.auth_service import auth_service, AuthSourceType
         from ..utils.logger import logger
         
         # 只在配置了浏览器来源时刷新
@@ -1038,8 +1051,8 @@ class MainWindow(FluentWindow):
     def check_cookie_status(self):
         """检查Cookie提取状态，如果失败则提示用户"""
         try:
+            from ..auth.auth_service import AuthSourceType, auth_service
             from ..auth.cookie_sentinel import cookie_sentinel
-            from ..auth.auth_service import auth_service, AuthSourceType
             from ..utils.admin_utils import is_admin
             
             # 只在配置了浏览器来源时检查
@@ -1097,5 +1110,3 @@ class MainWindow(FluentWindow):
                 
         except Exception as e:
             logger.error(f"[MainWindow] Cookie状态检查失败: {e}")
-
-

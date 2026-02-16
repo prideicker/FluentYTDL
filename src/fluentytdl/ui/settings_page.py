@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
-
+import os
 import shutil
 import subprocess
-import os
 import time
 from pathlib import Path
+from typing import Any, Literal, cast
 
-from PySide6.QtCore import Qt, Signal, QThread
-from PySide6.QtWidgets import QFileDialog, QWidget, QVBoxLayout, QStackedWidget
-
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import QFileDialog, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CheckBox,
     ComboBox,
@@ -18,30 +16,29 @@ from qfluentwidgets import (
     HyperlinkCard,
     InfoBar,
     LineEdit,
+    MessageBox,
+    ProgressBar,
     PushButton,
     PushSettingCard,
     ScrollArea,
+    SegmentedWidget,
     SettingCard,
     SettingCardGroup,
-    SwitchButton,
     SubtitleLabel,
-    ProgressBar,
+    SwitchButton,
     ToolButton,
     ToolTipFilter,
     ToolTipPosition,
-    MessageBox,
-    SegmentedWidget,
 )
 
 from ..core.config_manager import config_manager
-from ..youtube.yt_dlp_cli import resolve_yt_dlp_exe, run_version
-from ..utils.paths import find_bundled_executable, is_frozen
-from ..utils.logger import LOG_DIR
-from .components.smart_setting_card import SmartSettingCard
 from ..core.dependency_manager import dependency_manager
-from ..processing.subtitle_manager import COMMON_SUBTITLE_LANGUAGES
 from ..core.hardware_manager import hardware_manager
-
+from ..processing.subtitle_manager import COMMON_SUBTITLE_LANGUAGES
+from ..utils.logger import LOG_DIR
+from ..utils.paths import find_bundled_executable, is_frozen
+from ..youtube.yt_dlp_cli import resolve_yt_dlp_exe, run_version
+from .components.smart_setting_card import SmartSettingCard
 
 # ============================================================================
 # Cookie 刷新 Worker（使用Qt线程，确保打包后正常工作）
@@ -56,8 +53,8 @@ class CookieRefreshWorker(QThread):
     
     def run(self):
         """在Qt线程中执行Cookie刷新"""
-        from ..auth.cookie_sentinel import cookie_sentinel
         from ..auth.auth_service import auth_service
+        from ..auth.cookie_sentinel import cookie_sentinel
         from ..utils.logger import logger
         
         success = False
@@ -349,7 +346,7 @@ class LanguageSelectionDialog(MessageBox):
         self.checkboxes = {}
         
         # 创建内容布局
-        from PySide6.QtWidgets import QVBoxLayout, QFrame, QScrollArea, QGridLayout, QWidget
+        from PySide6.QtWidgets import QFrame, QGridLayout, QScrollArea, QVBoxLayout, QWidget
         
         content_widget = QWidget(self)
         content_layout = QVBoxLayout(content_widget)
@@ -417,7 +414,7 @@ class LanguageMultiSelectCard(SettingCard):
         title: str,
         content: str | None,
         languages: list[tuple[str, str]],  # [(code, name), ...]
-        selected_default: list[str] = None,
+        selected_default: list[str] | None = None,
         parent=None,
     ):
         super().__init__(icon, title, content, parent)
@@ -944,7 +941,26 @@ class SettingsPage(QWidget):
         )
         self.clipboardDetectCard.checkedChanged.connect(self._on_clipboard_detect_changed)
 
+        self.clipboardActionModeCard = InlineComboBoxCard(
+            FluentIcon.PLAY,
+            "剪贴板识别默认行为",
+            "选择自动识别到链接后的处理方式",
+            ["智能识别 (推荐)", "仅普通下载", "仅 VR 下载", "仅下载字幕", "仅下载封面"],
+            parent=self.automationGroup,
+        )
+        self.clipboardActionModeCard.comboBox.currentIndexChanged.connect(self._on_clipboard_action_mode_changed)
+
+        self.clipboardWindowToFrontCard = InlineSwitchCard(
+            FluentIcon.APPLICATION,
+            "解析后置顶窗口",
+            "识别到链接并弹出解析窗口时，自动将其置于前台（默认开启）",
+            parent=self.automationGroup,
+        )
+        self.clipboardWindowToFrontCard.checkedChanged.connect(self._on_clipboard_window_to_front_changed)
+
         self.automationGroup.addSettingCard(self.clipboardDetectCard)
+        self.automationGroup.addSettingCard(self.clipboardActionModeCard)
+        self.automationGroup.addSettingCard(self.clipboardWindowToFrontCard)
         layout.addWidget(self.automationGroup)
 
     def _init_vr_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
@@ -1349,6 +1365,19 @@ class SettingsPage(QWidget):
         self.checkUpdatesOnStartupCard.switchButton.setChecked(auto_check)
         self.checkUpdatesOnStartupCard.switchButton.blockSignals(False)
 
+        # Clipboard action mode
+        action_mode = str(config_manager.get("clipboard_action_mode", "smart"))
+        action_idx_map = {"smart": 0, "standard": 1, "vr": 2, "subtitle": 3, "cover": 4}
+        self.clipboardActionModeCard.comboBox.blockSignals(True)
+        self.clipboardActionModeCard.comboBox.setCurrentIndex(action_idx_map.get(action_mode, 0))
+        self.clipboardActionModeCard.comboBox.blockSignals(False)
+
+        # Clipboard window to front
+        to_front = bool(config_manager.get("clipboard_window_to_front", True))
+        self.clipboardWindowToFrontCard.switchButton.blockSignals(True)
+        self.clipboardWindowToFrontCard.switchButton.setChecked(to_front)
+        self.clipboardWindowToFrontCard.switchButton.blockSignals(False)
+
         # Proxy mode -> combobox index
         proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
         proxy_index_map = {"off": 0, "system": 1, "http": 2, "socks5": 3}
@@ -1359,7 +1388,7 @@ class SettingsPage(QWidget):
         self.proxyEditCard.lineEdit.setText(str(config_manager.get("proxy_url") or "127.0.0.1:7890"))
 
         # Cookie 配置从 auth_service 加载
-        from ..auth.auth_service import auth_service, AuthSourceType
+        from ..auth.auth_service import AuthSourceType, auth_service
         
         current_source = auth_service.current_source
         
@@ -1551,6 +1580,17 @@ class SettingsPage(QWidget):
         self.clipboardAutoDetectChanged.emit(bool(checked))
         InfoBar.success("设置已更新", "剪贴板自动识别已开启" if checked else "剪贴板自动识别已关闭", duration=5000, parent=self)
 
+    def _on_clipboard_window_to_front_changed(self, checked: bool) -> None:
+        config_manager.set("clipboard_window_to_front", bool(checked))
+        InfoBar.success("设置已更新", "已开启解析后窗口置顶" if checked else "已关闭解析后窗口置顶", duration=5000, parent=self)
+
+    def _on_clipboard_action_mode_changed(self, index: int) -> None:
+        modes = ["smart", "standard", "vr", "subtitle", "cover"]
+        if 0 <= index < len(modes):
+            mode = modes[index]
+            config_manager.set("clipboard_action_mode", mode)
+            InfoBar.success("设置已更新", f"剪贴板识别行为已更改为: {mode}", duration=5000, parent=self)
+
     def _on_deletion_policy_changed(self, index: int) -> None:
         # Combo texts order: Ask, KeepFiles, DeleteFiles
         policies = ["AlwaysAsk", "KeepFiles", "DeleteFiles"]
@@ -1594,7 +1634,8 @@ class SettingsPage(QWidget):
         self._update_sponsorblock_categories_visibility(checked)
         
         if checked:
-            categories = config_manager.get("sponsorblock_categories", [])
+            raw_categories = config_manager.get("sponsorblock_categories", [])
+            categories = [c for c in raw_categories if isinstance(c, str) and c]
             if categories:
                 cat_names = {
                     "sponsor": "赞助广告",
@@ -1636,7 +1677,10 @@ class SettingsPage(QWidget):
     
     def _get_sponsorblock_categories_text(self) -> str:
         """获取当前选中的 SponsorBlock 类别的描述文本"""
-        categories = config_manager.get("sponsorblock_categories", ["sponsor", "selfpromo", "interaction"])
+        raw_categories = config_manager.get(
+            "sponsorblock_categories", ["sponsor", "selfpromo", "interaction"]
+        )
+        categories = [c for c in raw_categories if isinstance(c, str) and c]
         cat_names = {
             "sponsor": "赞助广告",
             "selfpromo": "自我推广", 
@@ -1711,7 +1755,7 @@ class SettingsPage(QWidget):
 
     def _on_cookie_mode_changed(self, index: int) -> None:
         """Cookie 模式切换：0=浏览器提取, 1=手动文件"""
-        from ..auth.auth_service import auth_service, AuthSourceType
+        from ..auth.auth_service import AuthSourceType, auth_service
         
         if index == 0:
             # 浏览器提取模式
@@ -1754,9 +1798,10 @@ class SettingsPage(QWidget):
 
     def _on_cookie_browser_changed(self, index: int) -> None:
         """浏览器选择变化 - 自动提取新浏览器的 Cookies"""
-        from ..auth.auth_service import auth_service, AuthSourceType
-        from ..utils.admin_utils import is_admin
         from qfluentwidgets import MessageBox
+
+        from ..auth.auth_service import AuthSourceType, auth_service
+        from ..utils.admin_utils import is_admin
         
         # 顺序与UI一致
         browser_map = [
@@ -1867,14 +1912,15 @@ class SettingsPage(QWidget):
                 # 清理worker
                 self._cookie_worker = None
             
-            self._cookie_worker.finished.connect(on_finished, Qt.QueuedConnection)
+            self._cookie_worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
             self._cookie_worker.start()
 
     def _on_refresh_cookie_clicked(self):
         """手动刷新 Cookie 按钮点击"""
+        from qfluentwidgets import MessageBox
+
         from ..auth.auth_service import auth_service
         from ..utils.admin_utils import is_admin
-        from qfluentwidgets import MessageBox
         
         current_source = auth_service.current_source
         
@@ -1966,14 +2012,15 @@ class SettingsPage(QWidget):
             # 清理worker
             self._cookie_worker = None
         
-        self._cookie_worker.finished.connect(on_finished, Qt.QueuedConnection)
+        self._cookie_worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
         self._cookie_worker.start()
     
     def _select_cookie_file(self):
         """选择 Cookie 文件并导入到 bin/cookies.txt"""
-        from ..auth.auth_service import auth_service, AuthSourceType
-        from ..auth.cookie_sentinel import cookie_sentinel
         import shutil
+
+        from ..auth.auth_service import AuthSourceType, auth_service
+        from ..auth.cookie_sentinel import cookie_sentinel
         
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -2024,9 +2071,10 @@ class SettingsPage(QWidget):
     
     def _open_cookie_location(self):
         """打开 Cookie 文件所在位置"""
-        from ..auth.cookie_sentinel import cookie_sentinel
-        import subprocess
         import os
+        import subprocess
+
+        from ..auth.cookie_sentinel import cookie_sentinel
         
         cookie_path = cookie_sentinel.cookie_path
         
@@ -2470,8 +2518,8 @@ class SettingsPage(QWidget):
     def _on_subtitle_enabled_changed(self, checked: bool) -> None:
         config_manager.set('subtitle_enabled', checked)
         self._update_subtitle_settings_visibility(checked)
-        status = 'enabled' if checked else 'disabled'
-        InfoBar.success('Subtitle Settings', f'Subtitle download {status}', duration=3000, parent=self)
+        status = '已启用' if checked else '已禁用'
+        InfoBar.success('字幕设置', f'字幕下载{status}', duration=3000, parent=self)
     
     def _on_subtitle_languages_changed(self, languages: list[str]) -> None:
         """语言选择改变回调"""
@@ -2482,8 +2530,10 @@ class SettingsPage(QWidget):
     
     def _on_subtitle_embed_type_changed(self, embed_type: str) -> None:
         """嵌入类型改变回调"""
+        if embed_type not in ("soft", "external", "hard"):
+            embed_type = "soft"
         config = config_manager.get_subtitle_config()
-        config.embed_type = embed_type
+        config.embed_type = cast(Literal["soft", "external", "hard"], embed_type)
         config_manager.set_subtitle_config(config)
         type_names = {'soft': '软嵌入', 'external': '外置文件', 'hard': '硬嵌入'}
         InfoBar.success('嵌入类型', f'字幕嵌入类型: {type_names.get(embed_type, embed_type)}', duration=3000, parent=self)
@@ -2500,20 +2550,22 @@ class SettingsPage(QWidget):
         mode_map = {0: 'always', 1: 'never', 2: 'ask'}
         mode = mode_map.get(index, 'always')
         config_manager.set('subtitle_embed_mode', mode)
-        InfoBar.success('Embed Mode', f'Subtitle embed strategy: {mode}', duration=3000, parent=self)
+        display_map = {'always': '总是嵌入', 'never': '从不嵌入', 'ask': '每次询问'}
+        display_text = display_map.get(mode, mode)
+        InfoBar.success('嵌入模式', f'字幕嵌入策略: {display_text}', duration=3000, parent=self)
     
     def _on_subtitle_format_changed(self, index: int) -> None:
         format_map = {0: 'srt', 1: 'ass', 2: 'vtt'}
         fmt = format_map.get(index, 'srt')
         config_manager.set('subtitle_format', fmt)
-        InfoBar.success('Format Settings', f'Subtitle format: {fmt.upper()}', duration=3000, parent=self)
+        InfoBar.success('格式设置', f'字幕格式: {fmt.upper()}', duration=3000, parent=self)
     
     def _update_keep_separate_visibility(self) -> None:
         """根据嵌入类型更新「保留外置字幕文件」开关的可见性"""
-        enabled = self.subtitleEnabledCard.switchButton.isChecked()
+        # enabled = self.subtitleEnabledCard.switchButton.isChecked() # No longer check enabled
         embed_type = self.subtitleEmbedTypeCard.get_value()
         # 仅软嵌入/硬嵌入时显示此选项（外置模式下字幕文件本身就是产物）
-        self.subtitleKeepSeparateCard.setVisible(enabled and embed_type in ("soft", "hard"))
+        self.subtitleKeepSeparateCard.setVisible(embed_type in ("soft", "hard"))
 
     def _update_vr_hardware_status(self) -> None:
         """更新 VR 硬件状态 Banner"""
@@ -2577,10 +2629,14 @@ class SettingsPage(QWidget):
         config_manager.set("vr_keep_source", checked)
     
     def _update_subtitle_settings_visibility(self, enabled: bool) -> None:
-        self.subtitleLanguagesCard.setVisible(enabled)
-        self.subtitleEmbedTypeCard.setVisible(enabled)
-        self.subtitleEmbedModeCard.setVisible(enabled)
-        self.subtitleFormatCard.setVisible(enabled)
-        # 「保留外置字幕」仅嵌入模式下可见
-        self._update_keep_separate_visibility()
+        # 用户希望关闭字幕下载时，依然保留选项显示以便修改
+        # 这样即使全局关闭，用户在单次下载中想开启时，配置已经是预期的
+        self.subtitleLanguagesCard.setVisible(True)
+        self.subtitleEmbedTypeCard.setVisible(True)
+        self.subtitleEmbedModeCard.setVisible(True)
+        self.subtitleFormatCard.setVisible(True)
+        
+        # 仅根据嵌入类型更新「保留外置字幕」可见性，不再依赖总开关
+        embed_type = self.subtitleEmbedTypeCard.get_value()
+        self.subtitleKeepSeparateCard.setVisible(embed_type in ("soft", "hard"))
 

@@ -5,11 +5,14 @@ from collections import deque
 from functools import partial
 from typing import Any
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
+    QFileDialog,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -18,39 +21,34 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    QButtonGroup,
-    QFrame,
 )
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
-    CardWidget,
     ComboBox,
     ImageLabel,
     IndeterminateProgressRing,
+    LineEdit,
     MessageBox,
     MessageBoxBase,
-    PushButton,
     PrimaryPushButton,
+    PushButton,
+    RadioButton,
     ScrollArea,
     SubtitleLabel,
-    RadioButton,
     ToolTipFilter,
     ToolTipPosition,
 )
 
-
 from ...download.workers import EntryDetailWorker, InfoExtractWorker, VRInfoExtractWorker
-from ...youtube.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
-from ...utils.image_loader import ImageLoader
-from ...utils.filesystem import sanitize_filename
 from ...processing import subtitle_service
-from .format_selector import VideoFormatSelectorWidget
-from .vr_format_selector import VRFormatSelectorWidget
-from .subtitle_selector import SubtitleSelectorWidget
+from ...utils.filesystem import sanitize_filename
+from ...utils.image_loader import ImageLoader
+from ...youtube.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
 from .cover_selector import CoverSelectorWidget
-
+from .format_selector import VideoFormatSelectorWidget
+from .subtitle_selector import SubtitleSelectorWidget
+from .vr_format_selector import VR_PRESETS, VRFormatSelectorWidget
 
 # ---- 字幕容器兼容性辅助函数 ----
 # MP4 和 MKV 都支持字幕嵌入（FFmpeg 自动将 SRT 转为 mov_text），只有 WebM 不支持 SRT/ASS
@@ -483,6 +481,7 @@ def _clean_video_formats(info: dict[str, Any]) -> list[dict[str, Any]]:
                 "fps": fps,
                 "ext": ext,
                 "filesize": f.get("filesize") or f.get("filesize_approx"),
+                "vcodec": f.get("vcodec"),
             }
         )
         seen_height.add(h)
@@ -562,16 +561,20 @@ def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | Non
 
 
 class PlaylistFormatDialog(MessageBoxBase):
-    """用于播放列表单项的“高级格式选择”弹窗 (复用 VideoFormatSelectorWidget)"""
+    """用于播放列表单项的“高级格式选择”弹窗 (复用 VideoFormatSelectorWidget / VRFormatSelectorWidget)"""
 
-    def __init__(self, info: dict[str, Any], parent=None):
+    def __init__(self, info: dict[str, Any], parent=None, *, vr_mode: bool = False):
         super().__init__(parent)
         self.widget.setMinimumSize(700, 500)
         
         self.titleLabel = SubtitleLabel("选择格式", self)
         self.viewLayout.addWidget(self.titleLabel)
         
-        self.selector = VideoFormatSelectorWidget(info, self)
+        if vr_mode:
+            self.selector = VRFormatSelectorWidget(info, self)
+        else:
+            self.selector = VideoFormatSelectorWidget(info, self)
+            
         self.viewLayout.addWidget(self.selector)
         
         # Override buttons
@@ -599,6 +602,13 @@ class SelectionDialog(MessageBoxBase):
         self.video_info: dict[str, Any] | None = None
         self._is_playlist = False
         self.download_tasks: list[dict[str, Any]] = []
+        try:
+            from ...core.config_manager import config_manager
+
+            self._download_dir = str(config_manager.get("download_dir") or "").strip()
+        except Exception:
+            self._download_dir = ""
+        self._download_dir_edit: LineEdit | None = None
         
         # 缓存字幕用户选择，避免在 get_selected_tasks() 中重复弹窗
         self._subtitle_embed_choice: bool | None = None
@@ -720,7 +730,7 @@ class SelectionDialog(MessageBoxBase):
 
         # Close/cancel should stop background parsing to avoid crashes and wasted work.
         self._is_closing = False
-        self.worker: InfoExtractWorker | None = None
+        self.worker: InfoExtractWorker | VRInfoExtractWorker | None = None
         self._detail_worker: EntryDetailWorker | None = None
 
         # 启动解析线程
@@ -742,6 +752,55 @@ class SelectionDialog(MessageBoxBase):
             self.widget.resize(760, 480)
         except Exception:
             pass
+
+    def _ensure_download_dir_bar(self) -> None:
+        wrap = QWidget(self.contentWidget)
+        row = QHBoxLayout(wrap)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+
+        label = CaptionLabel("下载位置", wrap)
+        edit = LineEdit(wrap)
+        edit.setText(self._download_dir)
+        try:
+            edit.setClearButtonEnabled(True)
+        except Exception:
+            pass
+
+        def _on_text_changed(text: str) -> None:
+            self._download_dir = str(text or "").strip()
+
+        edit.textChanged.connect(_on_text_changed)
+
+        pick_btn = PushButton("选择...", wrap)
+        pick_btn.clicked.connect(self._on_pick_download_dir)
+
+        row.addWidget(label)
+        row.addWidget(edit, 1)
+        row.addWidget(pick_btn)
+
+        self._download_dir_edit = edit
+        self.contentLayout.addWidget(wrap)
+
+    def _on_pick_download_dir(self) -> None:
+        start_dir = self._download_dir or ""
+        folder = QFileDialog.getExistingDirectory(self, "选择下载目录", start_dir)
+        if not folder:
+            return
+        self._download_dir = str(folder).strip()
+        if self._download_dir_edit is not None:
+            self._download_dir_edit.setText(self._download_dir)
+
+    def _apply_download_dir_to_opts(self, opts: dict[str, Any]) -> None:
+        p = str(self._download_dir or "").strip()
+        if not p:
+            return
+        opts["paths"] = {"home": p}
+        outtmpl = opts.get("outtmpl")
+        if not isinstance(outtmpl, str) or not outtmpl.strip():
+            opts["outtmpl"] = "%(title)s.%(ext)s"
+        elif ("/" in outtmpl or "\\" in outtmpl) and "%(title)s.%(ext)s" in outtmpl:
+            opts["outtmpl"] = "%(title)s.%(ext)s"
 
     def _apply_dialog_size_for_mode(self) -> None:
         if self._is_playlist:
@@ -858,9 +917,9 @@ class SelectionDialog(MessageBoxBase):
                 if w is not None:
                     w.deleteLater()
                     continue
-                l = child.layout()
-                if l is not None:
-                    _clear_layout(l)
+                child_layout = child.layout()
+                if child_layout is not None:
+                    _clear_layout(child_layout)
 
         _clear_layout(self.contentLayout)
 
@@ -1072,6 +1131,9 @@ class SelectionDialog(MessageBoxBase):
         else:
             self._format_selector = VideoFormatSelectorWidget(info, self.contentWidget)
             self.contentLayout.addWidget(self._format_selector)
+        
+        if self._mode not in ("subtitle", "cover"):
+            self._ensure_download_dir_bar()
 
     # =========================
     # Playlist UI
@@ -1120,15 +1182,21 @@ class SelectionDialog(MessageBoxBase):
         self.type_combo.currentIndexChanged.connect(self._on_playlist_type_changed)
 
         self.preset_combo = ComboBox(self.contentWidget)
-        self.preset_combo.addItems([
-            "最高质量(自动)",
-            "2160p(严格)",
-            "1440p(严格)",
-            "1080p(严格)",
-            "720p(严格)",
-            "480p(严格)",
-            "360p(严格)",
-        ])
+        if self._vr_mode:
+            # VR 模式使用场景化预设
+            for pid, title, _, _, _ in VR_PRESETS:
+                self.preset_combo.addItem(title, userData=pid)
+        else:
+            # 普通模式使用分辨率预设
+            self.preset_combo.addItems([
+                "最高质量(自动)",
+                "2160p(严格)",
+                "1440p(严格)",
+                "1080p(严格)",
+                "720p(严格)",
+                "480p(严格)",
+                "360p(严格)",
+            ])
         self.preset_combo.currentIndexChanged.connect(self._on_playlist_preset_changed)
 
         toolbar.addWidget(self.selectAllBtn)
@@ -1188,6 +1256,8 @@ class SelectionDialog(MessageBoxBase):
         
         # 延迟加载缩略图（等待表格布局完成）
         self._thumb_init_timer.start()
+        
+        self._ensure_download_dir_bar()
 
     def _build_playlist_rows(self, info: dict[str, Any]) -> None:
         entries = info.get("entries") or []
@@ -1480,6 +1550,65 @@ class SelectionDialog(MessageBoxBase):
 
             # 仅视频
             aw.qualityButton.setText(chosen or "已手动选择")
+            return
+
+        # VR 模式下的自动选择模拟（用于 UI 显示）
+        if self._vr_mode:
+            fmts = data.get("video_formats") or []
+            if not fmts:
+                aw.set_loading(False)
+                aw.qualityButton.setText("无可用格式")
+                aw.infoLabel.setText("")
+                return
+
+            # 获取当前预设 ID
+            if self.preset_combo is None:
+                pid = None
+            else:
+                pid = self.preset_combo.itemData(self.preset_combo.currentIndex())
+            
+            # 简单的 Python 端模拟匹配
+            best = None
+            if pid == "vr_compat":  # 优先 MP4
+                for f in fmts:
+                    # 注意：fmts 里的元素是我们自己构造的 dict，原始数据在 _raw
+                    raw = f.get("_raw") or {}
+                    if raw.get("ext") == "mp4":
+                        best = f
+                        break
+            elif pid == "vr_3d_cinema":  # 优先 3D
+                for f in fmts:
+                    raw = f.get("_raw") or {}
+                    if str(raw.get("__vr_stereo_mode") or "").startswith("stereo"):
+                        best = f
+                        break
+            elif pid == "vr_panorama": # 优先 Mono
+                for f in fmts:
+                    raw = f.get("_raw") or {}
+                    if str(raw.get("__vr_stereo_mode") or "") == "mono":
+                        best = f
+                        break
+
+            # 默认回退：取第一个（因为 _populate_formats 已经按 VR 质量排过序了）
+            if not best:
+                best = fmts[0]
+
+            fid = best.get("id")
+            if fid:
+                data["override_format_id"] = str(fid)
+            
+            # VR 模式下通常不需要显示音频组合，直接显示 VR 格式描述
+            data["override_text"] = best.get("text")
+            data["manual_override"] = False
+
+            aw.set_loading(False)
+            aw.qualityButton.setText(str(data["override_text"] or ""))
+            
+            # 显示详细信息
+            raw = best.get("_raw") or {}
+            sz = _format_size(raw.get("filesize") or raw.get("filesize_approx"))
+            ext = raw.get("ext")
+            aw.infoLabel.setText(f"{sz} · {ext}")
             return
 
         fmts: list[dict[str, Any]] = data.get("video_formats") or []
@@ -1805,7 +1934,7 @@ class SelectionDialog(MessageBoxBase):
             aw.set_loading(True, "获取中...")
             aw.infoLabel.setText("")
 
-        w = EntryDetailWorker(row, url, self._current_options)
+        w = EntryDetailWorker(row, url, self._current_options, vr_mode=self._vr_mode)
         w.finished.connect(self._on_detail_finished)
         w.error.connect(self._on_detail_error)
         w.start()
@@ -1884,7 +2013,7 @@ class SelectionDialog(MessageBoxBase):
         if not info:
             return
 
-        dialog = PlaylistFormatDialog(info, self)
+        dialog = PlaylistFormatDialog(info, self, vr_mode=self._vr_mode)
         if dialog.exec():
             sel = dialog.get_selection()
             if sel and sel.get("format"):
@@ -1959,7 +2088,7 @@ class SelectionDialog(MessageBoxBase):
                     # Or we treat it as a direct download.
                     
                     # Also, we might want to set a specific filename.
-                    ext = self._cover_selector.get_selected_ext()
+                    _ = self._cover_selector.get_selected_ext()
                     
                     # Use "outtmpl" to name the file properly (Title.jpg)
                     # We rely on yt-dlp to download the file at 'url'
@@ -2096,11 +2225,12 @@ class SelectionDialog(MessageBoxBase):
                 print(f"[DEBUG] get_selected_tasks: final embedsubtitles = {ydl_opts.get('embedsubtitles')}")
                 print(f"[DEBUG] get_selected_tasks: final merge_output_format = {ydl_opts.get('merge_output_format')}")
             
+            self._apply_download_dir_to_opts(ydl_opts)
             tasks.append((title, url, ydl_opts, thumb))
             return tasks
 
         # 2. Playlist Mode (Existing Logic)
-        for i, row_data in enumerate(self._playlist_rows):
+        for _i, row_data in enumerate(self._playlist_rows):
             if not row_data.get("selected"):
                 continue
             
@@ -2163,6 +2293,7 @@ class SelectionDialog(MessageBoxBase):
                     else:
                         row_opts["format"] = "bestvideo+bestaudio/best"
             
+            self._apply_download_dir_to_opts(row_opts)
             tasks.append((title, url, row_opts, thumb))
             
         return tasks
@@ -2186,7 +2317,6 @@ class SelectionDialog(MessageBoxBase):
             return None
         
         from ...core.config_manager import config_manager
-        from ...processing import subtitle_service
         from ...processing.subtitle_manager import extract_subtitle_tracks
         
         subtitle_config = config_manager.get_subtitle_config()
@@ -2205,8 +2335,8 @@ class SelectionDialog(MessageBoxBase):
             print("[DEBUG] _check_subtitle_and_ask: No subtitles, showing warning dialog")
             box = MessageBox(
                 "⚠️ 无可用字幕",
-                f"此视频没有可用字幕。\n\n"
-                f"是否继续下载（无字幕）？",
+                "此视频没有可用字幕。\n\n"
+                "是否继续下载（无字幕）？",
                 parent=self,
             )
             box.yesButton.setText("继续下载")
@@ -2240,7 +2370,7 @@ class SelectionDialog(MessageBoxBase):
             print("[DEBUG] _check_subtitle_and_ask: About to call box.exec() for embed confirmation")
             result = box.exec()
             print(f"[DEBUG] _check_subtitle_and_ask: box.exec() returned {result} (type: {type(result)})")
-            return result  # True 或 False
+            return bool(result)
         
         print("[DEBUG] _check_subtitle_and_ask: Returning None (use config default)")
         return None  # 使用配置默认值
@@ -2325,6 +2455,20 @@ class SelectionDialog(MessageBoxBase):
         mode = int(self.type_combo.currentIndex()) if self.type_combo is not None else 0
         preset_text = self.preset_combo.currentText() if self.preset_combo is not None else "最高质量(自动)"
 
+        # VR 模式预设解析
+        vr_preset_fmt = None
+        vr_preset_args = {}
+        if self._vr_mode:
+            if self.preset_combo is None:
+                pid = None
+            else:
+                pid = self.preset_combo.itemData(self.preset_combo.currentIndex())
+            for p in VR_PRESETS:
+                if p[0] == pid:
+                    vr_preset_fmt = p[3]
+                    vr_preset_args = p[4]
+                    break
+
         height_map = {
             "2160p(严格)": 2160,
             "1440p(严格)": 1440,
@@ -2382,6 +2526,13 @@ class SelectionDialog(MessageBoxBase):
                 continue
             opts: dict[str, Any] = {}
 
+            # VR 模式注入
+            if self._vr_mode:
+                opts["__fluentytdl_use_android_vr"] = True
+                # 如果详情已加载，传递 VR 格式 ID 以供过滤
+                if data.get("detail"):
+                    opts["__android_vr_format_ids"] = data["detail"].get("__android_vr_format_ids", [])
+
             # NEW: Advanced selection
             if data.get("custom_selection_data"):
                 sel = data["custom_selection_data"]
@@ -2401,6 +2552,24 @@ class SelectionDialog(MessageBoxBase):
                         }
                     )
                     continue
+
+            # VR 模式自动/简单选择
+            if self._vr_mode:
+                if bool(data.get("manual_override")) and data.get("override_format_id"):
+                     opts["format"] = f"{data['override_format_id']}+bestaudio/best"
+                else:
+                     opts["format"] = vr_preset_fmt or "bestvideo+bestaudio/best"
+                     opts.update(vr_preset_args)
+                
+                opts["writethumbnail"] = False
+                opts["addmetadata"] = True
+                tasks.append({
+                    "url": url,
+                    "title": str(data.get("title") or "未命名任务"),
+                    "thumbnail": str(data.get("thumbnail") or "").strip() or None,
+                    "opts": opts,
+                })
+                continue
 
             # 0=音视频，1=仅视频，2=仅音频
             audio_id = (
@@ -2515,34 +2684,117 @@ class SelectionDialog(MessageBoxBase):
         self.video_formats = []
         seen_res: set[int] = set()
 
-        for f in formats:
-            # 过滤掉仅音频和无效视频
-            if f.get("vcodec") == "none":
-                continue
+        # VR 模式下，使用更复杂的排序和展示逻辑
+        if self._vr_mode:
+            # 1. 过滤
+            compatible_ids = set(info.get("__android_vr_format_ids") or [])
+            should_filter = bool(compatible_ids)
+            
+            candidates = []
+            for f in formats:
+                if f.get("vcodec") in (None, "none"):
+                    continue
+                fid = str(f.get("format_id") or "")
+                if should_filter and fid not in compatible_ids:
+                    continue
+                h = int(f.get("height") or 0)
+                if h < 360:
+                    continue
+                candidates.append(f)
 
-            h = int(f.get("height") or 0)
-            if h < 360:
-                continue
+            # 2. 排序 (3D > 投影 > 分辨率)
+            _STEREO_ORDER = {"stereo_tb": 0, "stereo_sbs": 0, "mono": 1, "unknown": 2}
+            _PROJ_ORDER = {"equirectangular": 0, "mesh": 1, "eac": 2, "unknown": 3}
 
-            # 构造显示文本
-            res_str = f"{h}p"
-            fps = f.get("fps")
-            if fps and fps > 30:
-                res_str += f" {int(fps)}fps"
+            def _vr_sort_key(f: dict[str, Any]) -> tuple:
+                stereo = str(f.get("__vr_stereo_mode") or "unknown")
+                proj = str(f.get("__vr_projection") or "unknown")
+                h = int(f.get("height") or 0)
+                # 优先显示 stereo_tb/sbs，且优先 equirectangular，分辨率降序
+                return (_STEREO_ORDER.get(stereo, 9), _PROJ_ORDER.get(proj, 9), -h)
 
-            # 去重：仅保留每个分辨率的一条入口（后续可扩展为“推荐/更多”）
-            if h not in seen_res:
+            candidates.sort(key=_vr_sort_key)
+
+            # 3. 构造显示项
+            seen_keys = set()
+            for f in candidates:
+                h = int(f.get("height") or 0)
+                stereo = str(f.get("__vr_stereo_mode") or "unknown")
+                proj = str(f.get("__vr_projection") or "unknown")
+                vc = str(f.get("vcodec") or "")[:4]
+                
+                # 唯一键：高度+立体+投影+编码
+                # 这样可以显示不同版本的同一分辨率（比如 VP9 vs AV1）
+                # 简化起见，我们只取最高质量的每个分辨率变体
+                key = (h, stereo, proj)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+
+                # 构造文本
+                res_str = f"{h}p"
+                fps = f.get("fps")
+                if fps and fps > 30:
+                    res_str += f" {int(fps)}fps"
+                
+                stereo_str = ""
+                if stereo == "stereo_tb":
+                    stereo_str = " [3D TB]"
+                elif stereo == "stereo_sbs":
+                    stereo_str = " [3D SBS]"
+                elif stereo == "mono":
+                    stereo_str = " [2D]"
+                
+                proj_str = ""
+                if proj == "equirectangular":
+                    proj_str = " (Equi)"
+                elif proj == "mesh":
+                    proj_str = " (Mesh)"
+                elif proj == "eac":
+                    proj_str = " (EAC)"
+                
                 ext = f.get("ext") or "?"
-                self.video_formats.append(
-                    {
-                        "text": f"{res_str} - {ext}",
-                        "id": f.get("format_id"),
-                        "height": h,
-                    }
-                )
-                seen_res.add(h)
+                
+                display_text = f"{res_str}{stereo_str}{proj_str} - {ext} ({vc})"
+                
+                self.video_formats.append({
+                    "text": display_text,
+                    "id": f.get("format_id"),
+                    "height": h,
+                    # 保存完整对象以便后续使用
+                    "_raw": f 
+                })
+        else:
+            # 普通模式
+            for f in formats:
+                # 过滤掉仅音频和无效视频
+                if f.get("vcodec") == "none":
+                    continue
 
-        self.video_formats.sort(key=lambda x: x["height"], reverse=True)
+                h = int(f.get("height") or 0)
+                if h < 360:
+                    continue
+
+                # 构造显示文本
+                res_str = f"{h}p"
+                fps = f.get("fps")
+                if fps and fps > 30:
+                    res_str += f" {int(fps)}fps"
+
+                # 去重：仅保留每个分辨率的一条入口（后续可扩展为“推荐/更多”）
+                if h not in seen_res:
+                    ext = f.get("ext") or "?"
+                    self.video_formats.append(
+                        {
+                            "text": f"{res_str} - {ext}",
+                            "id": f.get("format_id"),
+                            "height": h,
+                        }
+                    )
+                    seen_res.add(h)
+
+            self.video_formats.sort(key=lambda x: x["height"], reverse=True)
+            
         self._update_format_list()
 
     def _update_format_list(self) -> None:

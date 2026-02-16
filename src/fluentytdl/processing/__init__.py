@@ -5,38 +5,38 @@ FluentYTDL 后处理功能域
 """
 
 from .audio_processor import AudioProcessor, audio_processor
-from .subtitle_manager import (
-    extract_subtitle_tracks,
-    get_subtitle_languages,
-    build_subtitle_opts,
-    SubtitleTrack,
-)
-from .subtitle_service import (
-    SubtitleService,
-    subtitle_service,
-    SubtitleStrategy,
-    SmartStrategy,
-    SingleLanguageStrategy,
-    MultiLanguageStrategy,
-)
-from .subtitle_processor import (
-    SubtitleProcessor,
-    subtitle_processor,
-    SubtitleProcessResult,
-)
 from .section_download import (
     TimeRange,
-    parse_time_input,
-    parse_time_range,
     build_section_opts,
     lossless_cut,
+    parse_time_input,
+    parse_time_range,
 )
 from .sponsorblock import (
     SponsorBlockConfig,
-    sponsorblock_config,
     build_sponsorblock_opts,
     extract_chapters,
     get_available_categories,
+    sponsorblock_config,
+)
+from .subtitle_manager import (
+    SubtitleTrack,
+    build_subtitle_opts,
+    extract_subtitle_tracks,
+    get_subtitle_languages,
+)
+from .subtitle_processor import (
+    SubtitleProcessor,
+    SubtitleProcessResult,
+    subtitle_processor,
+)
+from .subtitle_service import (
+    MultiLanguageStrategy,
+    SingleLanguageStrategy,
+    SmartStrategy,
+    SubtitleService,
+    SubtitleStrategy,
+    subtitle_service,
 )
 
 __all__ = [

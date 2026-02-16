@@ -505,8 +505,9 @@ class Builder:
             subprocess.run(cmd, check=True, cwd=source_dir)
         else:
             try:
-                import py7zr
-                with py7zr.SevenZipFile(output_path, 'w') as archive:
+                import importlib
+                py7zr = importlib.import_module("py7zr")
+                with py7zr.SevenZipFile(output_path, "w") as archive:
                     archive.writeall(source_dir, arcname=".")
             except ImportError:
                 raise RuntimeError("需要安装 py7zr 或系统 7z: pip install py7zr")

@@ -1,7 +1,6 @@
-import sys
 import shutil
+import sys
 from pathlib import Path
-from typing import Optional
 
 
 class PathManager:
@@ -30,7 +29,7 @@ class PathManager:
             self.root_dir = Path(__file__).resolve().parents[3]
             self.is_frozen = False
 
-    def get_tool_path(self, tool_name: str) -> Optional[Path]:
+    def get_tool_path(self, tool_name: str) -> Path | None:
         """双重检测策略：
 
         1) 先查 EXE 同级的 `bin`（Full 模式）。

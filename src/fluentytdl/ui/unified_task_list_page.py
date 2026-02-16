@@ -11,18 +11,17 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QLayout,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
-    QScrollArea,
-    QFrame,
-    QLayout,
-    QLabel,
 )
-
 from qfluentwidgets import (
     BodyLabel,
-    SubtitleLabel,
     FluentIcon,
+    SubtitleLabel,
 )
 
 if TYPE_CHECKING:
@@ -48,8 +47,9 @@ class UnifiedTaskListPage(QWidget):
         super().__init__(parent)
         self.setObjectName("unifiedTaskListPage")
         
-        self._cards: list["DownloadItemWidget"] = []
+        self._cards: list[DownloadItemWidget] = []
         self._current_filter: str = "all"
+        self._is_batch_mode: bool = False
         
         self._init_ui()
     
@@ -64,8 +64,8 @@ class UnifiedTaskListPage(QWidget):
         self.v_layout.addWidget(self.title_label)
         
         # === 用于筛选的 SegmentedWidget (胶囊样式) ===
-        from qfluentwidgets import SegmentedWidget
         from PySide6.QtWidgets import QHBoxLayout
+        from qfluentwidgets import SegmentedWidget
         
         self.header_layout = QHBoxLayout()
         self.header_layout.setContentsMargins(0, 0, 0, 0)
@@ -173,20 +173,24 @@ class UnifiedTaskListPage(QWidget):
         for card in self._cards:
             if hasattr(card, 'set_selection_mode'):
                 card.set_selection_mode(enabled)
-            if hasattr(card, 'setChecked') and not enabled:
-                card.setChecked(False)
+            if not enabled:
+                set_checked = getattr(card, "setChecked", None)
+                if callable(set_checked):
+                    set_checked(False)
     
     def select_all(self) -> None:
         """选择所有可见的卡片"""
         for card in self._cards:
-            if card.isVisible() and hasattr(card, 'setChecked'):
-                card.setChecked(True)
+            if card.isVisible():
+                set_checked = getattr(card, "setChecked", None)
+                if callable(set_checked):
+                    set_checked(True)
     
-    def get_selected_cards(self) -> list["DownloadItemWidget"]:
+    def get_selected_cards(self) -> list[DownloadItemWidget]:
         """获取所有选中的卡片"""
         return [c for c in self._cards if getattr(c, 'isChecked', lambda: False)()]
     
-    def get_visible_cards(self) -> list["DownloadItemWidget"]:
+    def get_visible_cards(self) -> list[DownloadItemWidget]:
         """获取所有可见的卡片"""
         return [c for c in self._cards if c.isVisible()]
 
@@ -195,7 +199,7 @@ class UnifiedTaskListPage(QWidget):
         """Pivot 切换时调用"""
         self.set_filter(route_key)
     
-    def add_card(self, card: "DownloadItemWidget") -> None:
+    def add_card(self, card: DownloadItemWidget) -> None:
         """添加卡片到列表顶部"""
         print(f"[DEBUG] UnifiedTaskListPage.add_card: adding card, current_filter={self._current_filter}")
         
@@ -222,7 +226,7 @@ class UnifiedTaskListPage(QWidget):
         print(f"[DEBUG] UnifiedTaskListPage.add_card: card.state()={card.state()}, card.isVisible()={card.isVisible()}, total cards={len(self._cards)}")
 
     
-    def remove_card(self, card: "DownloadItemWidget") -> None:
+    def remove_card(self, card: DownloadItemWidget) -> None:
         """从列表移除卡片"""
         if card in self._cards:
             self._cards.remove(card)
@@ -244,23 +248,23 @@ class UnifiedTaskListPage(QWidget):
         
         self._update_empty_state()
     
-    def _apply_filter_to_card(self, card: "DownloadItemWidget") -> None:
+    def _apply_filter_to_card(self, card: DownloadItemWidget) -> None:
         """根据当前过滤器决定卡片可见性"""
         if self._current_filter == "all":
             card.setVisible(True)
         else:
             card.setVisible(card.state() == self._current_filter)
     
-    def _on_card_state_changed(self, card: "DownloadItemWidget") -> None:
+    def _on_card_state_changed(self, card: DownloadItemWidget) -> None:
         """卡片状态变化时重新检查可见性"""
         self._apply_filter_to_card(card)
         self._update_empty_state()
     
-    def _on_card_remove_requested(self, card: "DownloadItemWidget") -> None:
+    def _on_card_remove_requested(self, card: DownloadItemWidget) -> None:
         """转发删除请求"""
         self.card_remove_requested.emit(card)
     
-    def _on_card_resume_requested(self, card: "DownloadItemWidget") -> None:
+    def _on_card_resume_requested(self, card: DownloadItemWidget) -> None:
         """转发恢复请求"""
         self.card_resume_requested.emit(card)
     

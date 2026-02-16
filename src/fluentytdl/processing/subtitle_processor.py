@@ -11,11 +11,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..core.config_manager import config_manager
 from ..utils.logger import logger
 
 
@@ -42,7 +42,7 @@ class SubtitleProcessor:
         self, 
         output_path: str | None,
         opts: dict[str, Any],
-        status_callback: callable = None,
+        status_callback: Callable[[str], None] | None = None,
     ) -> SubtitleProcessResult:
         """
         执行字幕后处理
@@ -76,7 +76,6 @@ class SubtitleProcessor:
         
         video_path = Path(output_path)
         processed_files = []
-        merged_file = None
         
         # 1. 查找并验证字幕文件
         subtitle_files = self._find_subtitle_files(video_path)

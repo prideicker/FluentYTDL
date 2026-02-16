@@ -6,16 +6,15 @@ SponsorBlock 类别选择对话框
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QFrame
 from PySide6.QtCore import Qt
-
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CheckBox,
-    MessageBoxBase,
-    SubtitleLabel,
     BodyLabel,
     CaptionLabel,
+    CheckBox,
+    MessageBoxBase,
     ScrollArea,
+    SubtitleLabel,
 )
 
 

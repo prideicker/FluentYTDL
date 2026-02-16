@@ -5,9 +5,7 @@
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
@@ -17,24 +15,21 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
 from qfluentwidgets import (
     BodyLabel,
     FluentIcon,
+    InfoBar,
+    InfoBarPosition,
     MessageBox,
-    PrimaryPushButton,
-    PushButton,
     SearchLineEdit,
     SubtitleLabel,
     ToolTipFilter,
     ToolTipPosition,
     TransparentToolButton,
-    InfoBar,
-    InfoBarPosition,
 )
 
+from ...storage.history_service import HistoryRecord, history_service
 from ..components.history_item_widget import HistoryItemWidget
-from ...storage.history_service import HistoryRecord, HistoryService, history_service
 
 
 class HistoryPage(QWidget):
@@ -248,7 +243,7 @@ class HistoryPage(QWidget):
     # ------ 状态更新 ------
 
     def _update_empty_state(self) -> None:
-        visible = sum(1 for c in self._cards if c.isVisible())
+        visible = sum(1 for c in self._cards if not c.isHidden())
         self.scroll_area.setVisible(visible > 0)
         self.empty_placeholder.setVisible(visible == 0)
 
