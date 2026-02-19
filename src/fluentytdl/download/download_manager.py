@@ -20,9 +20,9 @@ class DownloadManager(QObject):
 
     def _max_concurrent(self) -> int:
         try:
-            n = int(config_manager.get("max_concurrent_downloads", 2) or 2)
+            n = int(config_manager.get("max_concurrent_downloads", 3) or 3)
         except Exception:
-            n = 2
+            n = 3
         # Use 32-bit int max to avoid overflow in UI / Qt validators.
         return max(1, min(2_147_483_647, n))
 
@@ -63,8 +63,8 @@ class DownloadManager(QObject):
                 continue
         self.task_updated.emit()
 
-    def create_worker(self, url: str, opts: dict[str, Any]) -> DownloadWorker:
-        worker = DownloadWorker(url, opts)
+    def create_worker(self, url: str, opts: dict[str, Any], cached_info: dict[str, Any] | None = None) -> DownloadWorker:
+        worker = DownloadWorker(url, opts, cached_info=cached_info)
         self.active_workers.append(worker)
 
         # When a worker ends, free a slot and pump queued tasks.

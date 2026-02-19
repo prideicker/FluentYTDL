@@ -351,6 +351,8 @@ class DownloadConfigWindow(FramelessWindow):
     def _apply_dialog_size_for_mode(self) -> None:
         if self._is_playlist:
             size = (980, 620)
+        elif self._vr_mode:
+            size = (880, 620)
         else:
             size = (760, 520)
         

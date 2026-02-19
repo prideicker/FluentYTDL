@@ -22,7 +22,7 @@ from qfluentwidgets import (
 
 from ...download.workers import DownloadWorker
 from ...utils.image_loader import ImageLoader
-from .download_card import _format_bytes, _format_time, _strip_ansi
+from .download_card import _format_bytes, _format_time, _strip_ansi, _infer_stream_label
 
 
 class DownloadItemWidget(CardWidget):
@@ -259,16 +259,10 @@ class DownloadItemWidget(CardWidget):
         if d.get("status") == "downloading":
             self.set_state("running")
             
-            # Infer stream type (Video/Audio)
-            info = d.get("info_dict") or {}
-            vcodec = str(info.get("vcodec") or "none")
-            acodec = str(info.get("acodec") or "none")
-            
-            prefix = ""
-            if vcodec != "none" and acodec == "none":
-                prefix = "[视频] "
-            elif vcodec == "none" and acodec != "none":
-                prefix = "[音频] "
+            # Use shared logic for label inference
+            stream_label = _infer_stream_label(d)
+            if stream_label == "[下载]":
+                stream_label = "" 
             
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes") or 0
@@ -279,10 +273,6 @@ class DownloadItemWidget(CardWidget):
                 self.progressBar.setValue(int(downloaded / total * 100))
                 size_str = f"{_format_bytes(total)}"
             else:
-                # Indeterminate or unknown size
-                # Keep progress bar moving if we have speed? Or just 0.
-                # self.progressBar.setValue(0) 
-                # Actually, if we don't know total, we can't calculate percentage.
                 pass
                 size_str = "?"
 
@@ -290,6 +280,7 @@ class DownloadItemWidget(CardWidget):
             eta_str = f"剩余 {_format_time(eta)}"
 
             # 元数据行：[视频] 大小 • 速度 • 剩余时间
+            prefix = f"{stream_label} " if stream_label else ""
             self.metaLabel.setText(f"{prefix}{size_str} • {speed_str} • {eta_str}")
 
     def update_status(self, msg: str) -> None:
@@ -480,4 +471,3 @@ class DownloadItemWidget(CardWidget):
 
     def on_delete_clicked(self) -> None:
         self.remove_requested.emit(self)
-

@@ -33,9 +33,28 @@ on:
           - setup
           - full
           - portable
+      publish:
+        description: '是否发布 GitHub Release'
+        required: true
+        default: false
+        type: boolean
+      strict_version_check:
+        description: '严格校验版本一致性'
+        required: true
+        default: true
+        type: boolean
+      run_quality_gates:
+        description: '运行发布前质量门槛 (ruff/pyright)'
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.version }}
+  cancel-in-progress: false
 
 env:
   PYTHON_VERSION: '3.12'
@@ -66,10 +85,18 @@ jobs:
           pip install ".[dev]"
           pip install py7zr  # 用于创建 7z 压缩包
 
+      - name: "🔍 发布前质量门槛 (ruff/pyright)"
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_quality_gates == 'true'
+        shell: pwsh
+        run: |
+          ruff check src
+          pyright
+
       # ========================================
       # 2. 下载外部工具
       # ========================================
       - name: "🔧 下载外部工具 (yt-dlp, ffmpeg, deno, atomicparsley)"
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.targets != 'portable'
         shell: pwsh
         run: python scripts/fetch_tools.py --force
 
@@ -77,6 +104,7 @@ jobs:
       # 3. 安装 Inno Setup (使用 Chocolatey)
       # ========================================
       - name: "📦 安装 Inno Setup"
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.targets == 'all' || github.event.inputs.targets == 'setup'
         shell: pwsh
         run: |
           Write-Host "使用 Chocolatey 安装 Inno Setup..."
@@ -98,21 +126,41 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          # 优先级: 手动输入 > Git 标签 > pyproject.toml
           $version = ""
+          $targets = "all"
+          $publish = "false"
+          $strict = "true"
           
-          # 1. 检查手动输入
-          if ("${{ github.event.inputs.version }}" -ne "") {
-            $version = "${{ github.event.inputs.version }}"
-            Write-Host "使用手动输入版本: $version"
-          }
-          # 2. 检查 Git 标签
-          elseif ("${{ github.ref_type }}" -eq "tag") {
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $targets = "${{ github.event.inputs.targets }}"
+            $publish = "${{ github.event.inputs.publish }}"
+            $strict = "${{ github.event.inputs.strict_version_check }}"
+
+            if ($publish -eq "true" -and "${{ github.event.inputs.version }}" -eq "") {
+              Write-Host "❌ publish=true 时必须提供 inputs.version"
+              exit 1
+            }
+
+            if ("${{ github.event.inputs.version }}" -ne "") {
+              $version = "${{ github.event.inputs.version }}"
+              Write-Host "使用 workflow_dispatch 输入版本: $version"
+            } else {
+              $content = Get-Content pyproject.toml -Raw
+              if ($content -match 'version\s*=\s*"([^"]+)"') {
+                $version = $matches[1]
+                Write-Host "workflow_dispatch 未提供版本，使用 pyproject.toml 版本: $version"
+              } else {
+                $version = "0.0.0"
+                Write-Host "workflow_dispatch 未提供版本且无法读取 pyproject.toml，使用默认版本: $version"
+              }
+            }
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
             $version = "${{ github.ref_name }}".TrimStart("v")
+            $targets = "all"
+            $publish = "true"
+            $strict = "true"
             Write-Host "使用 Git 标签版本: $version"
-          }
-          # 3. 从 pyproject.toml 读取
-          else {
+          } else {
             $content = Get-Content pyproject.toml -Raw
             if ($content -match 'version\s*=\s*"([^"]+)"') {
               $version = $matches[1]
@@ -125,30 +173,110 @@ jobs:
           
           Write-Host "最终版本号: $version"
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "TARGETS=$targets" >> $env:GITHUB_OUTPUT
+          echo "PUBLISH=$publish" >> $env:GITHUB_OUTPUT
+          echo "STRICT=$strict" >> $env:GITHUB_OUTPUT
           echo "PACKAGE_VERSION=v$version" >> $env:GITHUB_ENV
+
+          $tagName = ""
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tagName = "${{ github.ref_name }}"
+          } elseif ($publish -eq "true") {
+            $tagName = "v$version"
+          }
+          echo "TAG_NAME=$tagName" >> $env:GITHUB_OUTPUT
+
+      - name: "🧾 校验发布版本一致性"
+        shell: pwsh
+        run: |
+          $publish = "${{ steps.version.outputs.PUBLISH }}"
+          $strict = "${{ steps.version.outputs.STRICT }}"
+          $expected = "${{ steps.version.outputs.VERSION }}"
+
+          if ($publish -ne "true") {
+            Write-Host "publish=false，跳过版本一致性校验"
+            exit 0
+          }
+
+          $content = Get-Content pyproject.toml -Raw
+          if ($content -notmatch 'version\s*=\s*"([^"]+)"') {
+            Write-Host "❌ 无法从 pyproject.toml 读取版本号"
+            exit 1
+          }
+
+          $actual = $matches[1]
+          # 允许 pre-release 后缀：tag 为 v2.0.1-pre 时，仅比较基础版本号
+          $expectedBase = ($expected -split '-')[0]
+          if ($actual -eq $expected -or $actual -eq $expectedBase) {
+            Write-Host "✓ 版本一致: pyproject.toml=$actual, release=$expected"
+            exit 0
+          }
+
+          $msg = "版本不一致: pyproject.toml=$actual, release=$expected"
+          if ($strict -eq "true") {
+            Write-Host "❌ $msg"
+            exit 1
+          } else {
+            Write-Host "⚠ $msg"
+            exit 0
+          }
 
       # ========================================
       # 5. 构建
       # ========================================
       - name: "🔨 构建所有目标"
-        if: github.event.inputs.targets == 'all' || github.event.inputs.targets == ''
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.targets == 'all' || github.event.inputs.targets == ''
         shell: pwsh
         run: python scripts/build.py --target all --version "v${{ steps.version.outputs.VERSION }}"
 
       - name: "🔨 构建 Setup"
-        if: github.event.inputs.targets == 'setup'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.targets == 'setup'
         shell: pwsh
         run: python scripts/build.py --target setup --version "v${{ steps.version.outputs.VERSION }}"
 
       - name: "🔨 构建 Full"
-        if: github.event.inputs.targets == 'full'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.targets == 'full'
         shell: pwsh
         run: python scripts/build.py --target full --version "v${{ steps.version.outputs.VERSION }}"
 
       - name: "🔨 构建 Portable"
-        if: github.event.inputs.targets == 'portable'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.targets == 'portable'
         shell: pwsh
         run: python scripts/build.py --target portable --version "v${{ steps.version.outputs.VERSION }}"
+
+      - name: "🔐 生成 SHA256 校验文件"
+        shell: pwsh
+        run: |
+          python -c "from scripts.build import Builder; import os; Builder(version=os.environ.get('PACKAGE_VERSION')).generate_checksums()"
+
+      - name: "✅ 校验构建产物"
+        shell: pwsh
+        run: |
+          $targets = "${{ steps.version.outputs.TARGETS }}"
+          $version = "${{ steps.version.outputs.VERSION }}"
+          $dir = "release"
+          if (-not (Test-Path $dir)) { throw "release 目录不存在" }
+
+          function Assert-Exists([string]$pattern) {
+            $items = Get-ChildItem -Path $dir -Filter $pattern -ErrorAction SilentlyContinue
+            if (-not $items) { throw "缺少产物: $pattern" }
+          }
+
+          if ($targets -eq "all" -or $targets -eq "") {
+            Assert-Exists "FluentYTDL-v$version-*-portable.exe"
+            Assert-Exists "FluentYTDL-v$version-*-full.7z"
+            Assert-Exists "FluentYTDL-v$version-*-setup.exe"
+          } elseif ($targets -eq "portable") {
+            Assert-Exists "FluentYTDL-v$version-*-portable.exe"
+          } elseif ($targets -eq "full") {
+            Assert-Exists "FluentYTDL-v$version-*-full.7z"
+          } elseif ($targets -eq "setup") {
+            Assert-Exists "FluentYTDL-v$version-*-setup.exe"
+          } else {
+            throw "未知 targets: $targets"
+          }
+
+          Assert-Exists "SHA256SUMS.txt"
 
       # ========================================
       # 6. 列出构建产物
@@ -178,10 +306,11 @@ jobs:
       # ========================================
       - name: "🚀 创建 GitHub Release"
         uses: softprops/action-gh-release@v2
-        if: success() && startsWith(github.ref, 'refs/tags/')
+        if: success() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true'))
         with:
           name: FluentYTDL v${{ steps.version.outputs.VERSION }}
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           draft: false
           prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
           generate_release_notes: true

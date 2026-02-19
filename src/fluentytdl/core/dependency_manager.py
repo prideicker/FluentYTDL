@@ -55,6 +55,7 @@ class DependencyManager(QObject):
     def __init__(self):
         super().__init__()
         self._workers = {}
+        self._just_installed: set[str] = set()  # 记录刚安装完的组件，用于抑制误报
         
         # Define known components
         self.components = {
@@ -64,6 +65,7 @@ class DependencyManager(QObject):
             "pot-provider": ComponentInfo("pot-provider", "POT Provider", "bgutil-pot-provider.exe"),
             "ytarchive": ComponentInfo("ytarchive", "ytarchive", "ytarchive.exe"),
             "atomicparsley": ComponentInfo("atomicparsley", "AtomicParsley", "AtomicParsley.exe"),
+
         }
 
     def get_target_dir(self, component_key: str) -> Path:
@@ -117,6 +119,13 @@ class DependencyManager(QObject):
         self.check_started.emit(component_key)
 
     def _on_check_finished(self, key, result):
+        # 如果组件刚刚安装完，且版本比较仍显示有更新，抑制误报
+        if key in self._just_installed:
+            self._just_installed.discard(key)
+            if result.get('update_available') and result.get('current') != 'unknown':
+                logger.info(f"Suppressing update notification for {key} (just installed)")
+                result['update_available'] = False
+
         # Store result in our cache
         if key in self.components:
             self.components[key].current_version = result.get('current')
@@ -153,6 +162,7 @@ class DependencyManager(QObject):
         self.download_started.emit(component_key)
 
     def _on_install_finished(self, key):
+        self._just_installed.add(key)
         self.install_finished.emit(key)
         self._workers.pop(f"install_{key}", None)
 
@@ -166,6 +176,15 @@ class UpdateCheckerWorker(QThread):
         self.key = key
         self.manager = manager
 
+    @staticmethod
+    def _parse_version_tuple(ver: str) -> tuple[int, ...] | None:
+        """将版本字符串归一化为可比较的整数元组。"""
+        cleaned = ver.lstrip("vn").strip()
+        m = re.match(r"(\d+(?:\.\d+)*)", cleaned)
+        if m:
+            return tuple(int(x) for x in m.group(1).split("."))
+        return None
+
     def run(self):
         try:
             exe_path = self.manager.get_exe_path(self.key)
@@ -175,11 +194,21 @@ class UpdateCheckerWorker(QThread):
             
             update_available = False
             if latest_ver and latest_ver != "unknown":
-                if current_ver == "unknown" or current_ver != latest_ver:
-                    # Simple string comparison is often enough for git tags, 
-                    # but semantic versioning compare is better. 
-                    # For now, inequality is a safe trigger.
-                    update_available = True
+                c_tuple = self._parse_version_tuple(current_ver)
+                l_tuple = self._parse_version_tuple(latest_ver)
+
+                if c_tuple is not None and l_tuple is not None:
+                    # 对齐元组长度: (7,1) vs (7,1,3) → (7,1,0) vs (7,1,3)
+                    max_len = max(len(c_tuple), len(l_tuple))
+                    c_padded = c_tuple + (0,) * (max_len - len(c_tuple))
+                    l_padded = l_tuple + (0,) * (max_len - len(l_tuple))
+                    # 仅当远程版本严格大于本地时才提示更新
+                    update_available = l_padded > c_padded
+                else:
+                    # 无法解析则 fallback 到字符串比较
+                    c_norm = current_ver.lstrip("vn")
+                    l_norm = latest_ver.lstrip("vn")
+                    update_available = c_norm != l_norm
 
             result = {
                 "current": current_ver,
@@ -229,11 +258,19 @@ class UpdateCheckerWorker(QThread):
                     return m.group(1)
             elif key == "ffmpeg":
                 # ffmpeg version 6.1-essentials_build-www.gyan.dev ...
-                # or ffmpeg version n6.1 ...
+                # or ffmpeg version n7.1.3-40-gcddd06f3b9-20260219 ...
                 line = out.splitlines()[0]
                 m = re.search(r"ffmpeg version ([^\s]+)", line)
                 if m:
-                    return m.group(1)
+                    raw = m.group(1)
+                    # 从完整版本字符串中仅提取核心数字版本
+                    # 示例: "n7.1.3-40-gcddd06f3b9-20260219" → "7.1.3"
+                    # 示例: "6.1-essentials_build-www.gyan.dev" → "6.1"
+                    core = raw.lstrip("nN")
+                    vm = re.match(r"(\d+(?:\.\d+)*)", core)
+                    if vm:
+                        return vm.group(1)
+                    return raw  # fallback
             elif key == "pot-provider":
                 # bgutil-ytdlp-pot-provider-rs
                 # Output: something like "bgutil-pot-provider 0.1.5" or just version
@@ -248,6 +285,11 @@ class UpdateCheckerWorker(QThread):
             elif key == "atomicparsley":
                 # AtomicParsley outputs: "AtomicParsley version: 20240608.083822.1ed9031" or similar
                 m = re.search(r"(\d{8}\.\d+\.\w+)", out)
+                if m:
+                    return m.group(1)
+            elif key == "aria2c":
+                # aria2 version 1.36.0
+                m = re.search(r"aria2 version (\d+\.\d+\.\d+)", out)
                 if m:
                     return m.group(1)
                 
@@ -294,21 +336,36 @@ class UpdateCheckerWorker(QThread):
             return tag, dl_url
 
         elif key == "ffmpeg":
-            # FFmpeg is tricky. Gyan.dev is standard for Windows.
-            # We can check the 'release' info from gyan.dev api or just check github mirror.
-            # BtbN builds are also good and hosted on GitHub. Let's use BtbN for easy API access.
+            # BtbN/FFmpeg-Builds: "latest" release 包含多个版本 (n7.1, n8.0, master)
             url = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
             resp = requests.get(url, proxies=proxies, timeout=10)
             resp.raise_for_status()
             data = resp.json()
-            tag = data["tag_name"] # e.g. "latest" or "autobuild-..."
-            
-            # We specifically want the win64-gpl-shared or static
-            dl_url = ""
+
+            # 收集所有版本化的 win64-gpl static 构建，选取最高版本
+            candidates: list[tuple[tuple[int, ...], str, str, str]] = []
             for asset in data.get("assets", []):
-                if "win64-gpl.zip" in asset["name"] and "shared" not in asset["name"]:
-                     dl_url = asset["browser_download_url"]
-                     break
+                name = asset["name"]
+                if "win64-gpl" in name and ".zip" in name and "shared" not in name:
+                    m = re.search(r"ffmpeg-n(\d+(?:\.\d+)*)", name)
+                    if m:
+                        ver_str = m.group(1)
+                        ver_tuple = tuple(int(x) for x in ver_str.split("."))
+                        candidates.append((ver_tuple, ver_str, asset["browser_download_url"], name))
+
+            if candidates:
+                # 按版本号降序排列，取最高版本
+                candidates.sort(reverse=True, key=lambda x: x[0])
+                _, tag, dl_url, asset_name = candidates[0]
+            else:
+                # Fallback: master 构建
+                dl_url, tag = "", "unknown"
+                for asset in data.get("assets", []):
+                    if "win64-gpl" in asset["name"] and ".zip" in asset["name"] and "shared" not in asset["name"]:
+                        dl_url = asset["browser_download_url"]
+                        tag = "master"
+                        break
+
             return tag, dl_url
 
         elif key == "pot-provider":
@@ -364,6 +421,8 @@ class UpdateCheckerWorker(QThread):
                     dl_url = asset["browser_download_url"]
                     break
             return tag, dl_url
+
+
 
         return "unknown", ""
 

@@ -31,6 +31,8 @@ from qfluentwidgets import (
     ToolTipPosition,
 )
 
+from ..download.dispatcher import download_dispatcher
+from ..download.download_manager import download_manager
 from ..core.config_manager import config_manager
 from ..core.dependency_manager import dependency_manager
 from ..core.hardware_manager import hardware_manager
@@ -709,8 +711,35 @@ class SettingsPage(QWidget):
         )
         self.downloadFolderCard.clicked.connect(self._select_download_folder)
 
+        self.downloadModeCard = InlineComboBoxCard(
+            FluentIcon.SPEED_HIGH,
+            "下载模式",
+            "选择下载引擎策略（自动模式会根据网络状况智能切换）",
+            ["🤖 自动智能 (推荐)", "⚡ 极速 (多线程并发)", "🛡️ 稳定 (单线程)", "🔧 最低兼容"],
+            self.downloadGroup,
+        )
+        self.downloadModeCard.comboBox.currentIndexChanged.connect(self._on_download_mode_changed)
+
+        # Max Concurrent Downloads
+        self.maxConcurrentCard = InlineComboBoxCard(
+            FluentIcon.ALBUM,
+            "最大同时下载数",
+            "设置同时进行的下载任务数量 (默认: 3)",
+            [str(i) for i in range(1, 11)],
+            self.downloadGroup,
+        )
+        # Select current value
+        current_max = config_manager.get("max_concurrent_downloads", 3)
+        self.maxConcurrentCard.comboBox.setCurrentIndex(max(0, min(9, int(current_max) - 1)))
+        self.maxConcurrentCard.comboBox.currentIndexChanged.connect(self._on_max_concurrent_changed)
+
         self.downloadGroup.addSettingCard(self.downloadFolderCard)
+        self.downloadGroup.addSettingCard(self.downloadModeCard)
+        self.downloadGroup.addSettingCard(self.maxConcurrentCard)
         layout.addWidget(self.downloadGroup)
+
+        # Trigger warning check initially
+        self._on_max_concurrent_changed(self.maxConcurrentCard.comboBox.currentIndex())
 
     def _init_network_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
         self.networkGroup = SettingCardGroup("网络连接", parent_widget)
@@ -877,6 +906,8 @@ class SettingsPage(QWidget):
             self.coreGroup
         )
 
+
+
         self.jsRuntimeCard = InlineComboBoxCard(
             FluentIcon.CODE,
             "JS Runtime 策略",
@@ -893,6 +924,7 @@ class SettingsPage(QWidget):
         self.coreGroup.addSettingCard(self.denoCard)
         self.coreGroup.addSettingCard(self.potProviderCard)
         self.coreGroup.addSettingCard(self.atomicParsleyCard)
+
         self.coreGroup.addSettingCard(self.jsRuntimeCard)
         layout.addWidget(self.coreGroup)
 
@@ -1352,6 +1384,13 @@ class SettingsPage(QWidget):
         # Download paths
         self.downloadFolderCard.setContent(str(config_manager.get("download_dir")))
 
+        # Download mode
+        dl_mode = str(config_manager.get("download_mode") or "auto").lower().strip()
+        dl_mode_map = {"auto": 0, "speed": 1, "stable": 2, "harsh": 3}
+        self.downloadModeCard.comboBox.blockSignals(True)
+        self.downloadModeCard.comboBox.setCurrentIndex(dl_mode_map.get(dl_mode, 0))
+        self.downloadModeCard.comboBox.blockSignals(False)
+
         # Update Source
         src = str(config_manager.get("update_source") or "github")
         src_idx = 1 if src == "ghproxy" else 0
@@ -1560,6 +1599,21 @@ class SettingsPage(QWidget):
         
         # Update subtitle settings visibility
         self._update_subtitle_settings_visibility(subtitle_enabled)
+
+    def _on_max_concurrent_changed(self, index: int):
+        val = index + 1
+        config_manager.set("max_concurrent_downloads", val)
+        
+        # Risk warning
+        if val > 3:
+            self.maxConcurrentCard.setContent(f"⚠️ 当前: {val} (高风险! 可能导致 YouTube 封禁 IP 429)")
+            self.maxConcurrentCard.setTitle("最大同时下载数 (慎用)")
+        else:
+            self.maxConcurrentCard.setContent(f"当前: {val}")
+            self.maxConcurrentCard.setTitle("最大同时下载数")
+            
+        # Immediately apply new limit to pending queue
+        download_manager.pump()
 
     def _on_update_source_changed(self, index: int) -> None:
         source = "ghproxy" if index == 1 else "github"
@@ -2151,6 +2205,10 @@ class SettingsPage(QWidget):
             self.poTokenCard.setValue(val)
         except Exception:
             pass
+
+    def _on_download_mode_changed(self, index: int) -> None:
+        modes = {0: "auto", 1: "speed", 2: "stable", 3: "harsh"}
+        config_manager.set("download_mode", modes.get(index, "auto"))
 
     def _select_download_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "选择下载目录")

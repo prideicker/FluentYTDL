@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ..utils.logger import logger
+from .cookie_cleaner import CookieCleaner
 
 # 尝试导入 rookiepy
 try:
@@ -135,6 +136,13 @@ class CookieManager:
             
             cookies = extractor(domains)
             logger.info(f"从 {browser} 提取到 {len(cookies)} 个 Cookie")
+            
+            # 合规清洗
+            # 注意: CookieManager 可能用于多种用途，暂且统一使用 youtube 策略或根据 domains 判断
+            # 这里简单起见，如果 domains 包含 youtube 则用 youtube 策略
+            platform = "youtube" if any("youtube" in d for d in domains) else "other"
+            cookies = CookieCleaner.clean(cookies, platform)
+            
             return cookies
             
         except Exception as e:

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..utils.logger import logger
+from .cookie_cleaner import CookieCleaner
 
 # 尝试导入 rookiepy
 try:
@@ -387,6 +388,9 @@ class AuthService:
             
             cookies = extractor(domains)
             logger.info(f"从 {browser} 提取到 {len(cookies)} 个 Cookie")
+            
+            # 使用 CookieCleaner 进行合规清洗
+            cookies = CookieCleaner.clean(cookies, platform)
             
         except Exception as e:
             logger.warning(f"直接提取失败: {e}")

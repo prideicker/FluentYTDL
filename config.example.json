@@ -12,6 +12,7 @@
   "js_runtime_path": "",
   "yt_dlp_exe_path": "",
   "max_concurrent_downloads": 3,
+  "download_mode": "auto",
   "clipboard_auto_detect": false,
   "deletion_policy": "AlwaysAsk",
   "playlist_skip_authcheck": true
