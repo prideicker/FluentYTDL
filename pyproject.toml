@@ -41,7 +41,7 @@ known-first-party = ["fluentytdl"]
 [tool.pyright]
 pythonVersion = "3.10"
 extraPaths = ["src"]
-exclude = ["src/fluentytdl/utils/spatialmedia"]
+exclude = ["src/fluentytdl/utils/spatialmedia", "build/**"]
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
 reportUnknownVariableType = false
