@@ -698,7 +698,7 @@ class SettingsPage(QWidget):
         # 每次显示设置页面时刷新Cookie状态
         self._update_cookie_status()
 
-    def _init_download_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_download_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.downloadGroup = SettingCardGroup("下载选项", parent_widget)
 
         self.downloadFolderCard = PushSettingCard(
@@ -740,7 +740,7 @@ class SettingsPage(QWidget):
         # Trigger warning check initially
         self._on_max_concurrent_changed(self.maxConcurrentCard.comboBox.currentIndex())
 
-    def _init_network_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_network_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.networkGroup = SettingCardGroup("网络连接", parent_widget)
 
         self.proxyModeCard = InlineComboBoxCard(
@@ -766,7 +766,7 @@ class SettingsPage(QWidget):
         self.networkGroup.addSettingCard(self.proxyEditCard)
         layout.addWidget(self.networkGroup)
 
-    def _init_account_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_account_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化账号与 Cookie 设置组"""
         self.accountGroup = SettingCardGroup("账号验证 (Cookie)", parent_widget)
         
@@ -838,7 +838,7 @@ class SettingsPage(QWidget):
         self._indent_setting_card(self.cookieFileCard)
         self._indent_setting_card(self.cookieStatusCard)
 
-    def _init_component_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_component_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化核心组件与更新设置组"""
         self.coreGroup = SettingCardGroup("核心组件", parent_widget)
 
@@ -927,7 +927,7 @@ class SettingsPage(QWidget):
         self.coreGroup.addSettingCard(self.jsRuntimeCard)
         layout.addWidget(self.coreGroup)
 
-    def _init_advanced_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_advanced_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.advancedGroup = SettingCardGroup("高级", parent_widget)
 
         self.poTokenCard = SmartSettingCard(
@@ -961,7 +961,7 @@ class SettingsPage(QWidget):
         self.advancedGroup.addSettingCard(self.jsRuntimePathCard)
         layout.addWidget(self.advancedGroup)
 
-    def _init_automation_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_automation_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.automationGroup = SettingCardGroup("自动化", parent_widget)
 
         self.clipboardDetectCard = InlineSwitchCard(
@@ -994,7 +994,7 @@ class SettingsPage(QWidget):
         self.automationGroup.addSettingCard(self.clipboardWindowToFrontCard)
         layout.addWidget(self.automationGroup)
 
-    def _init_vr_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_vr_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化 VR / 360° 设置组"""
         self.vrGroup = SettingCardGroup("VR / 360°", parent_widget)
 
@@ -1120,7 +1120,7 @@ class SettingsPage(QWidget):
             return False, "Token 格式看起来不对（通常包含 'mweb' 或 'visitor'）"
         return True, ""
 
-    def _init_behavior_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_behavior_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.behaviorGroup = SettingCardGroup("行为策略", parent_widget)
 
         self.deletionPolicyCard = InlineComboBoxCard(
@@ -1144,7 +1144,7 @@ class SettingsPage(QWidget):
         self.behaviorGroup.addSettingCard(self.playlistSkipAuthcheckCard)
         layout.addWidget(self.behaviorGroup)
 
-    def _init_postprocess_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_postprocess_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化后处理设置组（封面嵌入、元数据等）"""
         self.postprocessGroup = SettingCardGroup("后处理", parent_widget)
 
@@ -1205,7 +1205,7 @@ class SettingsPage(QWidget):
         
         layout.addWidget(self.postprocessGroup)
 
-    def _init_subtitle_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_subtitle_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化字幕配置组"""
         self.subtitleGroup = SettingCardGroup("字幕下载", parent_widget)
         
@@ -1287,7 +1287,7 @@ class SettingsPage(QWidget):
         
         layout.addWidget(self.subtitleGroup)
 
-    def _init_about_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_about_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.aboutGroup = SettingCardGroup("关于", parent_widget)
         self.aboutCard = HyperlinkCard(
             "https://github.com/prideicker/FluentYTDL",
@@ -1300,7 +1300,7 @@ class SettingsPage(QWidget):
         self.aboutGroup.addSettingCard(self.aboutCard)
         layout.addWidget(self.aboutGroup)
 
-    def _init_log_group(self, parent_widget: QWidget, layout: QVBoxLayout) -> None:
+    def _init_log_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化日志管理组"""
         self.logGroup = SettingCardGroup("日志管理", parent_widget)
 

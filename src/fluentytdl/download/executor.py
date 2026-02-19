@@ -129,7 +129,7 @@ class DownloadExecutor:
     """
 
     def __init__(self) -> None:
-        self._proc: subprocess.Popen[bytes] | None = None
+        self._proc: subprocess.Popen[Any] | None = None
         self._ytdlp_parser = YtDlpOutputParser()
 
     def execute(
@@ -283,8 +283,10 @@ class DownloadExecutor:
         dest_paths: set[str] = set()
         tail: deque[str] = deque(maxlen=120)
 
-        assert self._proc.stdout is not None
-        for raw in self._proc.stdout:
+        proc = self._proc
+        assert proc is not None
+        assert proc.stdout is not None
+        for raw in proc.stdout:
             if cancel_check():
                 self._terminate_proc()
                 raise RuntimeError("用户取消下载")
@@ -343,7 +345,7 @@ class DownloadExecutor:
                     if on_file_created:
                         on_file_created(p)
 
-        rc = self._proc.wait()
+        rc = proc.wait()
         self._proc = None
 
         if rc != 0:
@@ -404,7 +406,7 @@ class DownloadExecutor:
             url, opts, strategy,
             on_progress=on_progress,
             on_status=on_status,
-            on_path=lambda p: None,
+            on_path=lambda path: None,
             cancel_check=cancel_check,
             on_file_created=on_file_created,
         )

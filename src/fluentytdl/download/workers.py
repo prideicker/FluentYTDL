@@ -275,8 +275,8 @@ class DownloadWorker(QThread):
             def on_progress(data: dict[str, Any]) -> None:
                 self.progress.emit(data)
                 
-            def on_status(msg: str) -> None:
-                self.status_msg.emit(msg)
+            def on_status(message: str) -> None:
+                self.status_msg.emit(message)
                 
             def on_path(path: str) -> None:
                 self.output_path = path
