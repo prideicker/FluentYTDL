@@ -27,6 +27,9 @@
   #define OutputBaseFilename "FluentYTDL-setup"
 #endif
 
+; 提取纯数字版本 (去掉 "-pre" 等预发布后缀), 供 VersionInfoVersion 使用
+#define MyAppVersionNumeric Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
+
 ; --- 应用程序信息 ---
 #define MyAppName "FluentYTDL"
 #define MyAppPublisher "FluentYTDL Team"
@@ -50,11 +53,11 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
-VersionInfoVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersionNumeric}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppDescription}
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersionNumeric}
 
 ; 安装目录
 DefaultDirName={autopf}\{#MyAppName}
