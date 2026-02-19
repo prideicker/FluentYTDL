@@ -31,11 +31,10 @@ from qfluentwidgets import (
     ToolTipPosition,
 )
 
-from ..download.dispatcher import download_dispatcher
-from ..download.download_manager import download_manager
 from ..core.config_manager import config_manager
 from ..core.dependency_manager import dependency_manager
 from ..core.hardware_manager import hardware_manager
+from ..download.download_manager import download_manager
 from ..processing.subtitle_manager import COMMON_SUBTITLE_LANGUAGES
 from ..utils.logger import LOG_DIR
 from ..utils.paths import find_bundled_executable, is_frozen

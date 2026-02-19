@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import os
-import re
-import subprocess
 import threading
-from collections import deque
-from typing import Any, cast
+from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
+from ..core.config_manager import config_manager
 from ..utils.logger import logger
-from ..utils.paths import locate_runtime_tool
 from ..utils.translator import translate_error
 from ..youtube.youtube_service import YoutubeServiceOptions, youtube_service
-from ..youtube.yt_dlp_cli import YtDlpCancelled, prepare_yt_dlp_env, ydl_opts_to_cli_args
+from ..youtube.yt_dlp_cli import YtDlpCancelled
+from .dispatcher import download_dispatcher
+from .executor import DownloadExecutor
 from .features import (
     DownloadContext,
     MetadataFeature,
@@ -22,10 +21,7 @@ from .features import (
     ThumbnailFeature,
     VRFeature,
 )
-from .dispatcher import download_dispatcher
-from .executor import DownloadExecutor
 from .strategy import DownloadMode, get_fallback
-from ..core.config_manager import config_manager
 
 
 class DownloadCancelled(Exception):
@@ -258,8 +254,8 @@ class DownloadWorker(QThread):
                 feature.on_download_start(context)
 
             # Capture intent flags before stripping
-            is_vr_mode = merged.get("__fluentytdl_use_android_vr", False)
-            should_embed_subs = merged.get("embedsubtitles", False)
+            merged.get("__fluentytdl_use_android_vr", False)
+            merged.get("embedsubtitles", False)
 
             # Strip internal meta options (never pass to yt-dlp)
             for k in list(merged.keys()):
@@ -325,7 +321,7 @@ class DownloadWorker(QThread):
                     download_dispatcher.report_result(False)
 
                     if self.is_cancelled:
-                        raise DownloadCancelled()
+                        raise DownloadCancelled() from None
 
                     # 尝试降级
                     fallback = get_fallback(strategy.mode)

@@ -6,9 +6,10 @@ Cookie 清洗与合规过滤模块
 
 from __future__ import annotations
 
-from typing import Any, Set
+from typing import Any
 
 from ..utils.logger import logger
+
 
 class CookieCleaner:
     """Cookie 清洗器"""
@@ -61,8 +62,8 @@ class CookieCleaner:
         allowed_domains = cls.PLATFORM_DOMAINS.get(platform, set())
         allowed_names = cls.YOUTUBE_ALLOWED_NAMES if platform == "youtube" else None
         
-        ignored_domains: Set[str] = set()
-        ignored_names: Set[str] = set()
+        ignored_domains: set[str] = set()
+        ignored_names: set[str] = set()
         
         for cookie in cookies:
             # 1. 域名过滤

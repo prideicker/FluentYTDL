@@ -13,11 +13,10 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
-import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from loguru import logger
 
@@ -27,8 +26,7 @@ from ..youtube.yt_dlp_cli import (
     ydl_opts_to_cli_args,
 )
 from .output_parser import YtDlpOutputParser
-from .strategy import DownloadMode, DownloadStrategy, NATIVE_FALLBACK_STRATEGY
-
+from .strategy import DownloadMode, DownloadStrategy
 
 # ── 回调协议 ──────────────────────────────────────────────
 
@@ -306,7 +304,6 @@ class DownloadExecutor:
                     "speed": parsed.progress.speed,
                     "eta": parsed.progress.eta,
                     "filename": parsed.progress.filename,
-                    "filename": parsed.progress.filename,
                     "info_dict": parsed.progress.info_dict,
                     "label": label,
                 })
@@ -485,7 +482,7 @@ class DownloadExecutor:
         try:
             info = json.loads(stdout)
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"yt-dlp JSON 解析失败: {e}")
+            raise RuntimeError(f"yt-dlp JSON 解析失败: {e}") from e
 
         return self._parse_stream_info(info, check_protocol=check_protocol)
 

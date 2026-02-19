@@ -62,13 +62,13 @@ class NetworkProbe:
         latencies: list[float] = []
         failures = 0
 
-        for i in range(attempts):
+        for _i in range(attempts):
             try:
                 t0 = time.perf_counter()
                 with socket.create_connection((target, port), timeout=timeout):
                     elapsed = (time.perf_counter() - t0) * 1000  # ms
                     latencies.append(elapsed)
-            except (OSError, socket.timeout):
+            except (TimeoutError, OSError):
                 failures += 1
             except Exception:
                 failures += 1

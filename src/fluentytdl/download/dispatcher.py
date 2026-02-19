@@ -7,13 +7,10 @@
 
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from ..utils.paths import locate_runtime_tool
 from .network_probe import network_probe
 from .strategy import (
     HARSH_STRATEGY,
@@ -24,7 +21,6 @@ from .strategy import (
     DownloadStrategy,
     get_fallback,
 )
-
 
 # ── 常量 ──────────────────────────────────────────────────
 

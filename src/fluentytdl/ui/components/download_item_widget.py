@@ -22,7 +22,7 @@ from qfluentwidgets import (
 
 from ...download.workers import DownloadWorker
 from ...utils.image_loader import ImageLoader
-from .download_card import _format_bytes, _format_time, _strip_ansi, _infer_stream_label
+from .download_card import _format_bytes, _format_time, _infer_stream_label, _strip_ansi
 
 
 class DownloadItemWidget(CardWidget):
