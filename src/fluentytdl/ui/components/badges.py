@@ -18,7 +18,9 @@ def _with_alpha(c: QColor, alpha: int) -> QColor:
     return out
 
 
-def _hsl_adjust(c: QColor, *, hue_shift: float = 0.0, sat_mul: float = 1.0, light_mul: float = 1.0) -> QColor:
+def _hsl_adjust(
+    c: QColor, *, hue_shift: float = 0.0, sat_mul: float = 1.0, light_mul: float = 1.0
+) -> QColor:
     h, s, light, a = cast(tuple[float, float, float, float], c.getHslF())
     if h < 0:
         h = 0.0

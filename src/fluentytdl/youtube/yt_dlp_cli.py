@@ -86,7 +86,7 @@ def prepare_yt_dlp_env(extra_paths: list[str] | None = None) -> dict[str, str]:
     """Prepare environment so yt-dlp.exe can find bundled ffmpeg and JS runtime.
 
     We intentionally prefer PATH injection over less-portable flags.
-    
+
     Args:
         extra_paths: Additional paths to prepend to PATH
     """
@@ -128,7 +128,6 @@ def prepare_yt_dlp_env(extra_paths: list[str] | None = None) -> dict[str, str]:
     return env
 
 
-
 def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     """Convert a subset of yt-dlp Python options to CLI args.
 
@@ -156,12 +155,12 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
         v = ydl_opts.get(key)
         if isinstance(v, (int, float)):
             args += [flag, str(int(v))]
-    
+
     # 外部下载器
     external_downloader = ydl_opts.get("external_downloader")
     if isinstance(external_downloader, str) and external_downloader:
         args += ["--downloader", external_downloader]
-    
+
     # 外部下载器参数
     external_downloader_args = ydl_opts.get("external_downloader_args")
     if isinstance(external_downloader_args, dict):
@@ -171,7 +170,6 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
             elif isinstance(dl_args, str):
                 args += ["--downloader-args", f"{dl_name}:{dl_args}"]
 
-    
     # 下载限速
     ratelimit = ydl_opts.get("ratelimit")
     if isinstance(ratelimit, (int, float)) and ratelimit > 0:
@@ -210,6 +208,7 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
         # Example (python API):
         # {"youtube": {"player_client": ["android,ios"], "player_skip": ["js,configs,hls"]}}
         from loguru import logger
+
         logger.debug("[CLI] extractor_args 输入: {}", extractor_args)
         for ie_key, ie_args in extractor_args.items():
             if not ie_key:
@@ -265,11 +264,11 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
 
     if ydl_opts.get("addmetadata") is True:
         args += ["--add-metadata"]
-    
+
     # 封面缩略图下载
     if ydl_opts.get("writethumbnail") is True:
         args += ["--write-thumbnail"]
-    
+
     # 转换封面格式（用于嵌入）
     convert_thumbnail_format = ydl_opts.get("convert_thumbnail")
     if isinstance(convert_thumbnail_format, str) and convert_thumbnail_format:
@@ -279,41 +278,47 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     postprocessors = ydl_opts.get("postprocessors")
     if isinstance(postprocessors, list):
         has_embed_metadata = False
-        
+
         for pp in postprocessors:
             if not isinstance(pp, dict):
                 continue
             key = str(pp.get("key") or "").strip()
-            
+
             # 音频提取
             if key == "FFmpegExtractAudio":
                 codec = str(pp.get("preferredcodec") or "mp3").strip() or "mp3"
                 quality = str(pp.get("preferredquality") or "192").strip() or "192"
-                args += ["--extract-audio", "--audio-format", codec, "--audio-quality", f"{quality}K"]
-            
+                args += [
+                    "--extract-audio",
+                    "--audio-format",
+                    codec,
+                    "--audio-quality",
+                    f"{quality}K",
+                ]
+
             # 封面嵌入 - 注意：现在由外置工具处理，yt-dlp 只负责下载封面
             elif key == "EmbedThumbnail":
                 # 不再使用 yt-dlp 内置的封面嵌入，改用外置 AtomicParsley/FFmpeg
                 pass
-            
+
             # 元数据嵌入
             elif key == "FFmpegMetadata":
                 has_embed_metadata = True
-            
+
             # 封面格式转换（备用方式）
             elif key == "FFmpegThumbnailsConvertor":
                 fmt = str(pp.get("format") or "jpg").strip()
                 if fmt and "--convert-thumbnails" not in args:
                     args += ["--convert-thumbnails", fmt]
-        
+
         # 注意：封面嵌入现在由外置工具 (AtomicParsley/FFmpeg) 处理
         # yt-dlp 只负责下载封面（通过 writethumbnail 选项）
         # 不再添加 --embed-thumbnail 参数
-        
+
         # 添加元数据嵌入参数
         if has_embed_metadata:
             args += ["--embed-metadata"]
-    
+
     # 后处理器参数（如 loudnorm 音量标准化）
     postprocessor_args = ydl_opts.get("postprocessor_args")
     if isinstance(postprocessor_args, dict):
@@ -325,50 +330,50 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
                 args += ["--postprocessor-args", f"{pp_name}:{pp_args}"]
 
     # ========== 字幕相关参数 ==========
-    
+
     # 写入字幕
     if ydl_opts.get("writesubtitles"):
         args += ["--write-sub"]
     elif ydl_opts.get("writesubtitles") is False:
         # 显式禁用：覆盖外部 yt-dlp 配置中可能存在的 --write-sub
         args += ["--no-write-sub"]
-    
+
     # 写入自动字幕
     if ydl_opts.get("writeautomaticsub"):
         args += ["--write-auto-sub"]
     elif ydl_opts.get("writeautomaticsub") is False:
         # 显式禁用：覆盖外部 yt-dlp 配置中可能存在的 --write-auto-sub
         args += ["--no-write-auto-sub"]
-    
+
     # 字幕语言
     subtitleslangs = ydl_opts.get("subtitleslangs")
     if isinstance(subtitleslangs, list) and subtitleslangs:
         args += ["--sub-langs", ",".join(subtitleslangs)]
     elif isinstance(subtitleslangs, str) and subtitleslangs:
         args += ["--sub-langs", subtitleslangs]
-    
+
     # 嵌入字幕
     if ydl_opts.get("embedsubtitles"):
         args += ["--embed-subs"]
-    
+
     # 字幕格式转换
     convert_subs = ydl_opts.get("convertsubtitles")
     if isinstance(convert_subs, str) and convert_subs:
         args += ["--convert-subs", convert_subs]
 
     # ========== 片段下载参数 ==========
-    
+
     # 下载片段
     download_sections = ydl_opts.get("download_sections")
     if isinstance(download_sections, str) and download_sections:
         args += ["--download-sections", download_sections]
-    
+
     # 强制关键帧切割
     if ydl_opts.get("force_keyframes_at_cuts"):
         args += ["--force-keyframes-at-cuts"]
 
     # ========== SponsorBlock 参数 ==========
-    
+
     # 移除片段
     sponsorblock_remove = ydl_opts.get("sponsorblock_remove")
     if isinstance(sponsorblock_remove, list) and sponsorblock_remove:
@@ -376,7 +381,7 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
             args += ["--sponsorblock-remove", cat]
     elif isinstance(sponsorblock_remove, str) and sponsorblock_remove:
         args += ["--sponsorblock-remove", sponsorblock_remove]
-    
+
     # 标记片段
     sponsorblock_mark = ydl_opts.get("sponsorblock_mark")
     if isinstance(sponsorblock_mark, list) and sponsorblock_mark:
@@ -384,7 +389,7 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
             args += ["--sponsorblock-mark", cat]
     elif isinstance(sponsorblock_mark, str) and sponsorblock_mark:
         args += ["--sponsorblock-mark", sponsorblock_mark]
-    
+
     # 嵌入章节
     if ydl_opts.get("embed_chapters"):
         args += ["--embed-chapters"]

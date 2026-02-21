@@ -25,9 +25,9 @@ if sys.platform == "win32":
     except (ImportError, OSError):
         pass
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QFont  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
 def main() -> None:
@@ -69,9 +69,10 @@ def main() -> None:
     # Import UI after QApplication is created to avoid triggering Qt font operations
     # during module import (which can cause QFont warnings if done before app exists).
     # from fluentytdl.ui.main_window import MainWindow
-    from fluentytdl.ui.reimagined_main_window import MainWindow
-    from fluentytdl.core.config_manager import config_manager
     import threading
+
+    from fluentytdl.core.config_manager import config_manager
+    from fluentytdl.ui.reimagined_main_window import MainWindow
 
     # 2. 创建主窗口
     window = MainWindow()
@@ -80,13 +81,15 @@ def main() -> None:
     # === 3. 在后台线程中启动 POT Provider 服务 (完全不阻塞主界面) ===
     def start_pot_service_thread():
         import time
+
         time.sleep(1)  # 延迟 1 秒（从3秒改为1秒，减少等待时间）
-        
+
         try:
             if config_manager.get("pot_provider_enabled", True):
-                from fluentytdl.youtube.pot_manager import pot_manager
                 from loguru import logger
-                
+
+                from fluentytdl.youtube.pot_manager import pot_manager
+
                 # 尝试启动服务（带重试）
                 for attempt in range(3):
                     if pot_manager.start_server():
@@ -100,10 +103,11 @@ def main() -> None:
         except Exception as e:
             try:
                 from loguru import logger
+
                 logger.warning(f"POT Provider 服务启动异常: {e}")
-            except:
+            except Exception:
                 pass
-    
+
     # 在后台线程启动 POT 服务
     pot_thread = threading.Thread(target=start_pot_service_thread, daemon=True)
     pot_thread.start()
@@ -111,22 +115,26 @@ def main() -> None:
     # === 4. Cookie Sentinel: 启动时静默预提取 (Best-Effort) ===
     def start_cookie_sentinel_thread():
         import time
+
         time.sleep(2)  # 延迟 2 秒，不阻塞主界面
-        
+
         try:
             from fluentytdl.auth.cookie_sentinel import cookie_sentinel
+
             cookie_sentinel.silent_refresh_on_startup()
         except Exception as e:
             try:
                 from loguru import logger
-                logger.debug(f"Cookie Sentinel 启动失败（预期行为）: {e}")
-            except:
-                pass
-    
-  # 在后台线程启动 Cookie Sentinel
-    cookie_thread = threading.Thread(target=start_cookie_sentinel_thread, daemon=True, name="CookieSentinel-Startup")
-    cookie_thread.start()
 
+                logger.debug(f"Cookie Sentinel 启动失败（预期行为）: {e}")
+            except Exception:
+                pass
+
+    # 在后台线程启动 Cookie Sentinel
+    cookie_thread = threading.Thread(
+        target=start_cookie_sentinel_thread, daemon=True, name="CookieSentinel-Startup"
+    )
+    cookie_thread.start()
 
     # 4. 进入事件循环
     exit_code = app.exec()
@@ -134,6 +142,7 @@ def main() -> None:
     # === 5. 停止 POT Provider 服务 ===
     try:
         from fluentytdl.youtube.pot_manager import pot_manager
+
         pot_manager.stop_server()
     except Exception:
         pass

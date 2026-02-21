@@ -24,7 +24,7 @@ class YtDlpAuthOptions:
     """Authentication inputs.
 
     Priority: cookies_file (直接指定) > AuthService (统一管理).
-    
+
     Note: cookies_from_browser 已废弃，所有浏览器 Cookie 通过 AuthService 处理。
     """
 
@@ -123,11 +123,11 @@ class YoutubeService:
             # and we lose the real failure reason (e.g. cookies required).
             "ignoreerrors": False,
             # Anti-blocking
-                # Anti-blocking
-                # NOTE: Do NOT force youtube "player_client" simulation via extractor_args.
-                # Some videos may return an incomplete/empty format list under android/ios
-                # simulation, causing "Requested format is not available".
-                # Let yt-dlp choose the most stable default (web) extractor behavior.
+            # Anti-blocking
+            # NOTE: Do NOT force youtube "player_client" simulation via extractor_args.
+            # Some videos may return an incomplete/empty format list under android/ios
+            # simulation, causing "Requested format is not available".
+            # Let yt-dlp choose the most stable default (web) extractor behavior.
             # Random delay for batch/playlist
             "sleep_interval": int(anti.sleep_interval_min),
             "max_sleep_interval": int(anti.sleep_interval_max),
@@ -136,8 +136,45 @@ class YoutubeService:
             "retries": int(net.retries),
             "fragment_retries": int(net.fragment_retries),
             # Download output
-            "outtmpl": str(Path(download_dir) / "%(title)s.%(ext)s") if download_dir else "%(title)s.%(ext)s",
+            "outtmpl": str(Path(download_dir) / "%(title)s.%(ext)s")
+            if download_dir
+            else "%(title)s.%(ext)s",
         }
+
+        # 音频偏好语言注入 (Multi-Language Audio Track support)
+        # 例如: lang:orig, lang:en, res, br
+        pref_langs = config_manager.get("preferred_audio_languages")
+
+        fallback_langs = []
+        if isinstance(pref_langs, list) and len(pref_langs) > 0:
+            for lang in pref_langs:
+                lang = str(lang).strip().lower()
+                if not lang:
+                    continue
+                # yt-dlp 约定 orig 意味着最佳匹配或原始音轨
+                fallback_langs.append(f"lang:{lang}")
+
+            # 特殊处理：如果用户选了任何中文分支，添加几个别名降级以防漏网
+            if any("zh" in x for x in fallback_langs):
+                if "lang:zh-hans" in fallback_langs and "lang:zh-cn" not in fallback_langs:
+                    fallback_langs.append("lang:zh-cn")
+                    fallback_langs.append("lang:zh")
+                if "lang:zh-hant" in fallback_langs and "lang:zh-tw" not in fallback_langs:
+                    fallback_langs.append("lang:zh-tw")
+                    if "lang:zh" not in fallback_langs:
+                        fallback_langs.append("lang:zh")
+
+            # 如果列表中完全没有 orig 也没有 en，我们在末尾强制加一个 default兜底
+            if "lang:orig" not in fallback_langs:
+                fallback_langs.append("lang:orig")
+            if "lang:en" not in fallback_langs:
+                fallback_langs.append("lang:en")
+        else:
+            # 默认兜底
+            fallback_langs = ["lang:orig", "lang:en"]
+
+        # 组装最终 Sort 字符串列表
+        ydl_opts["format_sort"] = fallback_langs + ["res", "br", "fps", "acodec"]
 
         self._maybe_configure_youtube_js_runtime(ydl_opts)
 
@@ -161,7 +198,11 @@ class YoutubeService:
             # manual http/socks5
             if proxy_url:
                 lower = proxy_url.lower()
-                if lower.startswith("http://") or lower.startswith("https://") or lower.startswith("socks5://"):
+                if (
+                    lower.startswith("http://")
+                    or lower.startswith("https://")
+                    or lower.startswith("socks5://")
+                ):
                     ydl_opts["proxy"] = proxy_url
                 else:
                     scheme = "socks5" if proxy_mode == "socks5" else "http"
@@ -177,7 +218,7 @@ class YoutubeService:
 
         # 1. 检查 auth options 中是否直接指定了 cookie 文件（向后兼容）
         direct_cookiefile = (auth.cookies_file or "").strip() or None
-        
+
         if direct_cookiefile and os.path.exists(direct_cookiefile):
             # 直接指定的 cookie 文件优先
             if self._is_probably_json_cookie_file(direct_cookiefile):
@@ -204,20 +245,20 @@ class YoutubeService:
             # 2. 通过 Cookie Sentinel 获取统一的 bin/cookies.txt
             try:
                 from ..auth.cookie_sentinel import cookie_sentinel
-                
+
                 sentinel_cookie_file = cookie_sentinel.get_cookie_file_path()
-                
+
                 if cookie_sentinel.exists:
                     yt_cookie_count = self._count_youtube_related_cookies(sentinel_cookie_file)
                     if yt_cookie_count > 0:
                         cookiefile = sentinel_cookie_file
                         has_valid_cookie = True
-                        
+
                         # 显示状态信息
                         age = cookie_sentinel.age_minutes
                         age_str = f"{int(age)}分钟前" if age is not None else "未知"
                         status_emoji = "⚠️" if cookie_sentinel.is_stale else "✅"
-                        
+
                         self._emit_log(
                             "info",
                             f"{status_emoji} Cookie Sentinel: {cookie_sentinel.get_status_info()['source']} "
@@ -233,14 +274,14 @@ class YoutubeService:
                         "info",
                         "Cookie Sentinel 文件不存在，将使用无 Cookie 模式下载（可能受限）",
                     )
-                    
+
             except Exception as e:
                 self._emit_log("warning", f"Cookie Sentinel 获取失败: {e}")
-        
+
         # 设置 cookiefile 到 ydl_opts
         if cookiefile:
             ydl_opts["cookiefile"] = cookiefile
-        
+
         self._emit_log(
             "debug",
             f"[Cookie] Path={cookiefile or 'None'}, Valid={has_valid_cookie}",
@@ -258,7 +299,9 @@ class YoutubeService:
                     "player_skip": ["js,configs,hls"],
                 }
             }
-            self._emit_log("warning", "未检测到有效 Cookies，启用 Android/iOS 模拟（可能缺失部分高画质）")
+            self._emit_log(
+                "warning", "未检测到有效 Cookies，启用 Android/iOS 模拟（可能缺失部分高画质）"
+            )
         else:
             self._emit_log("info", "🚀 Cookies 模式激活：使用 Web 默认客户端获取更完整的格式列表")
 
@@ -269,25 +312,27 @@ class YoutubeService:
         if config_manager.get("pot_provider_enabled", True):
             try:
                 from .pot_manager import pot_manager
-                
+
                 if pot_manager.is_running():
                     pot_extractor_args = pot_manager.get_extractor_args()
                     if pot_extractor_args:
                         # pot_extractor_args 格式: "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416"
                         # 需要解析并注入到 extractor_args
-                        extractor_args = cast(dict[str, Any], ydl_opts.setdefault("extractor_args", {}))
-                        
+                        extractor_args = cast(
+                            dict[str, Any], ydl_opts.setdefault("extractor_args", {})
+                        )
+
                         # 解析 "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416"
                         if ":" in pot_extractor_args:
                             ie_key, args_str = pot_extractor_args.split(":", 1)
                             pot_args: dict[str, Any] = extractor_args.setdefault(ie_key, {})
-                            
+
                             # 解析 "base_url=http://127.0.0.1:4416"
                             for part in args_str.split(";"):
                                 if "=" in part:
                                     k, v = part.split("=", 1)
                                     pot_args[k] = [v]
-                            
+
                             pot_injected = True
                             self._emit_log(
                                 "info",
@@ -334,9 +379,13 @@ class YoutubeService:
                 if Path(ffmpeg_path).exists():
                     ydl_opts["ffmpeg_location"] = ffmpeg_path
                 else:
-                    self._emit_log("warning", f"FFmpeg 自定义路径无效，已忽略并回退自动检测: {ffmpeg_path}")
+                    self._emit_log(
+                        "warning", f"FFmpeg 自定义路径无效，已忽略并回退自动检测: {ffmpeg_path}"
+                    )
             except Exception:
-                self._emit_log("warning", f"FFmpeg 自定义路径无效，已忽略并回退自动检测: {ffmpeg_path}")
+                self._emit_log(
+                    "warning", f"FFmpeg 自定义路径无效，已忽略并回退自动检测: {ffmpeg_path}"
+                )
         elif is_frozen():
             bundled_ffmpeg = find_bundled_executable(
                 # New layout (preferred): dist/_internal/ffmpeg/ffmpeg.exe
@@ -350,32 +399,31 @@ class YoutubeService:
                 self._emit_log("info", f"已启用内置 FFmpeg: {bundled_ffmpeg}")
 
         # === Phase 2: 核心下载层集成 ===
-        
+
         # 并发分片数
         concurrent_fragments = config_manager.get("concurrent_fragments", 4)
         if concurrent_fragments and concurrent_fragments > 1:
             ydl_opts["concurrent_fragment_downloads"] = int(concurrent_fragments)
-        
+
         # 下载限速
         rate_limit = str(config_manager.get("rate_limit") or "").strip()
         if rate_limit:
             ydl_opts["ratelimit"] = rate_limit
 
-
         # === 后处理：封面嵌入 & 元数据嵌入 ===
         embed_thumbnail = config_manager.get("embed_thumbnail", True)
         embed_metadata = config_manager.get("embed_metadata", True)
-        
+
         if embed_thumbnail or embed_metadata:
             postprocessors = ydl_opts.setdefault("postprocessors", [])
-            
+
             # 封面嵌入：只下载缩略图，不让 yt-dlp 嵌入（由我们的后处理器处理）
             if embed_thumbnail:
                 ydl_opts["writethumbnail"] = True
                 # 转换缩略图格式为 jpg（兼容性最佳）
                 ydl_opts["convert_thumbnail"] = "jpg"
                 # 注意：不再添加 EmbedThumbnail 后处理器，由外部 thumbnail_embedder 处理
-            
+
             # 元数据嵌入
             if embed_metadata:
                 postprocessors.append({"key": "FFmpegMetadata"})
@@ -383,17 +431,24 @@ class YoutubeService:
         # === SponsorBlock 广告跳过 ===
         sponsorblock_enabled = config_manager.get("sponsorblock_enabled", False)
         if sponsorblock_enabled:
-            categories = config_manager.get("sponsorblock_categories", ["sponsor", "selfpromo", "interaction"])
+            categories = config_manager.get(
+                "sponsorblock_categories", ["sponsor", "selfpromo", "interaction"]
+            )
             action = config_manager.get("sponsorblock_action", "remove")
-            
+
             if categories:  # 确保有选中的类别
                 if action == "mark":
                     ydl_opts["sponsorblock_mark"] = categories
-                    self._emit_log("info", f"🚫 SponsorBlock 已启用: 将标记以下类别为章节: {', '.join(categories)}")
+                    self._emit_log(
+                        "info",
+                        f"🚫 SponsorBlock 已启用: 将标记以下类别为章节: {', '.join(categories)}",
+                    )
                 else:
                     # 默认为 remove
                     ydl_opts["sponsorblock_remove"] = categories
-                    self._emit_log("info", f"🚫 SponsorBlock 已启用: 将移除以下类别: {', '.join(categories)}")
+                    self._emit_log(
+                        "info", f"🚫 SponsorBlock 已启用: 将移除以下类别: {', '.join(categories)}"
+                    )
 
         return ydl_opts
 
@@ -595,11 +650,24 @@ class YoutubeService:
 
     # VR 相关关键词 (用于标题/描述检测)
     _VR_KEYWORDS = (
-        "vr180", "vr360", "vr 180", "vr 360",
-        "180°", "360°", "180vr", "360vr",
-        "3d vr", "vr video", "vr体验", "vr视频",
-        "sbs", "side by side", "over under", "ou3d",
-        "stereoscopic", "immersive",
+        "vr180",
+        "vr360",
+        "vr 180",
+        "vr 360",
+        "180°",
+        "360°",
+        "180vr",
+        "360vr",
+        "3d vr",
+        "vr video",
+        "vr体验",
+        "vr视频",
+        "sbs",
+        "side by side",
+        "over under",
+        "ou3d",
+        "stereoscopic",
+        "immersive",
     )
 
     def _is_vr_video(self, info: dict[str, Any]) -> bool:
@@ -669,9 +737,7 @@ class YoutubeService:
         text = f"{title} {description}"
 
         # 标题/描述辅助信号
-        title_hints_sbs = any(
-            kw in text for kw in ("sbs", "side by side", "side-by-side")
-        )
+        title_hints_sbs = any(kw in text for kw in ("sbs", "side by side", "side-by-side"))
         title_hints_vr180 = "vr180" in text or "vr 180" in text or "180°" in text
         title_hints_360 = any(
             kw in text for kw in ("360°", "vr360", "vr 360", "360vr", "360 video")
@@ -679,8 +745,14 @@ class YoutubeService:
         title_hints_stereo = any(
             kw in text
             for kw in (
-                "3d", "stereo", "stereoscopic", "over under", "over-under",
-                "ou3d", "top bottom", "top-bottom",
+                "3d",
+                "stereo",
+                "stereoscopic",
+                "over under",
+                "over-under",
+                "ou3d",
+                "top bottom",
+                "top-bottom",
             )
         )
 
@@ -783,9 +855,7 @@ class YoutubeService:
             primary_proj = str(max_height_fmt.get("__vr_projection") or "unknown")
             primary_stereo = str(max_height_fmt.get("__vr_stereo_mode") or "unknown")
 
-        has_stereo_3d = any(
-            k.startswith("stereo") for k in stereo_modes if stereo_modes[k] > 0
-        )
+        has_stereo_3d = any(k.startswith("stereo") for k in stereo_modes if stereo_modes[k] > 0)
         has_mono = stereo_modes.get("mono", 0) > 0
 
         summary = {
@@ -913,9 +983,7 @@ class YoutubeService:
 
         if added_count > 0:
             # 按分辨率排序
-            existing_formats.sort(
-                key=lambda f: (f.get("height") or 0, f.get("width") or 0)
-            )
+            existing_formats.sort(key=lambda f: (f.get("height") or 0, f.get("width") or 0))
             info["formats"] = existing_formats
 
             # 记录 VR 专属格式 ID (仅 android_vr 有，web 没有)
@@ -956,7 +1024,9 @@ class YoutubeService:
 
         def _do_extract(opts: dict[str, Any]) -> dict[str, Any]:
             self._emit_log("info", f"[EXE] 开始解析 URL: {url}")
-            info = run_dump_single_json(url, opts, extra_args=["--no-playlist"], cancel_event=cancel_event)
+            info = run_dump_single_json(
+                url, opts, extra_args=["--no-playlist"], cancel_event=cancel_event
+            )
             if info is None or info is False:
                 raise RuntimeError(
                     "解析失败：yt-dlp 未返回有效元数据（可能被要求登录/验证）。"
@@ -1122,9 +1192,7 @@ class YoutubeService:
                 cancel_event=cancel_event,
             )
             if info is None or info is False:
-                raise RuntimeError(
-                    "VR 解析失败：yt-dlp 未返回有效元数据。"
-                )
+                raise RuntimeError("VR 解析失败：yt-dlp 未返回有效元数据。")
             if not isinstance(info, dict):
                 raise RuntimeError(f"VR yt-dlp returned unexpected type: {type(info)!r}")
 
@@ -1158,7 +1226,9 @@ class YoutubeService:
             self._emit_log("error", f"🥽 [VR] 解析失败: {msg}")
             raise RuntimeError(f"VR 解析失败: {msg}") from exc
 
-    async def extract_info(self, url: str, options: YoutubeServiceOptions | None = None) -> dict[str, Any]:
+    async def extract_info(
+        self, url: str, options: YoutubeServiceOptions | None = None
+    ) -> dict[str, Any]:
         """Async metadata extraction (safe for UI thread)."""
 
         return await asyncio.to_thread(self.extract_info_sync, url, options)
@@ -1262,7 +1332,9 @@ class YoutubeService:
         """
 
         lower = (error_text or "").lower()
-        return "youtubetab:skip=authcheck" in lower or ("authcheck" in lower and "youtubetab" in lower)
+        return "youtubetab:skip=authcheck" in lower or (
+            "authcheck" in lower and "youtubetab" in lower
+        )
 
     @staticmethod
     def _with_youtubetab_skip_authcheck(ydl_opts: dict[str, Any]) -> dict[str, Any]:
@@ -1284,7 +1356,9 @@ class YoutubeService:
         youtubetab_args = extractor_args.get("youtubetab")
         if isinstance(youtubetab_args, dict):
             existing = youtubetab_args.get("skip")
-            if isinstance(existing, (list, tuple)) and any(str(x).strip().lower() == "authcheck" for x in existing):
+            if isinstance(existing, (list, tuple)) and any(
+                str(x).strip().lower() == "authcheck" for x in existing
+            ):
                 return ydl_opts
             if isinstance(existing, str) and "authcheck" in existing.lower():
                 return ydl_opts

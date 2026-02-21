@@ -16,7 +16,7 @@ from qfluentwidgets import (
 
 class SubtitleDownloadPage(QWidget):
     """Subtitle download page
-    
+
     Allows users to paste links and download subtitles specifically.
     """
 
@@ -25,7 +25,7 @@ class SubtitleDownloadPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("subtitleDownloadPage")
-        
+
         self.setStyleSheet("""
             #subtitleDownloadPage {
                 background-color: #F5F5F5;
@@ -65,9 +65,7 @@ class SubtitleDownloadPage(QWidget):
         self.cardLayout.setContentsMargins(20, 20, 20, 20)
         self.cardLayout.setSpacing(15)
 
-        self.instructionLabel = BodyLabel(
-            "在此处粘贴 YouTube 视频链接以下载字幕", self
-        )
+        self.instructionLabel = BodyLabel("在此处粘贴 YouTube 视频链接以下载字幕", self)
         self.cardLayout.addWidget(self.instructionLabel)
 
         # Input row

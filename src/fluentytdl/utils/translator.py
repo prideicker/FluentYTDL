@@ -19,11 +19,20 @@ def translate_error(error: BaseException) -> dict:
     raw = _strip_ansi(raw_original)
     err_msg = raw.lower()
 
+    from .error_parser import generate_issue_url, parse_ytdlp_error
+
+    friendly_title, friendly_content = parse_ytdlp_error(raw)
+
+    issue_url = generate_issue_url(
+        friendly_title if friendly_title != "解析或下载失败" else "发生未知错误", raw
+    )
+
     result = {
-        "title": "发生未知错误",
-        "content": f"错误详情: {raw[:200]}..." if len(raw) > 200 else f"错误详情: {raw}",
+        "title": friendly_title if friendly_title != "解析或下载失败" else "发生未知错误",
+        "content": friendly_content,
         "suggestion": "1. 请重试\n2. 查看日志文件\n3. 将此错误反馈给开发者",
         "raw_error": raw,
+        "issue_url": issue_url,
     }
 
     # 0) 链接无效/不支持
@@ -62,7 +71,7 @@ def translate_error(error: BaseException) -> dict:
         or "forbidden" in err_msg
     ):
         result["title"] = "访问被拒绝 (403/风控)"
-        result["content"] = "YouTube 拒绝了请求，通常是因为 IP 被风控或 Cookies 失效。"
+        result["content"] = "YouTube 拒绝了请求，通常是因为 IP 被风控或面临人机验证。"
         result["suggestion"] = (
             "1. 【推荐】更新 Cookies（设置 -> 核心组件 -> Cookies 来源）。\n"
             "2. 尝试更换代理节点（建议使用非热门节点）。\n"
@@ -127,5 +136,9 @@ def translate_error(error: BaseException) -> dict:
         result["content"] = "FFmpeg 在处理过程中发生错误。"
         result["suggestion"] = "1. 查看日志文件。\n2. 尝试更换格式后重试。"
         return result
+
+    # 8) From our global error parser
+    if friendly_title != "解析或下载失败":
+        result["suggestion"] = ""
 
     return result

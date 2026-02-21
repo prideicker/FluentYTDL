@@ -62,12 +62,7 @@ def collect_all() -> None:
         print(f"  ✓ 已保存: {license_file.name}")
 
         # 汇总
-        all_licenses.append(
-            f"{'=' * 60}\n"
-            f"{name}\n"
-            f"{'=' * 60}\n\n"
-            f"{content}\n"
-        )
+        all_licenses.append(f"{'=' * 60}\n{name}\n{'=' * 60}\n\n{content}\n")
 
     # 生成汇总文件
     summary = LICENSES_DIR / "THIRD_PARTY_LICENSES.txt"
@@ -80,7 +75,7 @@ def collect_all() -> None:
         + "\n".join(f"  - {name}" for name in LICENSE_SOURCES.keys())
         + "\n\n"
         + "\n".join(all_licenses),
-        encoding="utf-8"
+        encoding="utf-8",
     )
     print(f"\n✓ 汇总文件已生成: {summary}")
 

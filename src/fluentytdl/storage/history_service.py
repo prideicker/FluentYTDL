@@ -7,6 +7,7 @@
 - 按 video_id 分组同名文件
 - 不做文件指纹、不做智能搜索
 """
+
 from __future__ import annotations
 
 import json
@@ -40,23 +41,25 @@ def _notify_added(record) -> None:
 # 数据模型
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HistoryRecord:
     """单条下载历史"""
-    video_id: str                       # YouTube video ID
-    url: str                            # 原始链接
-    title: str                          # 视频标题
-    output_path: str                    # 最终输出路径
-    file_size: int = 0                  # 文件大小 (bytes)
-    thumbnail_url: str = ""             # 缩略图 URL
-    duration: int = 0                   # 视频时长 (秒)
-    format_note: str = ""               # 格式备注 (如 "1080p MP4")
+
+    video_id: str  # YouTube video ID
+    url: str  # 原始链接
+    title: str  # 视频标题
+    output_path: str  # 最终输出路径
+    file_size: int = 0  # 文件大小 (bytes)
+    thumbnail_url: str = ""  # 缩略图 URL
+    duration: int = 0  # 视频时长 (秒)
+    format_note: str = ""  # 格式备注 (如 "1080p MP4")
     download_time: float = field(default_factory=time.time)  # 下载完成时间戳
-    file_exists: bool = True            # 文件是否存在（运行时计算）
+    file_exists: bool = True  # 文件是否存在（运行时计算）
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        d.pop("file_exists", None)      # 不持久化运行时字段
+        d.pop("file_exists", None)  # 不持久化运行时字段
         return d
 
     @classmethod
@@ -69,6 +72,7 @@ class HistoryRecord:
 @dataclass
 class HistoryGroup:
     """同一视频的多次下载分组"""
+
     video_id: str
     title: str
     records: list[HistoryRecord] = field(default_factory=list)
@@ -98,6 +102,7 @@ def extract_video_id(url: str) -> str:
 # ---------------------------------------------------------------------------
 # HistoryService
 # ---------------------------------------------------------------------------
+
 
 class HistoryService:
     """下载历史管理（全局单例）"""
@@ -254,8 +259,7 @@ class HistoryService:
         """清理所有文件不存在的记录"""
         before = len(self._records)
         self._records = [
-            r for r in self._records
-            if r.output_path and os.path.exists(r.output_path)
+            r for r in self._records if r.output_path and os.path.exists(r.output_path)
         ]
         removed = before - len(self._records)
         if removed:

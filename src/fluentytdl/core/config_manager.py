@@ -45,57 +45,46 @@ class ConfigManager:
         # auto: prefer deno if available (default), else try node/bun/quickjs
         "js_runtime": "auto",  # auto / deno / node / bun / quickjs
         "js_runtime_path": "",  # optional absolute path to runtime executable
-
         # Optional yt-dlp.exe override path
         # Empty means auto (prefer bundled _internal/yt-dlp/yt-dlp.exe, else PATH)
         "yt_dlp_exe_path": "",
         "max_concurrent_downloads": 3,
-
         # UI/behavior
         # Whether to auto-detect YouTube URLs from clipboard.
         "clipboard_auto_detect": False,
-
         # Download list behavior
         # Deletion Policy:
         # - KeepFiles: Only remove task from list, keep all files.
         # - DeleteFiles: Silently delete source/cache files based on task status.
         # - AlwaysAsk: Prompt user every time (Legacy behavior).
         "deletion_policy": "AlwaysAsk",
-
         # Legacy keys (kept for migration or fallback, but effectively deprecated by deletion_policy)
         "remove_task_ask_delete_source": False,
         "remove_task_ask_delete_cache": False,
         "remove_task_ask_enable_feature": True,
-
         # yt-dlp / playlist parsing
         # yt-dlp sometimes refuses to enumerate some public playlists unless you skip authcheck.
         # Official suggestion: --extractor-args youtubetab:skip=authcheck
         # Default OFF to avoid surprising behavior changes.
         "playlist_skip_authcheck": False,
-        
         # Dependency update source
         # github: official github api/releases
         # ghproxy: use ghproxy mirror
         "update_source": "github",
-
         # Whether to check for component updates (yt-dlp, ffmpeg, etc.) on startup
         # If true, checks once every 24 hours.
         "check_updates_on_startup": True,
-        
         # Timestamp of last automatic update check
         "last_update_check": 0,
-        
         # Whether the user has seen the welcome guide (wizard)
         "has_shown_welcome_guide": False,
         # Version when user last saw the welcome guide (for version-aware re-trigger)
         "welcome_guide_shown_for_version": "",
-        
         # 封面嵌入设置
         # embed_thumbnail: 是否启用封面嵌入功能（全局开关）
         "embed_thumbnail": True,
         # embed_metadata: 是否嵌入元数据（标题、艺术家等）
         "embed_metadata": True,
-        
         # SponsorBlock 设置
         # sponsorblock_enabled: 是否启用 SponsorBlock 广告跳过功能
         "sponsorblock_enabled": False,  # 默认关闭（避免意外修改视频）
@@ -104,7 +93,6 @@ class ConfigManager:
         "sponsorblock_categories": ["sponsor", "selfpromo", "interaction"],
         # sponsorblock_action: 处理动作 - remove: 移除片段, mark: 仅标记为章节
         "sponsorblock_action": "remove",
-        
         # 字幕配置
         "subtitle_enabled": False,  # 是否启用字幕下载（全局开关）
         "subtitle_default_languages": ["zh-Hans", "en"],  # 默认字幕语言优先级
@@ -116,6 +104,10 @@ class ConfigManager:
         "subtitle_remove_ads": False,  # 是否自动移除字幕广告
         "subtitle_fallback_to_english": True,  # 是否回退到英语
         "subtitle_max_languages": 2,  # 最多下载字幕数量
+        # 音频偏好设置
+        # preferred_audio_languages: 首选音轨语言（多选优先级，对于多音轨视频）
+        # 'orig': 优先原音/默认, 'zh-Hans': 中文, 'en': 英文, 'ja': 日语等
+        "preferred_audio_languages": ["orig", "zh-Hans", "en"],
     }
 
     def __new__(cls) -> ConfigManager:
@@ -209,7 +201,7 @@ class ConfigManager:
     def set(self, key: str, value: Any) -> None:
         self.config[key] = value
         self.save()
-    
+
     def get_subtitle_config(self) -> SubtitleConfig:
         """获取字幕配置对象"""
         return SubtitleConfig(
@@ -225,7 +217,7 @@ class ConfigManager:
             fallback_to_english=self.config.get("subtitle_fallback_to_english", True),
             max_languages=self.config.get("subtitle_max_languages", 2),
         )
-    
+
     def set_subtitle_config(self, config: SubtitleConfig) -> None:
         """设置字幕配置并保存"""
         self.config["subtitle_enabled"] = config.enabled

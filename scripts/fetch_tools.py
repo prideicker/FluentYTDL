@@ -16,7 +16,6 @@ import argparse
 import hashlib
 import io
 import json
-import os
 import shutil
 import ssl
 import sys
@@ -46,6 +45,7 @@ TARGET_DIR = ROOT / "assets" / "bin"
 # ============================================================================
 # 网络工具
 # ============================================================================
+
 
 def create_ssl_context() -> ssl.SSLContext:
     """创建 SSL 上下文"""
@@ -81,11 +81,15 @@ def download_file(
                     if total:
                         pct = downloaded * 100 // total
                         bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
-                        print(f"\r  [{bar}] {pct}% ({downloaded:,}/{total:,} bytes)", end="", flush=True)
+                        print(
+                            f"\r  [{bar}] {pct}% ({downloaded:,}/{total:,} bytes)",
+                            end="",
+                            flush=True,
+                        )
 
         print()  # 换行
     except (HTTPError, URLError) as e:
-        raise RuntimeError(f"下载失败: {url} - {e}")
+        raise RuntimeError(f"下载失败: {url} - {e}") from e
 
 
 def verify_sha256(file_path: Path, expected_hash: str) -> bool:
@@ -97,7 +101,7 @@ def verify_sha256(file_path: Path, expected_hash: str) -> bool:
     actual = sha256.hexdigest().upper()
     expected = expected_hash.upper()
     if actual != expected:
-        print(f"  ❌ 校验失败!")
+        print("  ❌ 校验失败!")
         print(f"     期望: {expected[:32]}...")
         print(f"     实际: {actual[:32]}...")
         return False
@@ -108,21 +112,25 @@ def verify_sha256(file_path: Path, expected_hash: str) -> bool:
 def github_api(endpoint: str, timeout: int = 30) -> dict:
     """调用 GitHub API"""
     url = f"https://api.github.com{endpoint}"
-    req = Request(url, headers={
-        "User-Agent": "FluentYTDL-Builder/1.0",
-        "Accept": "application/vnd.github.v3+json",
-    })
+    req = Request(
+        url,
+        headers={
+            "User-Agent": "FluentYTDL-Builder/1.0",
+            "Accept": "application/vnd.github.v3+json",
+        },
+    )
     ctx = create_ssl_context()
     try:
         with urlopen(req, context=ctx, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except (HTTPError, URLError) as e:
-        raise RuntimeError(f"GitHub API 调用失败: {url} - {e}")
+        raise RuntimeError(f"GitHub API 调用失败: {url} - {e}") from e
 
 
 # ============================================================================
 # 工具下载函数
 # ============================================================================
+
 
 def fetch_yt_dlp(dest_dir: Path) -> None:
     """获取 yt-dlp"""
@@ -190,7 +198,9 @@ def fetch_ffmpeg(dest_dir: Path) -> None:
             z.extractall(tmp_path)
 
         # 找到 bin 目录
-        extracted_dirs = [d for d in tmp_path.iterdir() if d.is_dir() and d.name.startswith("ffmpeg")]
+        extracted_dirs = [
+            d for d in tmp_path.iterdir() if d.is_dir() and d.name.startswith("ffmpeg")
+        ]
         if not extracted_dirs:
             raise RuntimeError("未找到解压后的 ffmpeg 目录")
 
@@ -220,20 +230,15 @@ def fetch_deno(dest_dir: Path) -> None:
 
     # 查找 Windows zip
     zip_asset = next(
-        (a for a in release["assets"] if "x86_64-pc-windows-msvc.zip" in a["name"]),
-        None
+        (a for a in release["assets"] if "x86_64-pc-windows-msvc.zip" in a["name"]), None
     )
     if not zip_asset:
         raise RuntimeError("未找到 deno Windows zip 资产")
 
     # 查找校验文件
     checksum_asset = next(
-        (a for a in release["assets"] if a["name"] == zip_asset["name"] + ".sha256sum"),
-        None
-    ) or next(
-        (a for a in release["assets"] if a["name"] == zip_asset["name"] + ".sha256"),
-        None
-    )
+        (a for a in release["assets"] if a["name"] == zip_asset["name"] + ".sha256sum"), None
+    ) or next((a for a in release["assets"] if a["name"] == zip_asset["name"] + ".sha256"), None)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -246,7 +251,7 @@ def fetch_deno(dest_dir: Path) -> None:
             checksum_path = tmp_path / "checksum.txt"
             download_file(checksum_asset["browser_download_url"], checksum_path)
             hash_content = checksum_path.read_text(encoding="utf-8").strip()
-            
+
             # deno 的 sha256sum 文件可能有多种格式:
             # 1. "hash  filename"
             # 2. 纯 hash
@@ -262,10 +267,12 @@ def fetch_deno(dest_dir: Path) -> None:
                 if parts:
                     candidate = parts[0]
                     # 验证是否是有效的 SHA256 (64个十六进制字符)
-                    if len(candidate) == 64 and all(c in "0123456789abcdefABCDEF" for c in candidate):
+                    if len(candidate) == 64 and all(
+                        c in "0123456789abcdefABCDEF" for c in candidate
+                    ):
                         expected_hash = candidate
                         break
-            
+
             if expected_hash:
                 if not verify_sha256(zip_path, expected_hash):
                     raise RuntimeError("deno zip 校验失败")
@@ -294,7 +301,7 @@ def fetch_atomicparsley(dest_dir: Path) -> None:
     # 查找 Windows zip
     zip_asset = next(
         (a for a in release["assets"] if "Windows" in a["name"] and a["name"].endswith(".zip")),
-        None
+        None,
     )
     if not zip_asset:
         raise RuntimeError("未找到 AtomicParsley Windows zip 资产")
@@ -335,8 +342,12 @@ def fetch_pot_provider(dest_dir: Path) -> None:
     # 查找 Windows exe
     # 通常命名为: bgutil-pot-windows-x86_64.exe
     exe_asset = next(
-        (a for a in release["assets"] if "windows" in a["name"].lower() and a["name"].endswith(".exe")),
-        None
+        (
+            a
+            for a in release["assets"]
+            if "windows" in a["name"].lower() and a["name"].endswith(".exe")
+        ),
+        None,
     )
     if not exe_asset:
         raise RuntimeError("未找到 POT Provider Windows exe 资产")
@@ -358,10 +369,12 @@ def fetch_pot_provider(dest_dir: Path) -> None:
 # 主入口
 # ============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(description="FluentYTDL 外部工具下载器")
     parser.add_argument(
-        "--force", "-f",
+        "--force",
+        "-f",
         action="store_true",
         help="强制重新下载（忽略已存在的工具）",
     )

@@ -20,7 +20,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 # 修复 Windows 控制台 GBK 编码问题
 # 确保可以正确输出 UTF-8 字符（包括 emoji）
@@ -49,6 +48,7 @@ LICENSES_DIR = ROOT / "licenses"
 # ============================================================================
 # 工具函数
 # ============================================================================
+
 
 def _terminate_processes(exe_names: list[str]) -> None:
     """终止可能占用文件的进程"""
@@ -101,7 +101,7 @@ def sha256_file(file_path: Path) -> str:
 # 版本信息生成
 # ============================================================================
 
-VERSION_INFO_TEMPLATE = '''# UTF-8
+VERSION_INFO_TEMPLATE = """# UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
     filevers=({major}, {minor}, {patch}, 0),
@@ -134,7 +134,7 @@ VSVersionInfo(
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
   ]
 )
-'''
+"""
 
 
 def generate_version_info(
@@ -176,6 +176,7 @@ def generate_version_info(
 # ============================================================================
 # Builder 类
 # ============================================================================
+
 
 class Builder:
     """FluentYTDL 构建器"""
@@ -355,9 +356,7 @@ class Builder:
             before_size = f.stat().st_size
             try:
                 result = subprocess.run(
-                    [str(upx_path), "-q", "--best", str(f)],
-                    capture_output=True,
-                    timeout=60
+                    [str(upx_path), "-q", "--best", str(f)], capture_output=True, timeout=60
                 )
                 if result.returncode == 0:
                     after_size = f.stat().st_size
@@ -385,38 +384,67 @@ class Builder:
         version_file = self._generate_version_file()
 
         cmd = [
-            sys.executable, "-m", "PyInstaller",
-            "--noconfirm", "--clean", "--noconsole",
-            "--name", "FluentYTDL",
+            sys.executable,
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--noconsole",
+            "--name",
+            "FluentYTDL",
             "--onedir",
-            "--contents-directory", "runtime",
-            "--paths", str(ROOT / "src"),
-            "--icon", str(ROOT / "assets" / "logo.ico"),
-            "--version-file", str(version_file),
-            "--add-data", f"{ROOT / 'docs'}{os.pathsep}docs",
+            "--contents-directory",
+            "runtime",
+            "--paths",
+            str(ROOT / "src"),
+            "--icon",
+            str(ROOT / "assets" / "logo.ico"),
+            "--version-file",
+            str(version_file),
+            "--add-data",
+            f"{ROOT / 'docs'}{os.pathsep}docs",
             # 只打包必要的 assets 文件，排除 assets/bin（外部工具由 bundle_tools 单独复制）
-            "--add-data", f"{ROOT / 'assets' / 'logo.ico'}{os.pathsep}assets",
-            "--add-data", f"{ROOT / 'assets' / 'logo.png'}{os.pathsep}assets",
+            "--add-data",
+            f"{ROOT / 'assets' / 'logo.ico'}{os.pathsep}assets",
+            "--add-data",
+            f"{ROOT / 'assets' / 'logo.png'}{os.pathsep}assets",
             # 自动收集所有子模块（推荐方式）
-            "--collect-submodules", "fluentytdl",
-            "--collect-submodules", "rookiepy",
+            "--collect-submodules",
+            "fluentytdl",
+            "--collect-submodules",
+            "rookiepy",
             # 复制二进制文件
-            "--copy-metadata", "rookiepy",
+            "--copy-metadata",
+            "rookiepy",
             # 排除未使用的 PySide6 模块以减小体积
-            "--exclude-module", "PySide6.QtQml",
-            "--exclude-module", "PySide6.QtQuick",
-            "--exclude-module", "PySide6.QtQuickWidgets",
-            "--exclude-module", "PySide6.QtPdf",
-            "--exclude-module", "PySide6.QtPdfWidgets",
-            "--exclude-module", "PySide6.Qt3DCore",
-            "--exclude-module", "PySide6.Qt3DRender",
-            "--exclude-module", "PySide6.QtWebEngine",
-            "--exclude-module", "PySide6.QtWebEngineWidgets",
-            "--exclude-module", "PySide6.QtMultimedia",
-            "--exclude-module", "PySide6.QtBluetooth",
-            "--exclude-module", "PySide6.QtPositioning",
-            "--workpath", str(ROOT / "build"),
-            "--distpath", str(DIST_DIR),
+            "--exclude-module",
+            "PySide6.QtQml",
+            "--exclude-module",
+            "PySide6.QtQuick",
+            "--exclude-module",
+            "PySide6.QtQuickWidgets",
+            "--exclude-module",
+            "PySide6.QtPdf",
+            "--exclude-module",
+            "PySide6.QtPdfWidgets",
+            "--exclude-module",
+            "PySide6.Qt3DCore",
+            "--exclude-module",
+            "PySide6.Qt3DRender",
+            "--exclude-module",
+            "PySide6.QtWebEngine",
+            "--exclude-module",
+            "PySide6.QtWebEngineWidgets",
+            "--exclude-module",
+            "PySide6.QtMultimedia",
+            "--exclude-module",
+            "PySide6.QtBluetooth",
+            "--exclude-module",
+            "PySide6.QtPositioning",
+            "--workpath",
+            str(ROOT / "build"),
+            "--distpath",
+            str(DIST_DIR),
             str(ROOT / "main.py"),
         ]
 
@@ -443,24 +471,40 @@ class Builder:
         version_file = self._generate_version_file()
 
         cmd = [
-            sys.executable, "-m", "PyInstaller",
-            "--noconfirm", "--clean", "--noconsole",
-            "--name", "FluentYTDL",
+            sys.executable,
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--noconsole",
+            "--name",
+            "FluentYTDL",
             "--onefile",
-            "--paths", str(ROOT / "src"),
-            "--icon", str(ROOT / "assets" / "logo.ico"),
-            "--version-file", str(version_file),
-            "--add-data", f"{ROOT / 'docs'}{os.pathsep}docs",
+            "--paths",
+            str(ROOT / "src"),
+            "--icon",
+            str(ROOT / "assets" / "logo.ico"),
+            "--version-file",
+            str(version_file),
+            "--add-data",
+            f"{ROOT / 'docs'}{os.pathsep}docs",
             # 只打包必要的 assets 文件，排除 assets/bin
-            "--add-data", f"{ROOT / 'assets' / 'logo.ico'}{os.pathsep}assets",
-            "--add-data", f"{ROOT / 'assets' / 'logo.png'}{os.pathsep}assets",
+            "--add-data",
+            f"{ROOT / 'assets' / 'logo.ico'}{os.pathsep}assets",
+            "--add-data",
+            f"{ROOT / 'assets' / 'logo.png'}{os.pathsep}assets",
             # 自动收集所有子模块（推荐方式）
-            "--collect-submodules", "fluentytdl",
-            "--collect-submodules", "rookiepy",
+            "--collect-submodules",
+            "fluentytdl",
+            "--collect-submodules",
+            "rookiepy",
             # 复制二进制文件
-            "--copy-metadata", "rookiepy",
-            "--workpath", str(ROOT / "build"),
-            "--distpath", str(DIST_DIR),
+            "--copy-metadata",
+            "rookiepy",
+            "--workpath",
+            str(ROOT / "build"),
+            "--distpath",
+            str(DIST_DIR),
             str(ROOT / "main.py"),
         ]
 
@@ -506,11 +550,12 @@ class Builder:
         else:
             try:
                 import importlib
+
                 py7zr = importlib.import_module("py7zr")
                 with py7zr.SevenZipFile(output_path, "w") as archive:
                     archive.writeall(source_dir, arcname=".")
-            except ImportError:
-                raise RuntimeError("需要安装 py7zr 或系统 7z: pip install py7zr")
+            except ImportError as e:
+                raise RuntimeError("需要安装 py7zr 或系统 7z: pip install py7zr") from e
 
         print(f"✓ 已创建压缩包: {output_path}")
         return output_path
@@ -520,13 +565,14 @@ class Builder:
         iss_file = INSTALLER_DIR / "FluentYTDL.iss"
         if not iss_file.exists():
             raise FileNotFoundError(
-                f"Inno Setup 脚本不存在: {iss_file}\n"
-                "请先创建 installer/FluentYTDL.iss"
+                f"Inno Setup 脚本不存在: {iss_file}\n请先创建 installer/FluentYTDL.iss"
             )
 
         # 查找 Inno Setup 编译器
         iscc_paths = [
-            Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Inno Setup 6" / "ISCC.exe",
+            Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
+            / "Inno Setup 6"
+            / "ISCC.exe",
             Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Inno Setup 6" / "ISCC.exe",
             Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe"),
             Path("C:/Program Files/Inno Setup 6/ISCC.exe"),
@@ -675,6 +721,7 @@ class Builder:
 # 主入口
 # ============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="FluentYTDL 构建系统",
@@ -689,13 +736,15 @@ def main():
         """,
     )
     parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         choices=["all", "setup", "full", "portable"],
         default="all",
         help="构建目标 (默认: all)",
     )
     parser.add_argument(
-        "--version", "-v",
+        "--version",
+        "-v",
         help="覆盖版本号 (默认从 pyproject.toml 读取)",
     )
     args = parser.parse_args()
@@ -705,7 +754,7 @@ def main():
 
     builder = Builder(version=version)
 
-    print(f"FluentYTDL Build System")
+    print("FluentYTDL Build System")
     print(f"Python: {sys.version}")
     print(f"Version: {builder.version}")
     print(f"Target: {args.target}")

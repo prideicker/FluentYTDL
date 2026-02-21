@@ -15,6 +15,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 try:
     import psutil
+
     HAS_PSUTIL = True
 except ImportError:
     psutil = None
@@ -27,45 +28,49 @@ from .config_manager import config_manager
 
 class ComponentInfo:
     def __init__(self, key: str, name: str, exe_name: str, extra_exes: list[str] | None = None):
-        self.key = key          # internal key: 'yt-dlp', 'ffmpeg', 'deno'
-        self.name = name        # Display name
-        self.exe_name = exe_name # executable name (e.g., yt-dlp.exe)
-        self.extra_exes = extra_exes or [] # Additional executables to update (e.g. ffprobe.exe for ffmpeg)
+        self.key = key  # internal key: 'yt-dlp', 'ffmpeg', 'deno'
+        self.name = name  # Display name
+        self.exe_name = exe_name  # executable name (e.g., yt-dlp.exe)
+        self.extra_exes = (
+            extra_exes or []
+        )  # Additional executables to update (e.g. ffprobe.exe for ffmpeg)
         self.current_version: str | None = None
         self.latest_version: str | None = None
         self.download_url: str | None = None
+
 
 class DependencyManager(QObject):
     """
     Manages checking updates and downloading/installing external dependencies.
     """
-    
+
     # Signals
-    check_started = Signal(str) # component_key
-    check_finished = Signal(str, dict) # component_key, {current, latest, update_available, url}
-    check_error = Signal(str, str) # component_key, error_msg
-    
-    download_started = Signal(str) # component_key
-    download_progress = Signal(str, int) # component_key, percent
-    download_finished = Signal(str) # component_key
-    download_error = Signal(str, str) # component_key, error_msg
-    
-    install_finished = Signal(str) # component_key
+    check_started = Signal(str)  # component_key
+    check_finished = Signal(str, dict)  # component_key, {current, latest, update_available, url}
+    check_error = Signal(str, str)  # component_key, error_msg
+
+    download_started = Signal(str)  # component_key
+    download_progress = Signal(str, int)  # component_key, percent
+    download_finished = Signal(str)  # component_key
+    download_error = Signal(str, str)  # component_key, error_msg
+
+    install_finished = Signal(str)  # component_key
 
     def __init__(self):
         super().__init__()
         self._workers = {}
         self._just_installed: set[str] = set()  # 记录刚安装完的组件，用于抑制误报
-        
+
         # Define known components
         self.components = {
             "yt-dlp": ComponentInfo("yt-dlp", "yt-dlp", "yt-dlp.exe"),
             "ffmpeg": ComponentInfo("ffmpeg", "FFmpeg", "ffmpeg.exe", extra_exes=["ffprobe.exe"]),
             "deno": ComponentInfo("deno", "JS Runtime (Deno)", "deno.exe"),
-            "pot-provider": ComponentInfo("pot-provider", "POT Provider", "bgutil-pot-provider.exe"),
+            "pot-provider": ComponentInfo(
+                "pot-provider", "POT Provider", "bgutil-pot-provider.exe"
+            ),
             "ytarchive": ComponentInfo("ytarchive", "ytarchive", "ytarchive.exe"),
             "atomicparsley": ComponentInfo("atomicparsley", "AtomicParsley", "AtomicParsley.exe"),
-
         }
 
     def get_target_dir(self, component_key: str) -> Path:
@@ -81,7 +86,7 @@ class DependencyManager(QObject):
             # Dev mode: src/fluentytdl/assets/bin or project_root/assets/bin
             # Let's use project_root/assets/bin for consistency
             base = Path(__file__).parents[3] / "assets" / "bin"
-            
+
         target = base / component_key
         if not target.exists():
             try:
@@ -96,7 +101,7 @@ class DependencyManager(QObject):
     def get_mirror_url(self, original_url: str) -> str:
         """Apply the configured mirror source."""
         source = config_manager.get("update_source") or "github"
-        
+
         if source == "github":
             return original_url
         elif source == "ghproxy":
@@ -110,7 +115,7 @@ class DependencyManager(QObject):
         """Async check for updates."""
         if component_key not in self.components:
             return
-            
+
         worker = UpdateCheckerWorker(component_key, self)
         worker.finished_signal.connect(self._on_check_finished)
         worker.error_signal.connect(self.check_error)
@@ -122,16 +127,16 @@ class DependencyManager(QObject):
         # 如果组件刚刚安装完，且版本比较仍显示有更新，抑制误报
         if key in self._just_installed:
             self._just_installed.discard(key)
-            if result.get('update_available') and result.get('current') != 'unknown':
+            if result.get("update_available") and result.get("current") != "unknown":
                 logger.info(f"Suppressing update notification for {key} (just installed)")
-                result['update_available'] = False
+                result["update_available"] = False
 
         # Store result in our cache
         if key in self.components:
-            self.components[key].current_version = result.get('current')
-            self.components[key].latest_version = result.get('latest')
-            self.components[key].download_url = result.get('url')
-            
+            self.components[key].current_version = result.get("current")
+            self.components[key].latest_version = result.get("latest")
+            self.components[key].download_url = result.get("url")
+
         self.check_finished.emit(key, result)
         # Clean up worker ref
         self._workers.pop(f"check_{key}", None)
@@ -146,13 +151,15 @@ class DependencyManager(QObject):
             # If checking hasn't run or failed, try to resolve url dynamically if possible,
             # but usually we expect check_update to run first.
             # For now, trigger an error if no URL known.
-            self.download_error.emit(component_key, "Update URL not found. Please check for updates first.")
+            self.download_error.emit(
+                component_key, "Update URL not found. Please check for updates first."
+            )
             return
 
         # Apply mirror
         final_url = self.get_mirror_url(url)
         target_exe = self.get_exe_path(component_key)
-        
+
         worker = DownloaderWorker(component_key, final_url, target_exe)
         worker.progress_signal.connect(self.download_progress)
         worker.finished_signal.connect(self._on_install_finished)
@@ -189,9 +196,9 @@ class UpdateCheckerWorker(QThread):
         try:
             exe_path = self.manager.get_exe_path(self.key)
             current_ver = self._get_local_version(self.key, exe_path)
-            
+
             latest_ver, url = self._get_remote_version(self.key)
-            
+
             update_available = False
             if latest_ver and latest_ver != "unknown":
                 c_tuple = self._parse_version_tuple(current_ver)
@@ -214,7 +221,7 @@ class UpdateCheckerWorker(QThread):
                 "current": current_ver,
                 "latest": latest_ver,
                 "update_available": update_available,
-                "url": url
+                "url": url,
             }
             self.finished_signal.emit(self.key, result)
 
@@ -225,7 +232,7 @@ class UpdateCheckerWorker(QThread):
     def _get_local_version(self, key: str, path: Path) -> str:
         if not path.exists():
             return "unknown"
-        
+
         try:
             # Run --version
             cmd = [str(path), "--version"]
@@ -233,7 +240,7 @@ class UpdateCheckerWorker(QThread):
             # FFmpeg uses 'ffmpeg -version' (single dash often works too)
             if key == "ffmpeg":
                 cmd = [str(path), "-version"]
-            
+
             # Windows hide console
             kwargs = {}
             if os.name == "nt":
@@ -243,10 +250,12 @@ class UpdateCheckerWorker(QThread):
                 kwargs["startupinfo"] = si
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
-            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", **kwargs)
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", **kwargs
+            )
             if proc.returncode != 0:
                 return "unknown"
-            
+
             out = proc.stdout.strip()
             if key == "yt-dlp":
                 # yt-dlp output is just the date/version: "2023.11.16"
@@ -292,8 +301,8 @@ class UpdateCheckerWorker(QThread):
                 m = re.search(r"aria2 version (\d+\.\d+\.\d+)", out)
                 if m:
                     return m.group(1)
-                
-            return "installed" # Fallback if parsing fails
+
+            return "installed"  # Fallback if parsing fails
         except Exception:
             return "unknown"
 
@@ -303,15 +312,15 @@ class UpdateCheckerWorker(QThread):
         proxies = {}
         proxy_url = config_manager.get("proxy_url")
         if config_manager.get("proxy_mode") in ("http", "socks5") and proxy_url:
-             proxies = {"http": proxy_url, "https": proxy_url}
+            proxies = {"http": proxy_url, "https": proxy_url}
 
         if key == "yt-dlp":
             url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
             resp = requests.get(url, proxies=proxies, timeout=10)
             resp.raise_for_status()
             data = resp.json()
-            tag = data["tag_name"] # e.g. "2023.11.16"
-            
+            tag = data["tag_name"]  # e.g. "2023.11.16"
+
             # Find exe asset
             dl_url = ""
             for asset in data.get("assets", []):
@@ -325,8 +334,8 @@ class UpdateCheckerWorker(QThread):
             resp = requests.get(url, proxies=proxies, timeout=10)
             resp.raise_for_status()
             data = resp.json()
-            tag = data["tag_name"].lstrip("v") # e.g. "1.38.0"
-            
+            tag = data["tag_name"].lstrip("v")  # e.g. "1.38.0"
+
             # Find windows zip
             dl_url = ""
             for asset in data.get("assets", []):
@@ -361,7 +370,11 @@ class UpdateCheckerWorker(QThread):
                 # Fallback: master 构建
                 dl_url, tag = "", "unknown"
                 for asset in data.get("assets", []):
-                    if "win64-gpl" in asset["name"] and ".zip" in asset["name"] and "shared" not in asset["name"]:
+                    if (
+                        "win64-gpl" in asset["name"]
+                        and ".zip" in asset["name"]
+                        and "shared" not in asset["name"]
+                    ):
                         dl_url = asset["browser_download_url"]
                         tag = "master"
                         break
@@ -370,12 +383,14 @@ class UpdateCheckerWorker(QThread):
 
         elif key == "pot-provider":
             # bgutil-ytdlp-pot-provider-rs from jim60105
-            url = "https://api.github.com/repos/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest"
+            url = (
+                "https://api.github.com/repos/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest"
+            )
             resp = requests.get(url, proxies=proxies, timeout=10)
             resp.raise_for_status()
             data = resp.json()
             tag = data["tag_name"].lstrip("v")  # e.g. "0.1.5"
-            
+
             # Find windows exe or zip
             dl_url = ""
             for asset in data.get("assets", []):
@@ -393,7 +408,7 @@ class UpdateCheckerWorker(QThread):
             resp.raise_for_status()
             data = resp.json()
             tag = data["tag_name"].lstrip("v")  # e.g. "0.4.0"
-            
+
             # Find windows amd64 executable
             dl_url = ""
             for asset in data.get("assets", []):
@@ -411,7 +426,7 @@ class UpdateCheckerWorker(QThread):
             resp.raise_for_status()
             data = resp.json()
             tag = data["tag_name"]  # e.g. "20240608.083822.1ed9031"
-            
+
             # Find Windows zip asset
             dl_url = ""
             for asset in data.get("assets", []):
@@ -421,8 +436,6 @@ class UpdateCheckerWorker(QThread):
                     dl_url = asset["browser_download_url"]
                     break
             return tag, dl_url
-
-
 
         return "unknown", ""
 
@@ -438,7 +451,7 @@ class DownloaderWorker(QThread):
         self.url = url
         self.target_exe = target_exe
         self.extra_exes: list[str] = []
-        
+
         # Inject extra_exes if available
         if dependency_manager.components.get(key):
             self.extra_exes = dependency_manager.components[key].extra_exes
@@ -450,22 +463,22 @@ class DownloaderWorker(QThread):
             proxies = {}
             proxy_url = config_manager.get("proxy_url")
             if config_manager.get("proxy_mode") in ("http", "socks5") and proxy_url:
-                 proxies = {"http": proxy_url, "https": proxy_url}
+                proxies = {"http": proxy_url, "https": proxy_url}
 
             logger.info(f"Downloading {self.key} from {self.url}")
-            
+
             with requests.get(self.url, stream=True, proxies=proxies, timeout=30) as r:
                 r.raise_for_status()
-                total_length = int(r.headers.get('content-length', 0))
-                
+                total_length = int(r.headers.get("content-length", 0))
+
                 # Create a temp file
                 fd, tmp_path = tempfile.mkstemp()
                 os.close(fd)
-                
+
                 last_emit_time = 0
                 last_emit_percent = -1
-                
-                with open(tmp_path, 'wb') as f:
+
+                with open(tmp_path, "wb") as f:
                     downloaded = 0
                     for chunk in r.iter_content(chunk_size=8192):
                         if chunk:
@@ -476,18 +489,22 @@ class DownloaderWorker(QThread):
                                 current_time = time.time()
                                 # Throttle: emit only if percent changed AND (>= 1% diff OR > 100ms passed)
                                 if percent != last_emit_percent:
-                                    if (percent - last_emit_percent >= 1) or (current_time - last_emit_time > 0.1) or percent == 100:
+                                    if (
+                                        (percent - last_emit_percent >= 1)
+                                        or (current_time - last_emit_time > 0.1)
+                                        or percent == 100
+                                    ):
                                         self.progress_signal.emit(self.key, percent)
                                         last_emit_percent = percent
                                         last_emit_time = current_time
 
             # 2. Extract or Move
             # Kill processes first? Ideally UI should ensure nothing is running.
-            
+
             # Prepare final dir
             dest_dir = self.target_exe.parent
             dest_dir.mkdir(parents=True, exist_ok=True)
-            
+
             if self.url.endswith(".zip"):
                 self._handle_zip(tmp_path, dest_dir)
                 # zip handling doesn't move the temp file, so we need to delete it
@@ -516,35 +533,39 @@ class DownloaderWorker(QThread):
 
     def _handle_zip(self, zip_path, dest_dir):
         # Extract specific file from zip
-        with zipfile.ZipFile(zip_path, 'r') as z:
+        with zipfile.ZipFile(zip_path, "r") as z:
             # Prepare list of files to extract: main exe + extra exes
             targets = [(self.target_exe.name, self.target_exe)]
-            
+
             for extra in self.extra_exes:
                 targets.append((extra, dest_dir / extra))
-            
+
             for target_name, target_path in targets:
                 found_member = None
-                
+
                 # 1. Try exact match or path ending with target_name
                 for name in z.namelist():
                     if name.endswith(f"/{target_name}") or name == target_name:
                         found_member = name
                         break
-                
+
                 # 2. Heuristic search (case insensitive)
                 if not found_member:
                     for name in z.namelist():
                         if name.lower().endswith(target_name.lower()):
                             found_member = name
                             break
-                
+
                 if not found_member:
                     # Only raise error for the main executable
                     if target_name == self.target_exe.name:
-                        raise FileNotFoundError(f"Could not find {target_name} inside the downloaded archive.")
+                        raise FileNotFoundError(
+                            f"Could not find {target_name} inside the downloaded archive."
+                        )
                     else:
-                        logger.warning(f"Could not find extra component {target_name} in archive. Skipping.")
+                        logger.warning(
+                            f"Could not find extra component {target_name} in archive. Skipping."
+                        )
                         continue
 
                 # Extract to a temporary file first
@@ -552,11 +573,11 @@ class DownloaderWorker(QThread):
                     # Create a temp file for the extracted exe
                     fd, extracted_tmp_path = tempfile.mkstemp()
                     os.close(fd)
-                    
+
                     try:
                         with open(extracted_tmp_path, "wb") as target:
                             shutil.copyfileobj(source, target)
-                        
+
                         # Install securely
                         self._safe_install(extracted_tmp_path, target_path)
                     finally:
@@ -571,7 +592,7 @@ class DownloaderWorker(QThread):
         Safely install a file, handling existing files and potential locks.
         """
         source_path = Path(source_path)
-        
+
         # 1. If target doesn't exist, just move
         if not target_path.exists():
             shutil.move(source_path, target_path)
@@ -579,10 +600,10 @@ class DownloaderWorker(QThread):
 
         # 2. Try to kill processes locking the file
         self._kill_locking_processes(target_path)
-        
+
         # 3. Try to replace with retries
         old_file = target_path.with_suffix(".exe.old")
-        
+
         # Clean up previous .old if exists
         if old_file.exists():
             try:
@@ -598,16 +619,20 @@ class DownloaderWorker(QThread):
                 break
             except OSError as e:
                 if i == max_retries - 1:
-                    logger.error(f"Failed to replace {target_path} after {max_retries} attempts: {e}")
+                    logger.error(
+                        f"Failed to replace {target_path} after {max_retries} attempts: {e}"
+                    )
                     # Last ditch effort: try to move source to target directly (will fail if locked)
                     # But maybe replace failed due to permission on old_file?
                     pass
                 else:
-                    logger.warning(f"Replace attempt {i+1} failed for {target_path}: {e}. Retrying...")
+                    logger.warning(
+                        f"Replace attempt {i + 1} failed for {target_path}: {e}. Retrying..."
+                    )
                     time.sleep(1)
                     # Try killing processes again
                     self._kill_locking_processes(target_path)
-        
+
         # 4. Move new file to target
         try:
             shutil.move(source_path, target_path)
@@ -637,35 +662,42 @@ class DownloaderWorker(QThread):
             # Fallback: try to kill by name if it matches known components
             name = file_path.name.lower()
             try:
-                subprocess.run(["taskkill", "/F", "/IM", name], 
-                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", name],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                )
             except Exception:
                 pass
             return
 
         file_path_str = str(file_path.resolve()).lower()
         import psutil as psutil_mod
-        
-        for proc in psutil_mod.process_iter(['pid', 'name', 'open_files']):
+
+        for proc in psutil_mod.process_iter(["pid", "name", "open_files"]):
             try:
                 # Check open files
-                open_files = proc.info.get('open_files')
+                open_files = proc.info.get("open_files")
                 if open_files:
                     for f in open_files:
                         if f.path and str(Path(f.path).resolve()).lower() == file_path_str:
-                            logger.info(f"Killing process {proc.info['name']} ({proc.info['pid']}) locking {file_path}")
+                            logger.info(
+                                f"Killing process {proc.info['name']} ({proc.info['pid']}) locking {file_path}"
+                            )
                             proc.kill()
                             break
-                
+
                 # Also check if the process executable itself is the file
                 try:
                     exe = proc.exe()
                     if exe and str(Path(exe).resolve()).lower() == file_path_str:
-                        logger.info(f"Killing process {proc.info['name']} ({proc.info['pid']}) running from {file_path}")
+                        logger.info(
+                            f"Killing process {proc.info['name']} ({proc.info['pid']}) running from {file_path}"
+                        )
                         proc.kill()
                 except (psutil_mod.AccessDenied, psutil_mod.NoSuchProcess):
                     pass
-                    
+
             except (psutil_mod.NoSuchProcess, psutil_mod.AccessDenied):
                 continue
 

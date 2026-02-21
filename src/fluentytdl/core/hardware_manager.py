@@ -23,15 +23,16 @@ class RiskLevel(Enum):
     WARNING = "warning"
     CRITICAL = "critical"
 
+
 class HardwareManager:
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
@@ -53,7 +54,7 @@ class HardwareManager:
     def has_dedicated_gpu(self) -> bool:
         """
         粗略检测是否有独立显卡
-        
+
         依赖 environment_checker 的编码器检测结果作为代理指标。
         如果有 h264_nvenc (NVIDIA) 或 h264_amf (AMD)，通常意味着有独显。
         h264_qsv 通常是 Intel 核显，但也可能在 Arc 独显上。
@@ -70,16 +71,16 @@ class HardwareManager:
     def assess_transcode_risk(self, video_height: int) -> RiskLevel:
         """
         评估转码风险
-        
+
         Args:
             video_height: 视频高度 (如 2160, 4320)
-            
+
         Returns:
             RiskLevel
         """
         mem_gb = self.get_system_memory_gb()
         has_hw = self.has_dedicated_gpu()
-        
+
         # 8K (4320p) 及以上
         if video_height >= 3840:
             if not has_hw:
@@ -88,8 +89,8 @@ class HardwareManager:
             if mem_gb < 16:
                 # 8K + 内存不足 = 容易崩溃
                 return RiskLevel.CRITICAL
-            return RiskLevel.WARNING # 8K 即使有显卡也可能很慢
-            
+            return RiskLevel.WARNING  # 8K 即使有显卡也可能很慢
+
         # 5K/6K (2880p ~ 3840p)
         elif video_height >= 2880:
             if not has_hw:
@@ -97,11 +98,11 @@ class HardwareManager:
             if mem_gb < 8:
                 return RiskLevel.WARNING
             return RiskLevel.SAFE
-            
+
         # 4K (2160p) 及以下
         else:
             if not has_hw and video_height >= 1440:
-                 # CPU 转 2K/4K 会卡，但不至于死机
+                # CPU 转 2K/4K 会卡，但不至于死机
                 return RiskLevel.WARNING
             return RiskLevel.SAFE
 
@@ -116,10 +117,10 @@ class HardwareManager:
     def get_optimal_ffmpeg_threads(self, is_cpu_mode: bool) -> int:
         """
         获取建议的 FFmpeg 线程数
-        
+
         Args:
             is_cpu_mode: 是否为纯 CPU 转码
-            
+
         Returns:
             建议的线程数 (int)
         """
@@ -133,5 +134,6 @@ class HardwareManager:
                 return max(1, cpu_count - 2)
         except Exception:
             return 2
+
 
 hardware_manager = HardwareManager()

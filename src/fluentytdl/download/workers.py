@@ -52,9 +52,13 @@ class InfoExtractWorker(QThread):
     def run(self) -> None:
         try:
             if self.playlist_flat:
-                info = youtube_service.extract_playlist_flat(self.url, self.options, cancel_event=self._cancel_event)
+                info = youtube_service.extract_playlist_flat(
+                    self.url, self.options, cancel_event=self._cancel_event
+                )
             else:
-                info = youtube_service.extract_info_for_dialog_sync(self.url, self.options, cancel_event=self._cancel_event)
+                info = youtube_service.extract_info_for_dialog_sync(
+                    self.url, self.options, cancel_event=self._cancel_event
+                )
             if self._cancel_event.is_set():
                 return
             self.finished.emit(info)
@@ -85,18 +89,17 @@ class VRInfoExtractWorker(QThread):
             # 策略：
             # 1. 如果 URL 看起来像播放列表，先尝试 Flat 解析
             # 2. 如果 Flat 解析发现是单视频（或 URL 不像播放列表），则使用 android_vr 客户端进行深度 VR 解析
-            
+
             is_playlist_url = "list=" in self.url
             info = None
-            
+
             if is_playlist_url:
                 try:
                     # 尝试作为播放列表解析
                     info = youtube_service.extract_playlist_flat(
-                        self.url, 
-                        cancel_event=self._cancel_event
+                        self.url, cancel_event=self._cancel_event
                     )
-                    
+
                     # 检查是否真的是播放列表
                     if info.get("_type") != "playlist" and not info.get("entries"):
                         # 只有单个条目或不是播放列表，视为单视频，需要重新解析
@@ -104,19 +107,21 @@ class VRInfoExtractWorker(QThread):
                 except Exception:
                     # 播放列表解析失败，可能是单视频，忽略错误继续尝试 VR 解析
                     info = None
-            
+
             if self._cancel_event.is_set():
                 return
 
             if info is None:
                 # 单视频模式：使用 android_vr 客户端
-                info = youtube_service.extract_vr_info_sync(self.url, cancel_event=self._cancel_event)
+                info = youtube_service.extract_vr_info_sync(
+                    self.url, cancel_event=self._cancel_event
+                )
 
             if self._cancel_event.is_set():
                 return
-                
+
             self.finished.emit(info)
-            
+
         except YtDlpCancelled:
             return
         except Exception as exc:
@@ -131,12 +136,12 @@ class EntryDetailWorker(QThread):
     error = Signal(int, str)
 
     def __init__(
-        self, 
-        row: int, 
-        url: str, 
+        self,
+        row: int,
+        url: str,
         options: YoutubeServiceOptions | None = None,
         *,
-        vr_mode: bool = False
+        vr_mode: bool = False,
     ):
         super().__init__()
         self.row = row
@@ -152,11 +157,15 @@ class EntryDetailWorker(QThread):
         try:
             if self.vr_mode:
                 # VR 模式：使用 android_vr 客户端获取详情
-                info = youtube_service.extract_vr_info_sync(self.url, cancel_event=self._cancel_event)
+                info = youtube_service.extract_vr_info_sync(
+                    self.url, cancel_event=self._cancel_event
+                )
             else:
                 # 普通模式：使用标准流程
-                info = youtube_service.extract_video_info(self.url, self.options, cancel_event=self._cancel_event)
-                
+                info = youtube_service.extract_video_info(
+                    self.url, self.options, cancel_event=self._cancel_event
+                )
+
             if self._cancel_event.is_set():
                 return
             self.finished.emit(self.row, info)
@@ -193,11 +202,11 @@ class DownloadWorker(QThread):
         self.download_dir: str | None = None
         # Best-effort: all destination paths seen in yt-dlp output.
         # This is important for paused/cancelled tasks where final output_path may be unknown.
-        self.dest_paths: set[str] = set()        # 格式选择状态追踪（防止格式自动降级到音频）
+        self.dest_paths: set[str] = set()  # 格式选择状态追踪（防止格式自动降级到音频）
         self._original_format: str | None = None
         self._ssl_error_count = 0
         self._format_warning_shown = False  # 防止重复警告
-        
+
         # 初始化功能模块
         self.features = [
             SponsorBlockFeature(),
@@ -216,22 +225,26 @@ class DownloadWorker(QThread):
             base_opts = youtube_service.build_ydl_options()
             merged = dict(base_opts)
             merged.update(self.opts)
-            
+
             # 保存原始格式选择（用于错误恢复）
             self._original_format = merged.get("format")
             if self._original_format:
                 logger.info("原始格式选择已保存: {}", self._original_format)
-            
+
             # DEBUG: 记录音频处理相关选项
-            logger.debug("DownloadWorker options - postprocessors: {}", merged.get("postprocessors"))
+            logger.debug(
+                "DownloadWorker options - postprocessors: {}", merged.get("postprocessors")
+            )
             logger.debug("DownloadWorker options - addmetadata: {}", merged.get("addmetadata"))
-            logger.debug("DownloadWorker options - writethumbnail: {}", merged.get("writethumbnail"))
+            logger.debug(
+                "DownloadWorker options - writethumbnail: {}", merged.get("writethumbnail")
+            )
 
             # Derive download directory from outtmpl (best effort).
             try:
                 paths = merged.get("paths")
                 outtmpl = merged.get("outtmpl")
-                
+
                 if isinstance(paths, dict) and paths.get("home"):
                     self.download_dir = os.path.abspath(str(paths.get("home")))
                 elif isinstance(outtmpl, str) and outtmpl.strip():
@@ -248,7 +261,7 @@ class DownloadWorker(QThread):
             # === Feature Pipeline: Configuration & Pre-flight ===
             # 构建上下文并运行 Feature 链
             context = DownloadContext(self, merged)
-            
+
             for feature in self.features:
                 feature.configure(merged)
                 feature.on_download_start(context)
@@ -274,13 +287,13 @@ class DownloadWorker(QThread):
             # 回调定义 (复用)
             def on_progress(data: dict[str, Any]) -> None:
                 self.progress.emit(data)
-                
+
             def on_status(message: str) -> None:
                 self.status_msg.emit(message)
-                
+
             def on_path(path: str) -> None:
                 self.output_path = path
-                
+
             def on_file_created(path: str) -> None:
                 self.dest_paths.add(path)
 
@@ -295,7 +308,9 @@ class DownloadWorker(QThread):
                 try:
                     # 执行
                     final_path = self.executor.execute(
-                        self.url, merged, strategy,
+                        self.url,
+                        merged,
+                        strategy,
                         on_progress=on_progress,
                         on_status=on_status,
                         on_path=on_path,
@@ -316,7 +331,7 @@ class DownloadWorker(QThread):
 
                 except Exception as exc:
                     logger.warning(f"下载失败 (策略={strategy.label}): {exc}")
-                    
+
                     # 报告失败 (触发熔断计数)
                     download_dispatcher.report_result(False)
 
@@ -329,12 +344,13 @@ class DownloadWorker(QThread):
                         logger.info(f"正在降级策略: {strategy.mode} -> {fallback.mode}")
                         self.status_msg.emit(f"⚠️ 网络不稳定，自动切换至: {fallback.label}")
                         strategy = fallback
-                        
+
                         # 简单的指数退避，给网络一点喘息时间
                         import time
+
                         time.sleep(1)
                         continue
-                    
+
                     # 无路可退，抛出异常
                     raise exc
 
@@ -353,7 +369,7 @@ class DownloadWorker(QThread):
             # 恢复 SSL / 格式降级 等错误处理逻辑 (简单版)
             if "EOF occurred in violation of protocol" in msg or "_ssl.c" in msg:
                 self.status_msg.emit("⚠️ 检测到网络SSL错误，建议检查网络连接后重试")
-            
+
             logger.exception("下载过程发生异常: {}", self.url)
             # Failure for circuit breaker
             download_dispatcher.report_result(False)

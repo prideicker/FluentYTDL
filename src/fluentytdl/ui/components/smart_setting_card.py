@@ -88,7 +88,9 @@ class SmartSettingCard(SettingCard):
             # Open file picker; use provided filter if any
             start_dir = str(Path(current).parent) if current else str(Path.home())
             filt = self._file_filter or "All Files (*)"
-            path, _ = QFileDialog.getOpenFileName(self.window(), f"选择 {self.titleLabel.text()}", start_dir, filt)
+            path, _ = QFileDialog.getOpenFileName(
+                self.window(), f"选择 {self.titleLabel.text()}", start_dir, filt
+            )
             if not path:
                 return
             candidate = path

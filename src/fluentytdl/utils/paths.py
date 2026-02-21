@@ -101,7 +101,12 @@ def find_bundled_executable(*relative_candidates: str) -> Path | None:
         # for the new `internal/ffmpeg` layout.
         try:
             parts = rel_path.parts
-            if parts and parts[0].lower() in {"ffmpeg", "js", "deno", "node", "bun", "quickjs", "yt-dlp", "yt_dlp"} and len(parts) >= 2:
+            if (
+                parts
+                and parts[0].lower()
+                in {"ffmpeg", "js", "deno", "node", "bun", "quickjs", "yt-dlp", "yt_dlp"}
+                and len(parts) >= 2
+            ):
                 stripped = Path(*parts[1:])
                 for root in search_roots:
                     try:
@@ -137,7 +142,7 @@ def locate_runtime_tool(*relative_candidates: str) -> Path:
                 p1 = exe_bin / Path(rel).name
                 if p1.exists():
                     return p1.resolve()
-                
+
                 # Case B: bin/ffmpeg/ffmpeg.exe (if rel is "ffmpeg/ffmpeg.exe")
                 p2 = exe_bin / rel
                 if p2.exists():
@@ -146,7 +151,7 @@ def locate_runtime_tool(*relative_candidates: str) -> Path:
                 # Case C: bin/ffmpeg/ffmpeg.exe (automatic subfolder guessing)
                 # If searching for "ffmpeg.exe", try checking "bin/ffmpeg/ffmpeg.exe"
                 name = Path(rel).name
-                stem = Path(rel).stem # e.g. "ffmpeg"
+                stem = Path(rel).stem  # e.g. "ffmpeg"
                 p3 = exe_bin / stem / name
                 if p3.exists():
                     return p3.resolve()

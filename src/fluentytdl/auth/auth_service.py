@@ -28,6 +28,7 @@ from .cookie_cleaner import CookieCleaner
 # 尝试导入 rookiepy
 try:
     import rookiepy
+
     HAS_ROOKIEPY = True
 except ImportError:
     rookiepy = None
@@ -36,6 +37,7 @@ except ImportError:
 
 
 # ==================== Windows 管理员权限检查 ====================
+
 
 def is_admin() -> bool:
     """检查当前是否为管理员权限"""
@@ -60,37 +62,49 @@ def _is_appbound_error(error: Exception) -> bool:
 
 class AuthSourceType(str, Enum):
     """验证源类型"""
-    NONE = "none"           # 不使用身份验证
+
+    NONE = "none"  # 不使用身份验证
     # Chromium 内核浏览器（v130+ 需要管理员权限）
-    EDGE = "edge"           # Microsoft Edge
-    CHROME = "chrome"       # Google Chrome
-    CHROMIUM = "chromium"   # Chromium
-    BRAVE = "brave"         # Brave
-    OPERA = "opera"         # Opera
-    OPERA_GX = "opera_gx"   # Opera GX
-    VIVALDI = "vivaldi"     # Vivaldi
-    ARC = "arc"             # Arc
+    EDGE = "edge"  # Microsoft Edge
+    CHROME = "chrome"  # Google Chrome
+    CHROMIUM = "chromium"  # Chromium
+    BRAVE = "brave"  # Brave
+    OPERA = "opera"  # Opera
+    OPERA_GX = "opera_gx"  # Opera GX
+    VIVALDI = "vivaldi"  # Vivaldi
+    ARC = "arc"  # Arc
     # Firefox 内核浏览器（无需管理员权限）
-    FIREFOX = "firefox"     # Firefox
-    LIBREWOLF = "librewolf" # LibreWolf
+    FIREFOX = "firefox"  # Firefox
+    LIBREWOLF = "librewolf"  # LibreWolf
     # 其他
-    FILE = "file"           # 手动导入的 cookies.txt
+    FILE = "file"  # 手动导入的 cookies.txt
 
 
 # 浏览器类型列表（用于 UI 展示和逻辑判断）
 # Chromium 内核 v130+ 都需要管理员权限提取 Cookie
 BROWSER_SOURCES = [
-    AuthSourceType.EDGE, AuthSourceType.CHROME, AuthSourceType.CHROMIUM,
-    AuthSourceType.BRAVE, AuthSourceType.OPERA, AuthSourceType.OPERA_GX,
-    AuthSourceType.VIVALDI, AuthSourceType.ARC,
-    AuthSourceType.FIREFOX, AuthSourceType.LIBREWOLF,
+    AuthSourceType.EDGE,
+    AuthSourceType.CHROME,
+    AuthSourceType.CHROMIUM,
+    AuthSourceType.BRAVE,
+    AuthSourceType.OPERA,
+    AuthSourceType.OPERA_GX,
+    AuthSourceType.VIVALDI,
+    AuthSourceType.ARC,
+    AuthSourceType.FIREFOX,
+    AuthSourceType.LIBREWOLF,
 ]
 
 # 需要管理员权限的浏览器（Chromium 内核 v130+）
 ADMIN_REQUIRED_BROWSERS = [
-    AuthSourceType.EDGE, AuthSourceType.CHROME, AuthSourceType.CHROMIUM,
-    AuthSourceType.BRAVE, AuthSourceType.OPERA, AuthSourceType.OPERA_GX,
-    AuthSourceType.VIVALDI, AuthSourceType.ARC,
+    AuthSourceType.EDGE,
+    AuthSourceType.CHROME,
+    AuthSourceType.CHROMIUM,
+    AuthSourceType.BRAVE,
+    AuthSourceType.OPERA,
+    AuthSourceType.OPERA_GX,
+    AuthSourceType.VIVALDI,
+    AuthSourceType.ARC,
 ]
 
 # 各平台需要的 Cookie 域名
@@ -107,6 +121,7 @@ YOUTUBE_REQUIRED_COOKIES = {"SID", "HSID", "SSID", "SAPISID", "APISID"}
 @dataclass
 class AuthStatus:
     """验证状态"""
+
     valid: bool = False
     message: str = "未验证"
     cookie_count: int = 0
@@ -114,26 +129,27 @@ class AuthStatus:
     account_hint: str | None = None  # 账户提示 (如 "YouTube Premium")
 
 
-@dataclass  
+@dataclass
 class AuthProfile:
     """
     认证配置（用于高级多账户管理）
     """
-    name: str                              # 显示名称
-    platform: str = "youtube"              # 平台标识
+
+    name: str  # 显示名称
+    platform: str = "youtube"  # 平台标识
     source_type: AuthSourceType = AuthSourceType.EDGE
-    file_path: str | None = None           # 当 FILE 类型使用
+    file_path: str | None = None  # 当 FILE 类型使用
     cached_cookie_path: str | None = None  # 缓存的 cookie 文件路径
     enabled: bool = True
     last_updated: str | None = None
     cookie_count: int = 0
     is_valid: bool = False
-    
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["source_type"] = self.source_type.value
         return d
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AuthProfile:
         if "source_type" in data:
@@ -145,43 +161,43 @@ class AuthProfile:
 class AuthService:
     """
     统一身份验证服务
-    
+
     核心职责:
     1. 管理当前激活的验证源
     2. 按需提取/读取 Cookie 并生成临时文件
     3. 向 yt-dlp 提供统一的 cookie 文件路径
     """
-    
+
     def __init__(self, cache_dir: Path | None = None):
         self.cache_dir = cache_dir or Path(tempfile.gettempdir()) / "fluentytdl_auth"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self._config_path = self.cache_dir / "auth_config.json"
         self._profiles_path = self.cache_dir / "profiles.json"
-        
+
         # 当前配置
         self._current_source: AuthSourceType = AuthSourceType.NONE
         self._current_file_path: str | None = None
         self._auto_refresh: bool = True
         self._last_status: AuthStatus = AuthStatus()
-        
+
         # 高级：多账户配置
         self._profiles: dict[str, AuthProfile] = {}
-        
+
         self._load_config()
-    
+
     # ==================== 属性 ====================
-    
+
     @property
     def available(self) -> bool:
         """rookiepy 是否可用"""
         return HAS_ROOKIEPY
-    
+
     @property
     def current_source(self) -> AuthSourceType:
         """当前验证源"""
         return self._current_source
-    
+
     @property
     def current_source_display(self) -> str:
         """当前验证源的显示名称"""
@@ -200,19 +216,19 @@ class AuthService:
             AuthSourceType.FILE: "手动导入文件",
         }
         return names.get(self._current_source, "未知")
-    
+
     @property
     def auto_refresh(self) -> bool:
         """是否自动刷新 Cookie"""
         return self._auto_refresh
-    
+
     @property
     def last_status(self) -> AuthStatus:
         """最近一次验证状态"""
         return self._last_status
-    
+
     # ==================== 核心方法 ====================
-    
+
     def set_source(
         self,
         source: AuthSourceType,
@@ -221,30 +237,30 @@ class AuthService:
     ) -> None:
         """
         设置验证源
-        
+
         当来源变化时，会通知 CookieSentinel 清理旧的 Cookie 文件，
         确保不会复用来自不同浏览器的旧 Cookie。
-        
+
         Args:
             source: 验证源类型
             file_path: 当 FILE 类型需要
             auto_refresh: 是否自动刷新
         """
         old_source = self._current_source
-        
+
         self._current_source = source
         self._current_file_path = file_path if source == AuthSourceType.FILE else None
         self._auto_refresh = auto_refresh
         self._save_config()
-        
+
         logger.info(f"验证源已设置: {self.current_source_display}")
-        
+
         # 注意：不再立即清理旧 Cookie 文件
         # 延迟到实际提取成功后再清理，避免提取失败时丢失旧 Cookie
         if old_source != source:
             logger.info(f"验证源变化: {old_source.value} -> {source.value}")
             logger.info("将在下次成功提取后更新 Cookie 文件")
-    
+
     def get_cookie_file_for_ytdlp(
         self,
         platform: str = "youtube",
@@ -252,32 +268,64 @@ class AuthService:
     ) -> str | None:
         """
         获取 yt-dlp 可用的 cookie 文件路径
-        
+
         这是被 yt_dlp_cli.py 调用的核心方法。
-        
+
         Args:
             platform: 平台标识
             force_refresh: 强制刷新（忽略缓存）
-            
+
         Returns:
             cookie 文件的绝对路径，或 None（未启用验证）
         """
         if self._current_source == AuthSourceType.NONE:
             return None
-        
+
         try:
             if self._current_source == AuthSourceType.FILE:
-                # 手动导入的文件：直接返回路径
+                # 手动导入的文件：读取 -> 清洗 -> 缓存 -> 返回缓存路径
                 if self._current_file_path and Path(self._current_file_path).exists():
-                    self._update_status_from_file(self._current_file_path)
-                    return self._current_file_path
+                    cache_file = self.cache_dir / f"cached_file_{platform}.txt"
+                    src_path = Path(self._current_file_path)
+
+                    # 检查缓存是否存在且比源文件新
+                    need_refresh = force_refresh or not cache_file.exists()
+                    if not need_refresh:
+                        src_mtime = src_path.stat().st_mtime
+                        cache_mtime = cache_file.stat().st_mtime
+                        if src_mtime > cache_mtime:
+                            need_refresh = True
+
+                    if need_refresh:
+                        # 读取原生导入的 Cookie
+                        content = src_path.read_text(encoding="utf-8", errors="replace")
+                        cookies = self._parse_netscape_cookies(content)
+                        original_count = len(cookies)
+
+                        # 清洗
+                        cookies = CookieCleaner.clean(cookies, platform)
+                        cleaned_count = len(cookies)
+                        if original_count != cleaned_count:
+                            logger.info(
+                                f"[{platform}] 导入文件 Cookie 清洗完成: {original_count} -> {cleaned_count} (移除: {original_count - cleaned_count})"
+                            )
+                        else:
+                            logger.info(
+                                f"[{platform}] 导入文件 Cookie 清洗完成: 保持 {original_count} 个"
+                            )
+
+                        # 写入特殊的缓存文件
+                        self._write_netscape_file(cookies, cache_file)
+
+                    self._update_status_from_file(str(cache_file))
+                    return str(cache_file)
                 else:
                     self._last_status = AuthStatus(
                         valid=False,
                         message="Cookie 文件不存在",
                     )
                     return None
-            
+
             elif self._current_source in BROWSER_SOURCES:
                 # 浏览器来源：使用 rookiepy 提取
                 return self._extract_and_cache(
@@ -285,43 +333,43 @@ class AuthService:
                     platform=platform,
                     force_refresh=force_refresh or self._auto_refresh,
                 )
-            
+
         except Exception as e:
             logger.error(f"获取 Cookie 失败: {e}")
             self._last_status = AuthStatus(
                 valid=False,
                 message=f"获取失败: {e}",
             )
-        
+
         return None
-    
+
     def refresh_now(self, platform: str = "youtube") -> AuthStatus:
         """
         立即刷新 Cookie
-        
+
         Returns:
             刷新后的状态
         """
         if self._current_source == AuthSourceType.NONE:
             self._last_status = AuthStatus(valid=False, message="未启用验证")
             return self._last_status
-        
+
         try:
             cookie_path = self.get_cookie_file_for_ytdlp(platform, force_refresh=True)
             if cookie_path:
                 return self._last_status
         except Exception as e:
             self._last_status = AuthStatus(valid=False, message=f"刷新失败: {e}")
-        
+
         return self._last_status
-    
+
     def validate_file(self, file_path: str) -> AuthStatus:
         """
         验证 Cookie 文件
-        
+
         Args:
             file_path: cookies.txt 路径
-            
+
         Returns:
             验证结果
         """
@@ -329,27 +377,71 @@ class AuthService:
             path = Path(file_path)
             if not path.exists():
                 return AuthStatus(valid=False, message="文件不存在")
-            
+
             content = path.read_text(encoding="utf-8", errors="replace")
             cookies = self._parse_netscape_cookies(content)
-            
+
+            # 手动导入文件时，先进行合规清洗以反映实际的有效数量
+            from .cookie_cleaner import CookieCleaner
+
+            cookies = CookieCleaner.clean(cookies, "youtube")
+
             if not cookies:
                 return AuthStatus(valid=False, message="文件为空或格式无效")
-            
+
             validation = self._validate_cookies(cookies, "youtube")
-            
+
             return AuthStatus(
                 valid=validation["valid"],
                 message=validation["message"],
                 cookie_count=len(cookies),
                 last_updated=datetime.now().isoformat(),
             )
-            
+
         except Exception as e:
             return AuthStatus(valid=False, message=f"验证失败: {e}")
-    
+
+    def import_manual_cookie_file(self, file_path: str, platform: str = "youtube") -> AuthStatus:
+        """
+        全量导入并接管 Cookies 文件
+        读取 -> 格式化 -> 清洗 -> 覆盖 bin/cookies.txt 与缓存
+        """
+        try:
+            path = Path(file_path)
+            content = path.read_text(encoding="utf-8", errors="replace")
+            cookies = self._parse_netscape_cookies(content)
+
+            # 强化清洗过滤
+            from .cookie_cleaner import CookieCleaner
+
+            cookies = CookieCleaner.clean(cookies, platform)
+
+            # 再校验一次核心凭证
+            validation = self._validate_cookies(cookies, platform)
+            if not validation["valid"]:
+                return AuthStatus(valid=False, message=validation["message"])
+
+            # 写入专属缓存
+            cache_file = self.cache_dir / f"cached_file_{platform}.txt"
+            self._write_netscape_file(cookies, cache_file)
+
+            # 通知 Sentinel 一步到位更新 bin/cookies.txt
+            from .cookie_sentinel import cookie_sentinel
+
+            cookie_sentinel.cookie_path.parent.mkdir(parents=True, exist_ok=True)
+            self._write_netscape_file(cookies, cookie_sentinel.cookie_path)
+            cookie_sentinel._save_meta("file", len(cookies))
+
+            # 最后自我更新状态
+            self._update_status_from_file(str(cache_file))
+            return self._last_status
+
+        except Exception as e:
+            logger.error(f"导入 Cookie 失败: {e}")
+            return AuthStatus(valid=False, message=f"导入底层异常: {e}")
+
     # ==================== 内部方法 ====================
-    
+
     def _extract_and_cache(
         self,
         browser: str,
@@ -358,15 +450,15 @@ class AuthService:
     ) -> str | None:
         """
         从浏览器提取 Cookie 并缓存
-        
+
         支持 Chrome v130+ App-Bound 加密的自动提权处理
         """
         if not HAS_ROOKIEPY:
             raise RuntimeError("rookiepy 未安装，无法从浏览器提取 Cookie")
-        
+
         # 缓存文件路径
         cache_file = self.cache_dir / f"cached_{browser}_{platform}.txt"
-        
+
         # 检查缓存是否足够新（5 分钟内）
         if not force_refresh and cache_file.exists():
             mtime = datetime.fromtimestamp(cache_file.stat().st_mtime)
@@ -375,45 +467,69 @@ class AuthService:
                 logger.debug(f"使用缓存的 Cookie 文件: {cache_file}")
                 self._update_status_from_file(str(cache_file))
                 return str(cache_file)
-        
+
         # 提取 Cookie
         domains = PLATFORM_DOMAINS.get(platform, [".youtube.com", ".google.com"])
         cookies = None
-        
+
         try:
             # 首先尝试直接提取
             extractor = getattr(rookiepy, browser, None)
             if extractor is None:
                 raise RuntimeError(f"rookiepy 不支持 {browser}")
-            
+
             cookies = extractor(domains)
             logger.info(f"从 {browser} 提取到 {len(cookies)} 个 Cookie")
-            
+
             # 使用 CookieCleaner 进行合规清洗
             cookies = CookieCleaner.clean(cookies, platform)
-            
+
         except Exception as e:
             logger.warning(f"直接提取失败: {e}")
-            
-            # 检测是否为 App-Bound 加密错误（Chrome v130+）
-            if _is_appbound_error(e) and sys.platform == "win32":
-                logger.info("检测到 Chrome v130+ App-Bound 加密，需要管理员权限")
-                
-                # 直接抛出 PermissionError，由 UI 层调用 restart_as_admin() 重启程序
+
+            error_str = str(e).lower()
+
+            # 检测是否为 App-Bound 加密错误（Chrome/Edge v127+ 的解密失败）或权限问题
+            is_decryption_failed = "decrypt_encrypted_value failed" in error_str
+            is_admin_needed = _is_appbound_error(e) and sys.platform == "win32"
+
+            if is_decryption_failed or is_admin_needed:
                 browser_display = self.current_source_display
-                self._last_status = AuthStatus(
-                    valid=False,
-                    message=f"{browser_display} 需要管理员权限才能提取 Cookie（App-Bound 加密）",
-                )
-                raise PermissionError(
-                    f"{browser_display} v130+ 使用了 App-Bound 加密。\n"
-                    "需要以管理员身份重新启动程序才能提取 Cookie。\n\n"
-                    "建议：使用 Edge 浏览器可避免此问题。"
-                ) from e
+
+                # 如果是明确的解密失败，说明即使用管理员也无法绕过当前版本的防护
+                if is_decryption_failed:
+                    logger.info("检测到 Chromium 严格依赖本地执行的 App-Bound 加密拒绝解密")
+
+                    self._last_status = AuthStatus(
+                        valid=False,
+                        message=(
+                            f"【提取解密失败】\n\n"
+                            f"受到 {browser_display} 最新的底层加密机制 (App-Bound Encryption) 限制，"
+                            "目前第三方工具无法直接解密提取它的 Cookie。\n\n"
+                            "请执行以下任一替代方案：\n"
+                            "1. 切换到不受此限制的浏览器 (推荐: Firefox 或 LibreWolf)\n"
+                            '2. 使用「手动导入」方式 (前往设置选择"手动导入 cookies.txt"并提供导出的文件)'
+                        ),
+                    )
+                    # 返回 None 意味着失败，不再抛出异常触发管理员提权弹窗
+                    return None
+
+                else:
+                    # 原本的安全降级，可能只需要管理员权限
+                    logger.info("检测到 Chrome v130+ App-Bound 加密，需要管理员权限")
+                    self._last_status = AuthStatus(
+                        valid=False,
+                        message=f"{browser_display} 需要管理员权限才能提取 Cookie（App-Bound 加密）",
+                    )
+                    raise PermissionError(
+                        f"{browser_display} v130+ 使用了 App-Bound 加密。\n"
+                        "需要以管理员身份重新启动程序才能提取 Cookie。\n\n"
+                        "建议：使用 Edge 或 Firefox 浏览器可避免此问题。"
+                    ) from e
             else:
-                # 非 App-Bound 错误，直接抛出
+                # 非 App-Bound / 解密相关的其他错误，直接抛出
                 raise
-        
+
         if not cookies:
             browser_display = self.current_source_display
             self._last_status = AuthStatus(
@@ -431,13 +547,13 @@ class AuthService:
                 ),
             )
             return None
-        
+
         # 写入缓存文件
         self._write_netscape_file(cookies, cache_file)
-        
+
         # 验证并更新状态
         validation = self._validate_cookies(cookies, platform)
-        
+
         self._last_status = AuthStatus(
             valid=validation["valid"],
             message=validation["message"],
@@ -445,9 +561,9 @@ class AuthService:
             last_updated=datetime.now().isoformat(),
             account_hint=self._detect_account_hint(cookies),
         )
-        
+
         return str(cache_file)
-    
+
     def _write_netscape_file(self, cookies: list[dict], output_path: Path) -> None:
         """将 Cookie 写入 Netscape 格式文件"""
         lines = [
@@ -456,7 +572,7 @@ class AuthService:
             f"# {datetime.now().isoformat()}",
             "",
         ]
-        
+
         for c in cookies:
             domain = c.get("domain", "")
             flag = "TRUE" if domain.startswith(".") else "FALSE"
@@ -465,12 +581,12 @@ class AuthService:
             expiry = str(int(c.get("expires", 0) or 0))
             name = c.get("name", "")
             value = c.get("value", "")
-            
+
             lines.append(f"{domain}\t{flag}\t{path}\t{secure}\t{expiry}\t{name}\t{value}")
-        
+
         output_path.write_text("\n".join(lines), encoding="utf-8")
         logger.debug(f"已生成 Cookie 文件: {output_path}")
-    
+
     def _parse_netscape_cookies(self, content: str) -> list[dict]:
         """解析 Netscape 格式的 Cookie 文件"""
         cookies = []
@@ -478,27 +594,40 @@ class AuthService:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            
+
             parts = line.split("\t")
             if len(parts) >= 7:
-                cookies.append({
-                    "domain": parts[0],
-                    "path": parts[2],
-                    "secure": parts[3].upper() == "TRUE",
-                    "expires": int(parts[4]) if parts[4].isdigit() else 0,
-                    "name": parts[5],
-                    "value": parts[6],
-                })
+                cookies.append(
+                    {
+                        "domain": parts[0],
+                        "path": parts[2],
+                        "secure": parts[3].upper() == "TRUE",
+                        "expires": int(parts[4]) if parts[4].isdigit() else 0,
+                        "name": parts[5],
+                        "value": parts[6],
+                    }
+                )
         return cookies
-    
+
     def _validate_cookies(self, cookies: list[dict], platform: str) -> dict:
-        """验证 Cookie"""
-        found = {c.get("name", "") for c in cookies}
-        
+        """验证 Cookie 时间戳有效性与核心组件遗漏情况"""
+        from datetime import datetime
+
+        current_time = int(datetime.now().timestamp())
+
+        valid_cookies = []
+        for c in cookies:
+            expires = int(c.get("expires", 0) or 0)
+            # expires == 0 represents a session cookie; naturally assumed to be valid
+            if expires == 0 or expires > current_time:
+                valid_cookies.append(c)
+
+        found = {c.get("name", "") for c in valid_cookies}
+
         if platform == "youtube":
             required = YOUTUBE_REQUIRED_COOKIES
             missing = required - found
-            
+
             if missing:
                 return {
                     "valid": False,
@@ -509,10 +638,10 @@ class AuthService:
                 "message": "已验证 (检测到 YouTube 登录)",
             }
         else:
-            if cookies:
-                return {"valid": True, "message": f"找到 {len(cookies)} 个 Cookie"}
-            return {"valid": False, "message": "未找到 Cookie"}
-    
+            if valid_cookies:
+                return {"valid": True, "message": f"找到 {len(valid_cookies)} 个有效 Cookie"}
+            return {"valid": False, "message": "未找到有效 Cookie"}
+
     def _detect_account_hint(self, cookies: list[dict]) -> str | None:
         """尝试检测账户信息"""
         # 检查是否有 Premium 相关标识
@@ -522,27 +651,25 @@ class AuthService:
             if "premium" in name or "premium" in value:
                 return "YouTube Premium"
         return None
-    
+
     def _update_status_from_file(self, file_path: str) -> None:
         """从文件更新状态"""
         try:
             content = Path(file_path).read_text(encoding="utf-8", errors="replace")
             cookies = self._parse_netscape_cookies(content)
             validation = self._validate_cookies(cookies, "youtube")
-            
+
             self._last_status = AuthStatus(
                 valid=validation["valid"],
                 message=validation["message"],
                 cookie_count=len(cookies),
-                last_updated=datetime.fromtimestamp(
-                    Path(file_path).stat().st_mtime
-                ).isoformat(),
+                last_updated=datetime.fromtimestamp(Path(file_path).stat().st_mtime).isoformat(),
             )
         except Exception as e:
             self._last_status = AuthStatus(valid=False, message=f"读取失败: {e}")
-    
+
     # ==================== 配置持久化 ====================
-    
+
     def _save_config(self) -> None:
         """保存配置"""
         data = {
@@ -554,7 +681,7 @@ class AuthService:
         }
         with open(self._config_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(data, ensure_ascii=False, indent=2))
-    
+
     def _load_config(self) -> None:
         """加载配置"""
         if not self._config_path.exists():
@@ -564,7 +691,7 @@ class AuthService:
             logger.info("首次启动，默认使用 Edge 浏览器验证")
             self._save_config()
             return
-        
+
         try:
             with open(self._config_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -576,19 +703,19 @@ class AuthService:
             self._current_file_path = data.get("file_path")
             self._auto_refresh = data.get("auto_refresh", True)
             logger.info(f"已加载验证配置: {self.current_source_display}")
-            
+
             # 尝试恢复上次的验证状态
             self._restore_last_status()
         except Exception as e:
             logger.error(f"加载验证配置失败: {e}")
             # 加载失败时使用默认的 Edge
             self._current_source = AuthSourceType.EDGE
-    
+
     def _restore_last_status(self) -> None:
         """恢复上次的验证状态（从缓存文件）"""
         if self._current_source == AuthSourceType.NONE:
             return
-        
+
         try:
             if self._current_source == AuthSourceType.FILE:
                 # 文件模式：检查文件是否存在
@@ -606,13 +733,13 @@ class AuthService:
                         self._last_status.message += " (缓存可能过期)"
         except Exception as e:
             logger.debug(f"恢复状态失败: {e}")
-    
+
     def startup_refresh(self) -> AuthStatus:
         """
         启动时自动刷新 Cookie
-        
+
         在应用启动时调用，自动获取 Cookie 并验证有效性。
-        
+
         Returns:
             刷新后的状态
         """
@@ -620,18 +747,15 @@ class AuthService:
             # 如果当前是 NONE，切换到默认的 Edge
             self._current_source = AuthSourceType.EDGE
             self._save_config()
-        
+
         if self._current_source == AuthSourceType.FILE:
             # 文件模式不自动刷新，只检查文件
             if self._current_file_path and Path(self._current_file_path).exists():
                 self._update_status_from_file(self._current_file_path)
             else:
-                self._last_status = AuthStatus(
-                    valid=False,
-                    message="Cookie 文件不存在，请重新选择"
-                )
+                self._last_status = AuthStatus(valid=False, message="Cookie 文件不存在，请重新选择")
             return self._last_status
-        
+
         # 浏览器模式：自动刷新
         logger.info(f"启动时自动刷新 Cookie ({self.current_source_display})...")
         try:
@@ -643,22 +767,22 @@ class AuthService:
         except Exception as e:
             logger.error(f"启动刷新失败: {e}")
             self._last_status = AuthStatus(valid=False, message=f"刷新失败: {e}")
-        
+
         return self._last_status
-    
+
     # ==================== 高级：多账户管理 ====================
-    
+
     def get_profiles(self) -> list[AuthProfile]:
         """获取所有配置文件"""
         self._load_profiles()
         return list(self._profiles.values())
-    
+
     def add_profile(self, profile: AuthProfile) -> None:
         """添加配置"""
         key = f"{profile.platform}_{profile.name}"
         self._profiles[key] = profile
         self._save_profiles()
-    
+
     def remove_profile(self, name: str, platform: str = "youtube") -> bool:
         """移除配置"""
         key = f"{platform}_{name}"
@@ -667,7 +791,7 @@ class AuthService:
             self._save_profiles()
             return True
         return False
-    
+
     def _save_profiles(self) -> None:
         """保存配置文件"""
         data = {
@@ -676,7 +800,7 @@ class AuthService:
         }
         with open(self._profiles_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(data, ensure_ascii=False, indent=2))
-    
+
     def _load_profiles(self) -> None:
         """加载配置文件"""
         if not self._profiles_path.exists():
@@ -690,12 +814,12 @@ class AuthService:
                 self._profiles[key] = profile
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}")
-    
+
     def cleanup_cache(self, max_age_hours: int = 24) -> int:
         """清理过期缓存"""
         cleaned = 0
         now = datetime.now()
-        
+
         for f in self.cache_dir.glob("cached_*.txt"):
             try:
                 mtime = datetime.fromtimestamp(f.stat().st_mtime)
@@ -705,7 +829,7 @@ class AuthService:
                     cleaned += 1
             except Exception:
                 pass
-        
+
         return cleaned
 
 

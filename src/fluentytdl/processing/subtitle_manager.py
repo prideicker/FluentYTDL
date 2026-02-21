@@ -45,7 +45,6 @@ COMMON_SUBTITLE_LANGUAGES = [
     ("en", "英语"),
     ("ja", "日语"),
     ("ko", "韩语"),
-    
     # 欧洲主要语言
     ("fr", "法语"),
     ("de", "德语"),
@@ -53,7 +52,6 @@ COMMON_SUBTITLE_LANGUAGES = [
     ("pt", "葡萄牙语"),
     ("it", "意大利语"),
     ("ru", "俄语"),
-    
     # 其他地区
     ("ar", "阿拉伯语"),
     ("hi", "印地语"),
@@ -74,13 +72,14 @@ SUBTITLE_FORMATS = ["srt", "ass", "vtt", "lrc"]
 @dataclass
 class SubtitleTrack:
     """字幕轨道信息"""
-    lang_code: str           # 语言代码 (如 "en", "zh-Hans")
-    lang_name: str           # 语言名称 (如 "English", "中文")
-    is_auto: bool            # 是否自动生成
-    ext: str                 # 格式 (srt, vtt, ass)
-    url: str | None = None   # 下载 URL
+
+    lang_code: str  # 语言代码 (如 "en", "zh-Hans")
+    lang_name: str  # 语言名称 (如 "English", "中文")
+    is_auto: bool  # 是否自动生成
+    ext: str  # 格式 (srt, vtt, ass)
+    url: str | None = None  # 下载 URL
     name: str | None = None  # 显示名称
-    
+
     @property
     def display_name(self) -> str:
         """获取显示名称"""
@@ -93,15 +92,15 @@ class SubtitleTrack:
 def extract_subtitle_tracks(info: dict[str, Any]) -> list[SubtitleTrack]:
     """
     从视频信息中提取可用字幕轨道
-    
+
     Args:
         info: yt-dlp 返回的视频信息
-        
+
     Returns:
         字幕轨道列表
     """
     tracks = []
-    
+
     # 手动字幕
     subtitles = info.get("subtitles") or {}
     for lang_code, sub_list in subtitles.items():
@@ -109,43 +108,47 @@ def extract_subtitle_tracks(info: dict[str, Any]) -> list[SubtitleTrack]:
             continue
         # 取第一个格式
         sub = sub_list[0] if isinstance(sub_list, list) else sub_list
-        tracks.append(SubtitleTrack(
-            lang_code=lang_code,
-            lang_name=sub.get("name", ""),
-            is_auto=False,
-            ext=sub.get("ext", "vtt"),
-            url=sub.get("url"),
-        ))
-    
+        tracks.append(
+            SubtitleTrack(
+                lang_code=lang_code,
+                lang_name=sub.get("name", ""),
+                is_auto=False,
+                ext=sub.get("ext", "vtt"),
+                url=sub.get("url"),
+            )
+        )
+
     # 自动生成字幕
     auto_subs = info.get("automatic_captions") or {}
     for lang_code, sub_list in auto_subs.items():
         if not sub_list:
             continue
         sub = sub_list[0] if isinstance(sub_list, list) else sub_list
-        tracks.append(SubtitleTrack(
-            lang_code=lang_code,
-            lang_name=sub.get("name", ""),
-            is_auto=True,
-            ext=sub.get("ext", "vtt"),
-            url=sub.get("url"),
-        ))
-    
+        tracks.append(
+            SubtitleTrack(
+                lang_code=lang_code,
+                lang_name=sub.get("name", ""),
+                is_auto=True,
+                ext=sub.get("ext", "vtt"),
+                url=sub.get("url"),
+            )
+        )
+
     return tracks
 
 
 def get_subtitle_languages(info: dict[str, Any]) -> list[dict[str, Any]]:
     """
     获取可用字幕语言列表（用于 UI 显示）
-    
+
     Args:
         info: 视频信息
-        
+
     Returns:
         [{"code": "en", "name": "英语", "auto": False}, ...]
     """
     tracks = extract_subtitle_tracks(info)
-    
+
     # 去重：同一语言优先手动字幕
     seen = {}
     for t in tracks:
@@ -157,17 +160,17 @@ def get_subtitle_languages(info: dict[str, Any]) -> list[dict[str, Any]]:
                 "auto": t.is_auto,
                 "ext": t.ext,
             }
-    
+
     # 排序：中文 > 英语 > 日语 > 其他
     priority = ["zh-Hans", "zh-Hant", "zh", "en", "ja", "ko"]
-    
+
     def sort_key(item):
         code = item["code"]
         try:
             return (0, priority.index(code))
         except ValueError:
             return (1, code)
-    
+
     return sorted(seen.values(), key=sort_key)
 
 
@@ -179,28 +182,28 @@ def build_subtitle_opts(
 ) -> dict[str, Any]:
     """
     构建字幕下载的 yt-dlp 选项
-    
+
     Args:
         languages: 语言代码列表 ["zh-Hans", "en"]
         embed: 是否嵌入到视频
         convert_to: 转换格式 (srt, ass, vtt)
         write_sub: 是否写入单独文件
-        
+
     Returns:
         yt-dlp 选项字典
     """
     opts: dict[str, Any] = {}
-    
+
     if not languages:
         return opts
-    
+
     # 设置字幕语言
     opts["subtitleslangs"] = languages
     opts["writesubtitles"] = True
-    
+
     # 也下载自动字幕
     opts["writeautomaticsub"] = True
-    
+
     # 嵌入字幕
     if embed:
         opts["embedsubtitles"] = True
@@ -208,18 +211,18 @@ def build_subtitle_opts(
         if "postprocessors" not in opts:
             opts["postprocessors"] = []
         opts["postprocessors"].append({"key": "FFmpegEmbedSubtitle"})
-    
+
     # 格式转换
     if convert_to and convert_to in SUBTITLE_FORMATS:
         opts["convertsubtitles"] = convert_to
-    
+
     # 写入单独文件
     if write_sub:
         opts["writesubtitles"] = True
     elif not embed:
         # 如果既不嵌入也不写文件，则不处理
         return {}
-    
+
     return opts
 
 
@@ -231,35 +234,36 @@ def convert_subtitle(
 ) -> Path:
     """
     转换字幕格式
-    
+
     Args:
         input_path: 输入字幕文件
         output_format: 目标格式 (srt, ass, vtt)
         output_path: 输出路径，None 则自动生成
         ffmpeg_path: ffmpeg 路径
-        
+
     Returns:
         输出文件路径
     """
     input_path = Path(input_path)
-    
+
     if output_format not in SUBTITLE_FORMATS:
         raise ValueError(f"不支持的字幕格式: {output_format}")
-    
+
     if output_path is None:
         output_path = input_path.with_suffix(f".{output_format}")
     else:
         output_path = Path(output_path)
-    
+
     # 使用 ffmpeg 转换
     ffmpeg = ffmpeg_path or "ffmpeg"
     cmd = [
         ffmpeg,
         "-y",  # 覆盖输出
-        "-i", str(input_path),
+        "-i",
+        str(input_path),
         str(output_path),
     ]
-    
+
     try:
         result = subprocess.run(
             cmd,
@@ -271,5 +275,5 @@ def convert_subtitle(
             raise RuntimeError(f"ffmpeg 转换失败: {result.stderr}")
     except subprocess.TimeoutExpired as e:
         raise RuntimeError("字幕转换超时") from e
-    
+
     return output_path

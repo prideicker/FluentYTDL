@@ -1,0 +1,132 @@
+﻿E402 Module level import not at top of file
+  --> main.py:28:1
+   |
+26 |         pass
+27 |
+28 | from PySide6.QtCore import Qt
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+29 | from PySide6.QtGui import QFont
+30 | from PySide6.QtWidgets import QApplication
+   |
+
+E402 Module level import not at top of file
+  --> main.py:29:1
+   |
+28 | from PySide6.QtCore import Qt
+29 | from PySide6.QtGui import QFont
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+30 | from PySide6.QtWidgets import QApplication
+   |
+
+E402 Module level import not at top of file
+  --> main.py:30:1
+   |
+28 | from PySide6.QtCore import Qt
+29 | from PySide6.QtGui import QFont
+30 | from PySide6.QtWidgets import QApplication
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+
+E722 Do not use bare `except`
+   --> main.py:106:13
+    |
+104 |                 from loguru import logger
+105 |                 logger.warning(f"POT Provider 鏈嶅姟鍚姩寮傚父: {e}")
+106 |             except:
+    |             ^^^^^^
+107 |                 pass
+    |
+
+E722 Do not use bare `except`
+   --> main.py:125:13
+    |
+123 |                 from loguru import logger
+124 |                 logger.debug(f"Cookie Sentinel 鍚姩澶辫触锛堥鏈熻涓猴級: {e}")
+125 |             except:
+    |             ^^^^^^
+126 |                 pass
+    |
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+   --> scripts\build.py:512:17
+    |
+510 |                     archive.writeall(source_dir, arcname=".")
+511 |             except ImportError:
+512 |                 raise RuntimeError("闇€瑕佸畨瑁?py7zr 鎴栫郴缁?7z: pip install py7zr")
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+513 |
+514 |         print(f"鉁?宸插垱寤哄帇缂╁寘: {output_path}")
+    |
+
+E402 Module level import not at top of file
+  --> scripts\build_gui.py:26:1
+   |
+24 | sys.path.insert(0, str(ROOT / "src"))
+25 |
+26 | from PySide6.QtCore import QObject, QThread, Signal
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+27 | from PySide6.QtGui import QFont, QIcon, QTextCursor
+28 | from PySide6.QtWidgets import (
+   |
+
+E402 Module level import not at top of file
+  --> scripts\build_gui.py:27:1
+   |
+26 | from PySide6.QtCore import QObject, QThread, Signal
+27 | from PySide6.QtGui import QFont, QIcon, QTextCursor
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+28 | from PySide6.QtWidgets import (
+29 |     QApplication,
+   |
+
+E402 Module level import not at top of file
+  --> scripts\build_gui.py:28:1
+   |
+26 |   from PySide6.QtCore import QObject, QThread, Signal
+27 |   from PySide6.QtGui import QFont, QIcon, QTextCursor
+28 | / from PySide6.QtWidgets import (
+29 | |     QApplication,
+30 | |     QComboBox,
+31 | |     QGroupBox,
+32 | |     QHBoxLayout,
+33 | |     QLabel,
+34 | |     QLineEdit,
+35 | |     QMainWindow,
+36 | |     QMessageBox,
+37 | |     QProgressBar,
+38 | |     QPushButton,
+39 | |     QTextEdit,
+40 | |     QVBoxLayout,
+41 | |     QWidget,
+42 | | )
+   | |_^
+43 |
+44 |   # ============================================================================
+   |
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+  --> scripts\fetch_tools.py:87:9
+   |
+85 |         print()  # 鎹㈣
+86 |     except (HTTPError, URLError) as e:
+87 |         raise RuntimeError(f"涓嬭浇澶辫触: {url} - {e}")
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+   --> scripts\fetch_tools.py:119:9
+    |
+117 |             return json.loads(resp.read().decode())
+118 |     except (HTTPError, URLError) as e:
+119 |         raise RuntimeError(f"GitHub API 璋冪敤澶辫触: {url} - {e}")
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+
+E402 Module level import not at top of file
+   --> src\fluentytdl\ui\settings_page.py:475:1
+    |
+475 | from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+
+Found 12 errors.

@@ -44,7 +44,7 @@ class DownloadItemWidget(CardWidget):
         self.title_text = title
         self.url = worker.url
         self.opts = dict(opts)
-        
+
         # Track created files persistently across worker restarts
         self.recorded_paths: set[str] = set()
 
@@ -54,7 +54,7 @@ class DownloadItemWidget(CardWidget):
         self._bind_worker(worker)
 
         self.setFixedHeight(100)  # 稍微增高以容纳三行信息
-        
+
         # 主布局
         self.hLayout = QHBoxLayout(self)
         self.hLayout.setContentsMargins(12, 12, 12, 12)
@@ -78,7 +78,7 @@ class DownloadItemWidget(CardWidget):
 
         # 2. 中间信息区 (Title, Progress, Meta)
         self.infoLayout = QVBoxLayout()
-        self.infoLayout.setSpacing(6) # 增加间距
+        self.infoLayout.setSpacing(6)  # 增加间距
         self.infoLayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # 标题 (粗体)
@@ -96,7 +96,7 @@ class DownloadItemWidget(CardWidget):
         self.metaLabel.setTextColor(QColor(120, 120, 120), QColor(150, 150, 150))
         # 使用等宽字体防止数字跳动
         font = self.metaLabel.font()
-        font.setFamily("Consolas") # Windows default monospace fallback
+        font.setFamily("Consolas")  # Windows default monospace fallback
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.metaLabel.setFont(font)
 
@@ -111,18 +111,24 @@ class DownloadItemWidget(CardWidget):
 
         self.actionBtn = TransparentToolButton(FluentIcon.PAUSE, self)
         self.actionBtn.setToolTip("暂停任务")
-        self.actionBtn.installEventFilter(ToolTipFilter(self.actionBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.actionBtn.installEventFilter(
+            ToolTipFilter(self.actionBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.actionBtn.clicked.connect(self.on_action_clicked)
 
         self.folderBtn = TransparentToolButton(FluentIcon.FOLDER, self)
         self.folderBtn.setToolTip("打开文件夹")
-        self.folderBtn.installEventFilter(ToolTipFilter(self.folderBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.folderBtn.installEventFilter(
+            ToolTipFilter(self.folderBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.folderBtn.setEnabled(False)
         self.folderBtn.clicked.connect(self._open_output_location)
 
         self.deleteBtn = TransparentToolButton(FluentIcon.DELETE, self)
         self.deleteBtn.setToolTip("删除任务")
-        self.deleteBtn.installEventFilter(ToolTipFilter(self.deleteBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.deleteBtn.installEventFilter(
+            ToolTipFilter(self.deleteBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.deleteBtn.clicked.connect(self.on_delete_clicked)
 
         self.actionLayout.addWidget(self.actionBtn)
@@ -147,7 +153,7 @@ class DownloadItemWidget(CardWidget):
             return
         self._state = s
         self.state_changed.emit(self._state)
-        
+
         # 更新按钮图标
         if s == "running":
             self.actionBtn.setIcon(FluentIcon.PAUSE)
@@ -213,16 +219,20 @@ class DownloadItemWidget(CardWidget):
             worker.completed.connect(self.on_finished, Qt.ConnectionType.UniqueConnection)
             worker.error.connect(self.on_error, Qt.ConnectionType.UniqueConnection)
             worker.cancelled.connect(self.on_cancelled, Qt.ConnectionType.UniqueConnection)
-            
+
             # Track files
             worker.output_path_ready.connect(self._record_path, Qt.ConnectionType.UniqueConnection)
-            worker.progress.connect(self._check_filename_in_progress, Qt.ConnectionType.UniqueConnection)
-            
+            worker.progress.connect(
+                self._check_filename_in_progress, Qt.ConnectionType.UniqueConnection
+            )
+
             # 封面嵌入警告
-            worker.thumbnail_embed_warning.connect(self._on_thumbnail_embed_warning, Qt.ConnectionType.UniqueConnection)
+            worker.thumbnail_embed_warning.connect(
+                self._on_thumbnail_embed_warning, Qt.ConnectionType.UniqueConnection
+            )
         except Exception:
             pass
-    
+
     def _on_thumbnail_embed_warning(self, warning: str) -> None:
         """处理封面嵌入警告"""
         try:
@@ -258,12 +268,12 @@ class DownloadItemWidget(CardWidget):
     def update_progress(self, d: dict[str, Any]) -> None:
         if d.get("status") == "downloading":
             self.set_state("running")
-            
+
             # Use shared logic for label inference
             stream_label = _infer_stream_label(d)
             if stream_label == "[下载]":
-                stream_label = "" 
-            
+                stream_label = ""
+
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes") or 0
             speed = d.get("speed") or 0
@@ -287,7 +297,7 @@ class DownloadItemWidget(CardWidget):
         clean_msg = _strip_ansi(msg)
         # 仅在非下载状态下显示状态文本，或者覆盖元数据
         # 这里选择覆盖元数据，因为状态信息（如“正在合并”）很重要
-        
+
         # Highlight merge/postprocess status
         if "合并" in clean_msg or "Merger" in clean_msg or "Merging" in clean_msg:
             clean_msg = "正在合并音视频..."
@@ -295,7 +305,7 @@ class DownloadItemWidget(CardWidget):
         elif "ExtractAudio" in clean_msg:
             clean_msg = "正在提取音频..."
             self.progressBar.setValue(99)
-            
+
         self.metaLabel.setText(clean_msg)
 
         clean_msg.lower()
@@ -419,7 +429,7 @@ class DownloadItemWidget(CardWidget):
                     cancel()
         elif self._state in {"paused", "error", "queued"}:
             self.resume_requested.emit(self)
-        
+
     def load_thumbnail(self, path: str) -> None:
         self._thumbnail_url = path
         self.image_loader.load(path)
@@ -467,6 +477,7 @@ class DownloadItemWidget(CardWidget):
             )
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"写入历史记录失败: {e}")
 
     def on_delete_clicked(self) -> None:

@@ -13,13 +13,14 @@ from typing import Any
 
 # ── 下载模式枚举 ──────────────────────────────────────────
 
+
 class DownloadMode(str, Enum):
     """用户可选的下载模式。"""
 
-    SPEED = "speed"    # 极速: 多线程并发 (Native)
+    SPEED = "speed"  # 极速: 多线程并发 (Native)
     STABLE = "stable"  # 稳定: 单线程 + 高容错 (Native)
-    HARSH = "harsh"    # 恶劣: 激进限流 + 极强容错 (Native)
-    AUTO = "auto"      # 自动: 根据网络状况 + 工具可用性自动路由
+    HARSH = "harsh"  # 恶劣: 激进限流 + 极强容错 (Native)
+    AUTO = "auto"  # 自动: 根据网络状况 + 工具可用性自动路由
 
     @property
     def label(self) -> str:
@@ -47,19 +48,19 @@ class DownloadStrategy:
     label: str
 
     # ── yt-dlp native 参数 ──
-    concurrent_fragments: int = 1     # -N
+    concurrent_fragments: int = 1  # -N
     socket_timeout: int = 15
-    retries: str | int = 10           # infinite or int
+    retries: str | int = 10  # infinite or int
     fragment_retries: str | int = 10
     sleep_interval: int = 0
     max_sleep_interval: int = 0
     force_ipv4: bool = False
-    
+
     # ── IO 优化参数 ──
-    buffer_size: str = "1024"         # --buffer-size (e.g. "16M", "1024") (default 1024 bytes in yt-dlp is too small?) No, default is 1024.
-    http_chunk_size: str | None = None # --http-chunk-size
-    resize_buffer: bool = False       # --resize-buffer
-    skip_unavailable_fragments: bool = False # --skip-unavailable-fragments
+    buffer_size: str = "1024"  # --buffer-size (e.g. "16M", "1024") (default 1024 bytes in yt-dlp is too small?) No, default is 1024.
+    http_chunk_size: str | None = None  # --http-chunk-size
+    resize_buffer: bool = False  # --resize-buffer
+    skip_unavailable_fragments: bool = False  # --skip-unavailable-fragments
 
     # ── 元信息 ──
     risk_level: str = "low"  # low / medium / high
@@ -88,7 +89,7 @@ class DownloadStrategy:
             ydl_opts["http_chunk_size"] = self.http_chunk_size
         if self.resize_buffer:
             ydl_opts["resize_buffer"] = True
-        
+
         if self.skip_unavailable_fragments:
             ydl_opts["skip_unavailable_fragments"] = True
 
@@ -99,12 +100,12 @@ class DownloadStrategy:
 SPEED_STRATEGY = DownloadStrategy(
     mode=DownloadMode.SPEED,
     label="🚀 极速",
-    concurrent_fragments=16,          # Max concurrency
+    concurrent_fragments=16,  # Max concurrency
     socket_timeout=30,
     retries=10,
     fragment_retries=10,
-    buffer_size="16M",                # Large buffer
-    http_chunk_size="10M",            # Large chunks
+    buffer_size="16M",  # Large buffer
+    http_chunk_size="10M",  # Large chunks
     resize_buffer=False,
     risk_level="high",
 )
@@ -113,15 +114,15 @@ SPEED_STRATEGY = DownloadStrategy(
 STABLE_STRATEGY = DownloadStrategy(
     mode=DownloadMode.STABLE,
     label="🛡️ 稳定",
-    concurrent_fragments=1,           # Single thread
-    socket_timeout=10,                # Fast fail
-    retries="inf",                    # Infinite retries
+    concurrent_fragments=1,  # Single thread
+    socket_timeout=10,  # Fast fail
+    retries="inf",  # Infinite retries
     fragment_retries="inf",
-    buffer_size="1M",                 # Conservative buffer
-    http_chunk_size=None,             # Default chunk size
+    buffer_size="1M",  # Conservative buffer
+    http_chunk_size=None,  # Default chunk size
     resize_buffer=True,
     skip_unavailable_fragments=True,  # Skip bad fragments in harsh conditions
-    force_ipv4=True,                  # Prefer IPv4
+    force_ipv4=True,  # Prefer IPv4
     risk_level="low",
 )
 
@@ -136,10 +137,10 @@ HARSH_STRATEGY = DownloadStrategy(
     mode=DownloadMode.HARSH,
     label="🧟 恶劣",
     concurrent_fragments=1,
-    socket_timeout=5,                 # Extremely fast fail
+    socket_timeout=5,  # Extremely fast fail
     retries="inf",
     fragment_retries="inf",
-    sleep_interval=2,                 # Active throttling
+    sleep_interval=2,  # Active throttling
     max_sleep_interval=5,
     buffer_size="512K",
     force_ipv4=True,

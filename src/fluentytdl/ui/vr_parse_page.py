@@ -95,9 +95,7 @@ class VRParsePage(QWidget):
         self.cardLayout.setContentsMargins(20, 20, 20, 20)
         self.cardLayout.setSpacing(15)
 
-        self.instructionLabel = BodyLabel(
-            "粘贴 YouTube VR 视频链接", self
-        )
+        self.instructionLabel = BodyLabel("粘贴 YouTube VR 视频链接", self)
         self.cardLayout.addWidget(self.instructionLabel)
 
         # 输入框行

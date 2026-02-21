@@ -13,6 +13,7 @@ from typing import Any
 
 # ── 解析结果类型 ──────────────────────────────────────────
 
+
 @dataclass
 class DownloadProgress:
     """标准化的下载进度数据。"""
@@ -39,6 +40,7 @@ class ParsedLine:
 
 
 # ── yt-dlp 输出解析器 ────────────────────────────────────
+
 
 class YtDlpOutputParser:
     """解析 yt-dlp CLI 的 stdout 输出行。"""
@@ -110,7 +112,11 @@ class YtDlpOutputParser:
             return ParsedLine(type="status", message="正在转换字幕格式...")
 
         # 4. 合并/提取音频
-        if line.startswith("[Merger]") or line.startswith("[ExtractAudio]") or "Merging formats" in line:
+        if (
+            line.startswith("[Merger]")
+            or line.startswith("[ExtractAudio]")
+            or "Merging formats" in line
+        ):
             m = self._RE_MERGE.match(line)
             if m:
                 return ParsedLine(type="merge", path=m.group("path").strip(), message=line)
@@ -219,10 +225,8 @@ class YtDlpOutputParser:
         return ParsedLine(type="status", message=line)
 
 
-
-
-
 # ── 工具函数 ──────────────────────────────────────────────
+
 
 def _safe_int(s: str) -> int:
     """安全地将字符串转为 int，NA 或空值返回 0。"""

@@ -3,6 +3,7 @@
 
 轻量展示：缩略图 + 标题 + 文件信息 + 操作按钮
 """
+
 from __future__ import annotations
 
 import os
@@ -41,6 +42,7 @@ def _format_bytes(b: int | float) -> str:
 def _format_time_ago(ts: float) -> str:
     """时间戳 → '3 分钟前' 之类"""
     import time
+
     diff = time.time() - ts
     if diff < 60:
         return "刚刚"
@@ -56,6 +58,7 @@ def _format_time_ago(ts: float) -> str:
             return f"{days} 天前"
         else:
             from datetime import datetime
+
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
 
@@ -68,8 +71,8 @@ class HistoryItemWidget(CardWidget):
              [文件信息: 大小 · 格式 · 时间]
     """
 
-    remove_requested = Signal(object)   # 请求从历史删除
-    play_requested = Signal(object)     # 请求播放
+    remove_requested = Signal(object)  # 请求从历史删除
+    play_requested = Signal(object)  # 请求播放
 
     def __init__(self, record: HistoryRecord, parent: QWidget | None = None):
         super().__init__(parent)
@@ -90,8 +93,7 @@ class HistoryItemWidget(CardWidget):
         self.thumb.setFixedSize(128, 72)
         self.thumb.setScaledContents(True)
         self.thumb.setStyleSheet(
-            "background: rgba(0,0,0,0.03); border-radius: 6px; "
-            "border: 1px solid rgba(0,0,0,0.08);"
+            "background: rgba(0,0,0,0.03); border-radius: 6px; border: 1px solid rgba(0,0,0,0.08);"
         )
         h.addWidget(self.thumb)
 
@@ -134,21 +136,27 @@ class HistoryItemWidget(CardWidget):
         # 打开文件夹
         self.folder_btn = TransparentToolButton(FluentIcon.FOLDER, self)
         self.folder_btn.setToolTip("打开文件位置")
-        self.folder_btn.installEventFilter(ToolTipFilter(self.folder_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.folder_btn.installEventFilter(
+            ToolTipFilter(self.folder_btn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.folder_btn.setEnabled(record.file_exists)
         self.folder_btn.clicked.connect(self._open_location)
 
         # 播放按钮
         self.play_btn = TransparentToolButton(FluentIcon.PLAY, self)
         self.play_btn.setToolTip("播放文件")
-        self.play_btn.installEventFilter(ToolTipFilter(self.play_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.play_btn.installEventFilter(
+            ToolTipFilter(self.play_btn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.play_btn.setEnabled(record.file_exists)
         self.play_btn.clicked.connect(self._play_file)
 
         # 删除记录
         self.del_btn = TransparentToolButton(FluentIcon.DELETE, self)
         self.del_btn.setToolTip("删除记录")
-        self.del_btn.installEventFilter(ToolTipFilter(self.del_btn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.del_btn.installEventFilter(
+            ToolTipFilter(self.del_btn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.del_btn.clicked.connect(lambda: self.remove_requested.emit(self))
 
         btn_layout.addWidget(self.play_btn)

@@ -25,17 +25,18 @@ _global_manager_initialized: bool = False
 def _get_global_manager() -> QNetworkAccessManager:
     """获取全局共享的网络管理器，复用 HTTP 连接"""
     global _global_manager, _global_manager_initialized
-    
+
     if _global_manager is None:
         _global_manager = QNetworkAccessManager()
-        
+
         # 启用磁盘缓存
         try:
             import tempfile
             from pathlib import Path
+
             cache_dir = Path(tempfile.gettempdir()) / "fluentytdl_thumb_cache"
             cache_dir.mkdir(parents=True, exist_ok=True)
-            
+
             disk_cache = QNetworkDiskCache()
             disk_cache.setCacheDirectory(str(cache_dir))
             disk_cache.setMaximumCacheSize(50 * 1024 * 1024)  # 50MB 缓存
@@ -43,11 +44,11 @@ def _get_global_manager() -> QNetworkAccessManager:
             logger.debug("[ImageLoader] 已启用磁盘缓存: {}", cache_dir)
         except Exception as e:
             logger.warning("[ImageLoader] 磁盘缓存初始化失败: {}", e)
-    
+
     if not _global_manager_initialized:
         _global_manager_initialized = True
         _apply_proxy_to_manager(_global_manager)
-    
+
     return _global_manager
 
 
@@ -76,7 +77,9 @@ def _apply_proxy_to_manager(manager: QNetworkAccessManager) -> None:
         return
 
     lower = proxy_url_str.lower()
-    if not (lower.startswith("http://") or lower.startswith("https://") or lower.startswith("socks5://")):
+    if not (
+        lower.startswith("http://") or lower.startswith("https://") or lower.startswith("socks5://")
+    ):
         scheme = "socks5" if proxy_mode == "socks5" else "http"
         proxy_url_str = f"{scheme}://" + proxy_url_str
         lower = proxy_url_str.lower()
@@ -97,7 +100,7 @@ def _apply_proxy_to_manager(manager: QNetworkAccessManager) -> None:
 
 class ImageLoader(QObject):
     """通用异步图片加载器
-    
+
     优化特性：
     - 全局共享 QNetworkAccessManager，复用 HTTP 连接
     - 50MB 磁盘缓存，加速重复加载
@@ -130,19 +133,19 @@ class ImageLoader(QObject):
             url_str = self._force_youtube_webp_to_jpg(url_str)
 
         request = QNetworkRequest(QUrl(url_str))
-        
+
         # 设置请求头
         request.setRawHeader(
             b"User-Agent",
             b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         )
-        
+
         # 启用缓存
         request.setAttribute(
             QNetworkRequest.Attribute.CacheLoadControlAttribute,
             QNetworkRequest.CacheLoadControl.PreferCache,
         )
-        
+
         # 启用 HTTP 流水线（如果服务器支持）
         request.setAttribute(
             QNetworkRequest.Attribute.HttpPipeliningAllowedAttribute,
@@ -163,9 +166,7 @@ class ImageLoader(QObject):
         except Exception:
             pass
 
-        reply.finished.connect(
-            lambda: self._on_finished(reply, target_size, radius, url_str)
-        )
+        reply.finished.connect(lambda: self._on_finished(reply, target_size, radius, url_str))
 
     def _on_finished(
         self,

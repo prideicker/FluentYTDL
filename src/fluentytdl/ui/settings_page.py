@@ -45,35 +45,42 @@ from .components.smart_setting_card import SmartSettingCard
 # Cookie 刷新 Worker（使用Qt线程，确保打包后正常工作）
 # ============================================================================
 
+
 class CookieRefreshWorker(QThread):
     """Cookie刷新工作线程（Qt线程，打包后可靠）"""
+
     finished = Signal(bool, str, bool)  # (成功标志, 消息, 是否需要管理员权限)
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
-    
+
     def run(self):
         """在Qt线程中执行Cookie刷新"""
         from ..auth.auth_service import auth_service
         from ..auth.cookie_sentinel import cookie_sentinel
         from ..utils.logger import logger
-        
+
         success = False
         message = "未知错误"
-        
+
         try:
             # 直接刷新（调用前已检查权限，或已是管理员/非Edge/Chrome）
             success, message = cookie_sentinel.force_refresh_with_uac()
-            
+
             if not success:
                 # 获取详细状态
                 status = auth_service.last_status
-                if status and hasattr(status, 'message') and status.message:
+                if status and hasattr(status, "message") and status.message:
                     message = status.message
-                
+
                 # 友好的错误引导
                 browser_name = auth_service.current_source_display
-                if "未找到" in message or "not found" in message.lower():
+
+                # 如果 auth_service 已经提供了关于【提取解密失败】的详细多行指引，则保留其内容
+                # 否则，如果是其他诸如“未找到文件”或普通的异常，才覆盖为通用建议
+                if "【提取解密失败】" not in message and (
+                    "未找到" in message or "not found" in message.lower()
+                ):
                     message = (
                         f"无法从 {browser_name} 提取 Cookie\n\n"
                         "可能的原因：\n"
@@ -81,13 +88,13 @@ class CookieRefreshWorker(QThread):
                         f"2. {browser_name} Cookie 数据库被锁定（请关闭浏览器）\n\n"
                         "建议：完全关闭浏览器后重试"
                     )
-                
+
                 logger.warning(f"[CookieRefreshWorker] 提取失败: {message}")
         except Exception as e:
             success = False
             message = f"刷新异常: {str(e)}"
             logger.error(f"[CookieRefreshWorker] 异常: {e}", exc_info=True)
-        
+
         # 发射信号（线程安全，第三个参数保留但不再使用）
         self.finished.emit(success, message, False)
 
@@ -105,25 +112,29 @@ class ComponentSettingCard(SettingCard):
     ):
         super().__init__(icon, title, content, parent)
         self.component_key = component_key
-        
+
         # UI Elements
         self.progressBar = ProgressBar(self)
         self.progressBar.setRange(0, 100)
         self.progressBar.setValue(0)
         self.progressBar.setFixedWidth(120)
         self.progressBar.setVisible(False)
-        
+
         self.actionButton = PushButton("检查更新", self)
         self.actionButton.clicked.connect(self._on_action_clicked)
-        
+
         self.importButton = PushButton("手动导入", self, FluentIcon.ADD)
         self.importButton.setToolTip("选择本地文件覆盖当前组件")
-        self.importButton.installEventFilter(ToolTipFilter(self.importButton, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.importButton.installEventFilter(
+            ToolTipFilter(self.importButton, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.importButton.clicked.connect(self._on_import_clicked)
-        
+
         self.folderButton = ToolButton(FluentIcon.FOLDER, self)
         self.folderButton.setToolTip("打开所在文件夹")
-        self.folderButton.installEventFilter(ToolTipFilter(self.folderButton, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.folderButton.installEventFilter(
+            ToolTipFilter(self.folderButton, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.folderButton.clicked.connect(self._open_folder)
 
         # Layout
@@ -135,12 +146,12 @@ class ComponentSettingCard(SettingCard):
         self.hBoxLayout.addSpacing(5)
         self.hBoxLayout.addWidget(self.folderButton, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
-        
+
         # Connect signals
         dependency_manager.check_started.connect(self._on_check_started)
         dependency_manager.check_finished.connect(self._on_check_finished)
         dependency_manager.check_error.connect(self._on_error)
-        
+
         dependency_manager.download_started.connect(self._on_download_started)
         dependency_manager.download_progress.connect(self._on_download_progress)
         dependency_manager.download_finished.connect(self._on_download_finished)
@@ -153,7 +164,7 @@ class ComponentSettingCard(SettingCard):
             dependency_manager.check_update(self.component_key)
         elif text in ("立即更新", "立即安装"):
             dependency_manager.install_component(self.component_key)
-            
+
     def _on_import_clicked(self):
         # Filter based on component type
         exe_name = "yt-dlp.exe"
@@ -167,36 +178,33 @@ class ComponentSettingCard(SettingCard):
             exe_name = "ytarchive.exe"
         elif self.component_key == "atomicparsley":
             exe_name = "AtomicParsley.exe"
-        
+
         file, _ = QFileDialog.getOpenFileName(
-            self.window(),
-            f"选择 {exe_name}",
-            "",
-            f"Executables ({exe_name});;All Files (*)"
+            self.window(), f"选择 {exe_name}", "", f"Executables ({exe_name});;All Files (*)"
         )
-        
+
         if not file:
             return
-        
+
         try:
             src = Path(file)
             if not src.exists():
                 return
-            
+
             target_dir = dependency_manager.get_target_dir(self.component_key)
             target_path = target_dir / exe_name
-            
+
             # Simple check
             if src.stat().st_size == 0:
                 InfoBar.error("错误", "所选文件为空", parent=self.window())
                 return
-                
+
             shutil.copy2(src, target_path)
-            
+
             InfoBar.success("导入成功", f"已手动导入 {exe_name}", parent=self.window())
             # Refresh version info
             dependency_manager.check_update(self.component_key)
-            
+
         except Exception as e:
             InfoBar.error("导入失败", str(e), parent=self.window())
 
@@ -220,22 +228,22 @@ class ComponentSettingCard(SettingCard):
         if key != self.component_key:
             return
         self.actionButton.setEnabled(True)
-        
-        curr = result.get('current', 'unknown')
-        latest = result.get('latest', 'unknown')
-        has_update = result.get('update_available', False)
-        
+
+        curr = result.get("current", "unknown")
+        latest = result.get("latest", "unknown")
+        has_update = result.get("update_available", False)
+
         self.setContent(f"当前: {curr}  |  最新: {latest}")
-        
+
         title_text = self.titleLabel.text()
-        
+
         if has_update:
             self.actionButton.setText("立即更新")
             InfoBar.info(
                 f"发现新版本: {title_text}",
                 f"版本 {latest} 可用 (当前: {curr})",
                 duration=15000,
-                parent=self.window()
+                parent=self.window(),
             )
         else:
             if curr == "unknown":
@@ -246,7 +254,7 @@ class ComponentSettingCard(SettingCard):
                     "已是最新",
                     f"{title_text} 当前版本 {curr} 已是最新。",
                     duration=5000,
-                    parent=self.window()
+                    parent=self.window(),
                 )
 
     def _on_download_started(self, key):
@@ -275,13 +283,10 @@ class ComponentSettingCard(SettingCard):
         self.actionButton.setText("检查更新")
         # Trigger a re-check to update version text
         dependency_manager.check_update(self.component_key)
-        
+
         title_text = self.titleLabel.text()
         InfoBar.success(
-            "安装完成",
-            f"{title_text} 已成功安装/更新。",
-            duration=5000,
-            parent=self.window()
+            "安装完成", f"{title_text} 已成功安装/更新。", duration=5000, parent=self.window()
         )
 
     def _on_error(self, key, msg):
@@ -290,14 +295,9 @@ class ComponentSettingCard(SettingCard):
         self.progressBar.setVisible(False)
         self.actionButton.setEnabled(True)
         self.actionButton.setText("检查更新")  # Reset
-        
+
         title_text = self.titleLabel.text()
-        InfoBar.error(
-            f"{title_text} 错误",
-            msg,
-            duration=15000,
-            parent=self.window()
-        )
+        InfoBar.error(f"{title_text} 错误", msg, duration=15000, parent=self.window())
 
 
 class InlineComboBoxCard(SettingCard):
@@ -338,32 +338,32 @@ class InlineLineEditCard(SettingCard):
 
 class LanguageSelectionDialog(MessageBox):
     """语言多选对话框"""
-    
+
     def __init__(self, languages: list[tuple[str, str]], selected: list[str], parent=None):
         super().__init__("选择字幕语言", "", parent)
-        
+
         self.languages = languages
         self.selected_languages = selected.copy() if selected else []
         self.checkboxes = {}
-        
+
         # 创建内容布局
         from PySide6.QtWidgets import QFrame, QGridLayout, QScrollArea, QVBoxLayout, QWidget
-        
+
         content_widget = QWidget(self)
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # 添加说明
         hint_label = SubtitleLabel("请选择要下载的字幕语言（可多选）：", content_widget)
         content_layout.addWidget(hint_label)
         content_layout.addSpacing(12)
-        
+
         # 创建复选框容器
         checkbox_container = QFrame(content_widget)
         checkbox_layout = QGridLayout(checkbox_container)
         checkbox_layout.setContentsMargins(8, 8, 8, 8)
         checkbox_layout.setSpacing(12)
-        
+
         # 创建复选框（2列网格，更易读）
         row = 0
         col = 0
@@ -373,16 +373,16 @@ class LanguageSelectionDialog(MessageBox):
             checkbox.setMinimumWidth(280)  # 确保复选框有足够宽度显示完整文本
             checkbox_layout.addWidget(checkbox, row, col)
             self.checkboxes[code] = checkbox
-            
+
             col += 1
             if col >= 2:  # 2列布局
                 col = 0
                 row += 1
-        
+
         # 设置列宽度均匀分布
         checkbox_layout.setColumnStretch(0, 1)
         checkbox_layout.setColumnStretch(1, 1)
-        
+
         # 添加滚动区域
         scroll = QScrollArea(content_widget)
         scroll.setWidget(checkbox_container)
@@ -391,14 +391,14 @@ class LanguageSelectionDialog(MessageBox):
         scroll.setMaximumHeight(400)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         content_layout.addWidget(scroll)
-        
+
         # 将内容添加到对话框
         self.textLayout.addWidget(content_widget)
-        
+
         # 设置对话框大小（更宽以容纳2列布局）
         self.widget.setMinimumWidth(700)
         self.widget.setMaximumWidth(800)
-    
+
     def get_selected_languages(self) -> list[str]:
         """获取选中的语言代码列表"""
         return [code for code, checkbox in self.checkboxes.items() if checkbox.isChecked()]
@@ -406,9 +406,9 @@ class LanguageSelectionDialog(MessageBox):
 
 class LanguageMultiSelectCard(SettingCard):
     """语言多选卡片 - 按钮弹出对话框"""
-    
+
     selectionChanged = Signal(list)  # 选中语言列表变化信号
-    
+
     def __init__(
         self,
         icon,
@@ -419,19 +419,19 @@ class LanguageMultiSelectCard(SettingCard):
         parent=None,
     ):
         super().__init__(icon, title, content, parent)
-        
+
         self.languages = languages
         self.selected_languages = selected_default if selected_default else []
-        
+
         # 创建按钮显示当前选择
         self.selectButton = PushButton("选择语言", self)
         self.selectButton.clicked.connect(self._show_language_dialog)
         self.hBoxLayout.addWidget(self.selectButton, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
-        
+
         # 更新按钮文本
         self._update_button_text()
-    
+
     def _update_button_text(self):
         """更新按钮显示文本"""
         if not self.selected_languages:
@@ -442,12 +442,12 @@ class LanguageMultiSelectCard(SettingCard):
             for code in self.selected_languages[:3]:  # 最多显示3个
                 name = next((n for c, n in self.languages if c == code), code)
                 names.append(name)
-            
+
             text = ", ".join(names)
             if len(self.selected_languages) > 3:
                 text += f" 等 {len(self.selected_languages)} 种语言"
             self.selectButton.setText(text)
-    
+
     def _show_language_dialog(self):
         """显示语言选择对话框"""
         dialog = LanguageSelectionDialog(self.languages, self.selected_languages, self.window())
@@ -458,29 +458,183 @@ class LanguageMultiSelectCard(SettingCard):
                 self.selected_languages = new_selection
                 self._update_button_text()
                 self.selectionChanged.emit(self.selected_languages)
-    
+
     def get_selected_languages(self) -> list[str]:
         """获取选中的语言代码列表"""
         return self.selected_languages.copy()
-    
+
     def set_selected_languages(self, codes: list[str]):
         """设置选中的语言"""
         self.selected_languages = codes.copy() if codes else []
         self._update_button_text()
 
 
+from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem  # noqa: E402
+
+
+class AudioLanguageSelectionDialog(MessageBox):
+    """音频备选语言提取对话框 (支持排序列表)"""
+
+    def __init__(self, languages: list[tuple[str, str]], selected: list[str], parent=None):
+        super().__init__(
+            "选择并排序首选音轨语言", "选中的语言越靠前，优先级越高。可拖拽调整顺序。", parent
+        )
+        self.languages = languages
+        self.selected_languages_init = selected.copy() if selected else []
+
+        # UI
+        from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+
+        content_widget = QWidget(self)
+        layout = QHBoxLayout(content_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Left list: Available
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(12)
+        left_layout.addWidget(SubtitleLabel("可选语言:", content_widget))
+        self.available_list = QListWidget(content_widget)
+        self.available_list.setMinimumWidth(240)
+        self.available_list.setMinimumHeight(250)
+        left_layout.addWidget(self.available_list)
+        layout.addLayout(left_layout, stretch=1)
+
+        # Middle Layout: Add/Remove buttons
+        mid_layout = QVBoxLayout()
+        mid_layout.addStretch(1)
+        self.btn_add = PushButton("添加 >>", content_widget)
+        self.btn_remove = PushButton("<< 移除", content_widget)
+        mid_layout.addWidget(self.btn_add)
+        mid_layout.addWidget(self.btn_remove)
+        mid_layout.addStretch(1)
+        layout.addLayout(mid_layout, stretch=0)
+
+        # Right list: Selected
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(12)
+        right_layout.addWidget(SubtitleLabel("已选排序 (拖拽调整):", content_widget))
+        self.selected_list = QListWidget(content_widget)
+        self.selected_list.setMinimumWidth(240)
+        self.selected_list.setMinimumHeight(250)
+        self.selected_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        right_layout.addWidget(self.selected_list)
+        layout.addLayout(right_layout, stretch=1)
+
+        self.textLayout.addWidget(content_widget)
+        self.widget.setMinimumWidth(650)
+        self.widget.setMinimumHeight(450)
+
+        # Signals
+        self.btn_add.clicked.connect(self._on_add)
+        self.btn_remove.clicked.connect(self._on_remove)
+
+        # Populate
+        self._populate()
+
+    def _populate(self):
+        # 建立快速查找表
+        lang_dict = {code: name for code, name in self.languages}
+
+        # 填充已选
+        for code in self.selected_languages_init:
+            name = lang_dict.get(code, code)
+            item = QListWidgetItem(f"{name} ({code})")
+            item.setData(Qt.ItemDataRole.UserRole, code)
+            self.selected_list.addItem(item)
+
+        # 填充备选
+        for code, name in self.languages:
+            if code not in self.selected_languages_init:
+                item = QListWidgetItem(f"{name} ({code})")
+                item.setData(Qt.ItemDataRole.UserRole, code)
+                self.available_list.addItem(item)
+
+    def _on_add(self):
+        for item in self.available_list.selectedItems():
+            row = self.available_list.row(item)
+            self.available_list.takeItem(row)
+            self.selected_list.addItem(item)
+
+    def _on_remove(self):
+        for item in self.selected_list.selectedItems():
+            row = self.selected_list.row(item)
+            self.selected_list.takeItem(row)
+            self.available_list.addItem(item)
+
+    def get_selected_languages(self) -> list[str]:
+        res = []
+        for i in range(self.selected_list.count()):
+            item = self.selected_list.item(i)
+            res.append(item.data(Qt.ItemDataRole.UserRole))
+        return res
+
+
+class AudioLanguageMultiSelectCard(SettingCard):
+    """支持顺位排序的音频语言多选卡片"""
+
+    selectionChanged = Signal(list)
+
+    def __init__(
+        self,
+        icon,
+        title: str,
+        content: str | None,
+        languages: list[tuple[str, str]],
+        selected_default: list[str] | None = None,
+        parent=None,
+    ):
+        super().__init__(icon, title, content, parent)
+        self.languages = languages
+        self.selected_languages = selected_default if selected_default else []
+
+        self.selectButton = PushButton("设置首选音轨...", self)
+        self.selectButton.clicked.connect(self._show_dialog)
+        self.hBoxLayout.addWidget(self.selectButton, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(16)
+
+        self._update_button_text()
+
+    def _update_button_text(self):
+        if not self.selected_languages:
+            self.selectButton.setText("选择语言 (未设置)")
+        else:
+            names = []
+            for code in self.selected_languages[:3]:
+                name = next((n for c, n in self.languages if c == code), code)
+                names.append(name)
+            text = " > ".join(names)
+            if len(self.selected_languages) > 3:
+                text += " ..."
+            self.selectButton.setText(text)
+
+    def _show_dialog(self):
+        dialog = AudioLanguageSelectionDialog(
+            self.languages, self.selected_languages, self.window()
+        )
+        if dialog.exec():
+            new_val = dialog.get_selected_languages()
+            if new_val != self.selected_languages:
+                self.selected_languages = new_val
+                self._update_button_text()
+                self.selectionChanged.emit(self.selected_languages)
+
+    def set_selected_languages(self, codes: list[str]):
+        self.selected_languages = codes.copy() if codes else []
+        self._update_button_text()
+
+
 class EmbedTypeComboCard(SettingCard):
     """嵌入类型下拉框卡片"""
-    
+
     valueChanged = Signal(str)  # soft/external/hard
-    
+
     # 嵌入类型映射
     EMBED_TYPES = [
         ("soft", "软嵌入（推荐） - 封装到容器，可开关，多语言"),
         ("external", "外置文件 - 独立.srt，易编辑，兼容性最佳"),
         ("hard", "硬嵌入（烧录） - 永久显示，最多2语言"),
     ]
-    
+
     def __init__(
         self,
         icon,
@@ -490,36 +644,36 @@ class EmbedTypeComboCard(SettingCard):
         parent=None,
     ):
         super().__init__(icon, title, content, parent)
-        
+
         # 创建下拉框
         self.comboBox = ComboBox(self)
         self.comboBox.setMinimumWidth(280)
-        
+
         # 添加选项
         for code, display_text in self.EMBED_TYPES:
             self.comboBox.addItem(display_text, userData=code)
-        
+
         # 设置默认值
         self.set_value(default)
-        
+
         # 连接信号
         self.comboBox.currentIndexChanged.connect(self._on_selection_changed)
-        
+
         # 添加到布局
         self.hBoxLayout.addWidget(self.comboBox, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
-    
+
     def _on_selection_changed(self, index: int):
         """下拉框选择改变"""
         value = self.comboBox.itemData(index)
         if value:
             self.valueChanged.emit(value)
-    
+
     def get_value(self) -> str:
         """获取当前选中的值"""
         current_index = self.comboBox.currentIndex()
         return self.comboBox.itemData(current_index) or "soft"
-    
+
     def set_value(self, value: str):
         """设置选中的值"""
         for i in range(self.comboBox.count()):
@@ -614,44 +768,89 @@ class SettingsPage(QWidget):
         self.pivotLayout = QVBoxLayout(self.pivotContainer)
         self.pivot = SegmentedWidget(self)
         self.pivotLayout.addWidget(self.pivot)
-        self.pivotLayout.setContentsMargins(30, 15, 30, 5) # Align with content margins
-        
+        self.pivotLayout.setContentsMargins(30, 15, 30, 5)  # Align with content margins
+
         self.mainLayout.addWidget(self.pivotContainer)
-        
+
         # Content Stack
         self.stackedWidget = QStackedWidget(self)
         self.mainLayout.addWidget(self.stackedWidget)
-        
+
         # Cookie刷新worker引用（防止垃圾回收）
         self._cookie_worker = None
-        
+
         # Init Pages
-        self.generalInterface, self.generalScroll, self.generalLayout = self._create_page("generalInterface")
-        self.featuresInterface, self.featuresScroll, self.featuresLayout = self._create_page("featuresInterface")
-        self.componentsInterface, self.componentsScroll, self.componentsLayout = self._create_page("componentsInterface")
-        self.systemInterface, self.systemScroll, self.systemLayout = self._create_page("systemInterface")
+        self.generalInterface, self.generalScroll, self.generalLayout = self._create_page(
+            "generalInterface"
+        )
+        self.downloadInterface, self.downloadScroll, self.downloadLayout = self._create_page(
+            "downloadInterface"
+        )
+        self.networkInterface, self.networkScroll, self.networkLayout = self._create_page(
+            "networkInterface"
+        )
+        self.featuresInterface, self.featuresScroll, self.featuresLayout = self._create_page(
+            "featuresInterface"
+        )
+        self.componentsInterface, self.componentsScroll, self.componentsLayout = self._create_page(
+            "componentsInterface"
+        )
+        self.systemInterface, self.systemScroll, self.systemLayout = self._create_page(
+            "systemInterface"
+        )
 
         # Add pages to stack
         self.stackedWidget.addWidget(self.generalInterface)
+        self.stackedWidget.addWidget(self.downloadInterface)
+        self.stackedWidget.addWidget(self.networkInterface)
         self.stackedWidget.addWidget(self.featuresInterface)
         self.stackedWidget.addWidget(self.componentsInterface)
         self.stackedWidget.addWidget(self.systemInterface)
-        
+
         # Setup Pivot items
-        self.pivot.addItem(routeKey="generalInterface", text="通用", onClick=lambda: self.stackedWidget.setCurrentWidget(self.generalInterface))
-        self.pivot.addItem(routeKey="featuresInterface", text="功能", onClick=lambda: self.stackedWidget.setCurrentWidget(self.featuresInterface))
-        self.pivot.addItem(routeKey="componentsInterface", text="组件", onClick=lambda: self.stackedWidget.setCurrentWidget(self.componentsInterface))
-        self.pivot.addItem(routeKey="systemInterface", text="系统", onClick=lambda: self.stackedWidget.setCurrentWidget(self.systemInterface))
-        
+        self.pivot.addItem(
+            routeKey="generalInterface",
+            text="账号验证",
+            onClick=lambda: self.stackedWidget.setCurrentWidget(self.generalInterface),
+        )
+        self.pivot.addItem(
+            routeKey="downloadInterface",
+            text="下载",
+            onClick=lambda: self.stackedWidget.setCurrentWidget(self.downloadInterface),
+        )
+        self.pivot.addItem(
+            routeKey="networkInterface",
+            text="网络",
+            onClick=lambda: self.stackedWidget.setCurrentWidget(self.networkInterface),
+        )
+        self.pivot.addItem(
+            routeKey="featuresInterface",
+            text="功能",
+            onClick=lambda: self.stackedWidget.setCurrentWidget(self.featuresInterface),
+        )
+        self.pivot.addItem(
+            routeKey="componentsInterface",
+            text="组件",
+            onClick=lambda: self.stackedWidget.setCurrentWidget(self.componentsInterface),
+        )
+        self.pivot.addItem(
+            routeKey="systemInterface",
+            text="系统",
+            onClick=lambda: self.stackedWidget.setCurrentWidget(self.systemInterface),
+        )
+
         self.pivot.setCurrentItem("generalInterface")
         self.stackedWidget.setCurrentWidget(self.generalInterface)
         self.stackedWidget.currentChanged.connect(self._on_current_tab_changed)
 
-        # Init Groups into respective pages
         # === General Tab ===
-        self._init_download_group(self.generalScroll.widget(), self.generalLayout)
-        self._init_network_group(self.generalScroll.widget(), self.generalLayout)
         self._init_account_group(self.generalScroll.widget(), self.generalLayout)
+
+        # === Download Tab ===
+        self._init_download_group(self.downloadScroll.widget(), self.downloadLayout)
+
+        # === Network Tab ===
+        self._init_network_group(self.networkScroll.widget(), self.networkLayout)
 
         # === Features Tab ===
         self._init_automation_group(self.featuresScroll.widget(), self.featuresLayout)
@@ -759,7 +958,9 @@ class SettingsPage(QWidget):
             placeholder="127.0.0.1:7890",
             parent=self.networkGroup,
         )
-        self.proxyEditCard.lineEdit.setText(str(config_manager.get("proxy_url") or "127.0.0.1:7890"))
+        self.proxyEditCard.lineEdit.setText(
+            str(config_manager.get("proxy_url") or "127.0.0.1:7890")
+        )
         self.proxyEditCard.lineEdit.editingFinished.connect(self._on_proxy_url_edited)
 
         self.networkGroup.addSettingCard(self.proxyModeCard)
@@ -769,7 +970,7 @@ class SettingsPage(QWidget):
     def _init_account_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化账号与 Cookie 设置组"""
         self.accountGroup = SettingCardGroup("账号验证 (Cookie)", parent_widget)
-        
+
         # === Cookie Sentinel 配置 ===
         self.cookieModeCard = InlineComboBoxCard(
             FluentIcon.PEOPLE,
@@ -785,9 +986,16 @@ class SettingsPage(QWidget):
             "选择浏览器",
             "Chromium 内核需管理员权限，Firefox 内核无需管理员权限",
             [
-                "Microsoft Edge", "Google Chrome (⚠️不稳定)", "Chromium",
-                "Brave", "Opera", "Opera GX", "Vivaldi", "Arc",
-                "Firefox", "LibreWolf"
+                "Microsoft Edge",
+                "Google Chrome (⚠️不稳定)",
+                "Chromium",
+                "Brave",
+                "Opera",
+                "Opera GX",
+                "Vivaldi",
+                "Arc",
+                "Firefox",
+                "LibreWolf",
             ],
             self.accountGroup,
         )
@@ -812,7 +1020,7 @@ class SettingsPage(QWidget):
             self.accountGroup,
         )
         self.cookieFileCard.clicked.connect(self._select_cookie_file)
-        
+
         # Cookie 状态显示（带打开位置按钮）
         self.cookieStatusCard = PushSettingCard(
             "打开位置",
@@ -829,7 +1037,7 @@ class SettingsPage(QWidget):
         self.accountGroup.addSettingCard(self.refreshCookieCard)
         self.accountGroup.addSettingCard(self.cookieStatusCard)
         self.accountGroup.addSettingCard(self.cookieFileCard)
-        
+
         layout.addWidget(self.accountGroup)
 
         # Make Cookie dependent cards look like "children" of cookie mode card
@@ -849,7 +1057,9 @@ class SettingsPage(QWidget):
             "开启后，每隔 24 小时尝试自动检查 yt-dlp 和 ffmpeg 更新（默认开启）",
             parent=self.coreGroup,
         )
-        self.checkUpdatesOnStartupCard.checkedChanged.connect(self._on_check_updates_startup_changed)
+        self.checkUpdatesOnStartupCard.checkedChanged.connect(
+            self._on_check_updates_startup_changed
+        )
 
         # Update Source
         self.updateSourceCard = InlineComboBoxCard(
@@ -867,33 +1077,29 @@ class SettingsPage(QWidget):
             FluentIcon.DOWNLOAD,
             "yt-dlp 引擎",
             "点击检查更新以获取最新版本",
-            self.coreGroup
+            self.coreGroup,
         )
-        
+
         self.ffmpegCard = ComponentSettingCard(
-            "ffmpeg",
-            FluentIcon.VIDEO,
-            "FFmpeg 引擎",
-            "点击检查更新以获取最新版本",
-            self.coreGroup
+            "ffmpeg", FluentIcon.VIDEO, "FFmpeg 引擎", "点击检查更新以获取最新版本", self.coreGroup
         )
-        
+
         # JS Runtime (Deno only for auto-update now)
         self.denoCard = ComponentSettingCard(
             "deno",
             FluentIcon.CODE,
             "JS Runtime (Deno)",
             "用于加速 yt-dlp 解析（点击检查更新）",
-            self.coreGroup
+            self.coreGroup,
         )
-        
+
         # POT Provider (PO Token 服务)
         self.potProviderCard = ComponentSettingCard(
             "pot-provider",
             FluentIcon.CERTIFICATE,
             "POT Provider",
             "用于绕过 YouTube 机器人检测（点击检查更新）",
-            self.coreGroup
+            self.coreGroup,
         )
 
         # AtomicParsley (封面嵌入工具)
@@ -902,10 +1108,8 @@ class SettingsPage(QWidget):
             FluentIcon.PHOTO,
             "AtomicParsley",
             "用于 MP4/M4A 封面嵌入（启用封面嵌入功能需要此工具）",
-            self.coreGroup
+            self.coreGroup,
         )
-
-
 
         self.jsRuntimeCard = InlineComboBoxCard(
             FluentIcon.CODE,
@@ -955,7 +1159,9 @@ class SettingsPage(QWidget):
             pick_file=True,
             file_filter="Executable Files (*.exe);;All Files (*)",
         )
-        self.jsRuntimePathCard.valueChanged.connect(lambda _: self.jsRuntimePathCard.setContent(self._js_runtime_status_text()))
+        self.jsRuntimePathCard.valueChanged.connect(
+            lambda _: self.jsRuntimePathCard.setContent(self._js_runtime_status_text())
+        )
 
         self.advancedGroup.addSettingCard(self.poTokenCard)
         self.advancedGroup.addSettingCard(self.jsRuntimePathCard)
@@ -979,7 +1185,9 @@ class SettingsPage(QWidget):
             ["智能识别 (推荐)", "仅普通下载", "仅 VR 下载", "仅下载字幕", "仅下载封面"],
             parent=self.automationGroup,
         )
-        self.clipboardActionModeCard.comboBox.currentIndexChanged.connect(self._on_clipboard_action_mode_changed)
+        self.clipboardActionModeCard.comboBox.currentIndexChanged.connect(
+            self._on_clipboard_action_mode_changed
+        )
 
         self.clipboardWindowToFrontCard = InlineSwitchCard(
             FluentIcon.APPLICATION,
@@ -987,7 +1195,9 @@ class SettingsPage(QWidget):
             "识别到链接并弹出解析窗口时，自动将其置于前台（默认开启）",
             parent=self.automationGroup,
         )
-        self.clipboardWindowToFrontCard.checkedChanged.connect(self._on_clipboard_window_to_front_changed)
+        self.clipboardWindowToFrontCard.checkedChanged.connect(
+            self._on_clipboard_window_to_front_changed
+        )
 
         self.automationGroup.addSettingCard(self.clipboardDetectCard)
         self.automationGroup.addSettingCard(self.clipboardActionModeCard)
@@ -1006,12 +1216,14 @@ class SettingsPage(QWidget):
             self.vrGroup,
         )
         self.vrHardwareStatusCard.hBoxLayout.addSpacing(16)
-        
+
         # 刷新按钮
         self.vrRefreshHardwareBtn = ToolButton(FluentIcon.SYNC, self.vrHardwareStatusCard)
         self.vrRefreshHardwareBtn.setToolTip("重新检测硬件")
         self.vrRefreshHardwareBtn.clicked.connect(self._update_vr_hardware_status)
-        self.vrHardwareStatusCard.hBoxLayout.addWidget(self.vrRefreshHardwareBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.vrHardwareStatusCard.hBoxLayout.addWidget(
+            self.vrRefreshHardwareBtn, 0, Qt.AlignmentFlag.AlignRight
+        )
         self.vrHardwareStatusCard.hBoxLayout.addSpacing(16)
 
         # EAC 自动转码开关
@@ -1041,7 +1253,9 @@ class SettingsPage(QWidget):
             ["4K (2160p) - 安全", "5K/6K - 警告", "8K (4320p) - 高危"],
             self.vrGroup,
         )
-        self.vrMaxResolutionCard.comboBox.currentIndexChanged.connect(self._on_vr_max_resolution_changed)
+        self.vrMaxResolutionCard.comboBox.currentIndexChanged.connect(
+            self._on_vr_max_resolution_changed
+        )
 
         # CPU 占用限制
         self.vrCpuPriorityCard = InlineComboBoxCard(
@@ -1051,7 +1265,9 @@ class SettingsPage(QWidget):
             ["低 (后台不卡顿)", "中 (均衡)", "高 (全速)"],
             self.vrGroup,
         )
-        self.vrCpuPriorityCard.comboBox.currentIndexChanged.connect(self._on_vr_cpu_priority_changed)
+        self.vrCpuPriorityCard.comboBox.currentIndexChanged.connect(
+            self._on_vr_cpu_priority_changed
+        )
 
         # 保留原片
         self.vrKeepSourceCard = InlineSwitchCard(
@@ -1069,7 +1285,7 @@ class SettingsPage(QWidget):
         self.vrGroup.addSettingCard(self.vrCpuPriorityCard)
         self.vrGroup.addSettingCard(self.vrKeepSourceCard)
         layout.addWidget(self.vrGroup)
-        
+
         # 初始化状态
         self._update_vr_hardware_status()
 
@@ -1123,6 +1339,36 @@ class SettingsPage(QWidget):
     def _init_behavior_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.behaviorGroup = SettingCardGroup("行为策略", parent_widget)
 
+        # 音频首选语言 (支持多选排序)
+        config = config_manager.get("preferred_audio_languages", ["orig", "zh-Hans", "en"])
+        if not isinstance(config, list):
+            config = ["orig", "zh-Hans", "en"]
+
+        langs = [
+            ("orig", "原音/默认"),
+            ("zh-Hans", "中文 (简体)"),
+            ("zh-Hant", "中文 (繁体)"),
+            ("en", "英语"),
+            ("ja", "日语"),
+            ("ko", "韩语"),
+            ("ru", "俄语"),
+            ("fr", "法语"),
+            ("de", "德语"),
+            ("es", "西班牙语"),
+        ]
+
+        self.preferredAudioLanguageCard = AudioLanguageMultiSelectCard(
+            FluentIcon.MUSIC,
+            "首选音轨语言 (多音轨视频)",
+            "当视频包含多个语言配音时，优先下载哪种语言的轨段 (可多选并排序)",
+            languages=langs,
+            selected_default=config,
+            parent=self.behaviorGroup,
+        )
+        self.preferredAudioLanguageCard.selectionChanged.connect(
+            self._on_preferred_audio_language_changed
+        )
+
         self.deletionPolicyCard = InlineComboBoxCard(
             FluentIcon.DELETE,
             "移除任务时的默认行为",
@@ -1130,7 +1376,9 @@ class SettingsPage(QWidget):
             ["每次询问 (默认)", "仅移除记录 (保留文件)", "彻底删除 (同时删除文件)"],
             self.behaviorGroup,
         )
-        self.deletionPolicyCard.comboBox.currentIndexChanged.connect(self._on_deletion_policy_changed)
+        self.deletionPolicyCard.comboBox.currentIndexChanged.connect(
+            self._on_deletion_policy_changed
+        )
 
         self.playlistSkipAuthcheckCard = InlineSwitchCard(
             FluentIcon.VIDEO,
@@ -1138,8 +1386,11 @@ class SettingsPage(QWidget):
             "跳过 YouTube 登录验证检查（authcheck）。可加快大列表解析，但可能导致部分受限视频无法解析（默认关闭）",
             parent=self.behaviorGroup,
         )
-        self.playlistSkipAuthcheckCard.checkedChanged.connect(self._on_playlist_skip_authcheck_changed)
+        self.playlistSkipAuthcheckCard.checkedChanged.connect(
+            self._on_playlist_skip_authcheck_changed
+        )
 
+        self.behaviorGroup.addSettingCard(self.preferredAudioLanguageCard)
         self.behaviorGroup.addSettingCard(self.deletionPolicyCard)
         self.behaviorGroup.addSettingCard(self.playlistSkipAuthcheckCard)
         layout.addWidget(self.behaviorGroup)
@@ -1168,7 +1419,7 @@ class SettingsPage(QWidget):
 
         self.postprocessGroup.addSettingCard(self.embedThumbnailCard)
         self.postprocessGroup.addSettingCard(self.embedMetadataCard)
-        
+
         # === SponsorBlock 广告跳过 ===
         # 主开关
         self.sponsorBlockCard = InlineSwitchCard(
@@ -1178,7 +1429,7 @@ class SettingsPage(QWidget):
             parent=self.postprocessGroup,
         )
         self.sponsorBlockCard.checkedChanged.connect(self._on_sponsorblock_changed)
-        
+
         # 类别选择（点击按钮打开对话框）
         self.sponsorBlockCategoriesCard = SettingCard(
             FluentIcon.SETTING,
@@ -1186,29 +1437,29 @@ class SettingsPage(QWidget):
             self._get_sponsorblock_categories_text(),
             parent=self.postprocessGroup,
         )
-        
+
         # 添加选择按钮
         self._sponsorBlockCategoriesBtn = PushButton("选择类别")
         self._sponsorBlockCategoriesBtn.clicked.connect(self._show_sponsorblock_categories_dialog)
         self.sponsorBlockCategoriesCard.hBoxLayout.addWidget(self._sponsorBlockCategoriesBtn)
         self.sponsorBlockCategoriesCard.hBoxLayout.addSpacing(16)
-        
+
         # 类别复选框容器（用于对话框）
         self._sponsorblock_checkboxes: dict[str, CheckBox] = {}
-        
+
         # 添加到组
         self.postprocessGroup.addSettingCard(self.sponsorBlockCard)
         self.postprocessGroup.addSettingCard(self.sponsorBlockCategoriesCard)
-        
+
         # 缩进类别卡片
         self._indent_setting_card(self.sponsorBlockCategoriesCard)
-        
+
         layout.addWidget(self.postprocessGroup)
 
     def _init_subtitle_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         """初始化字幕配置组"""
         self.subtitleGroup = SettingCardGroup("字幕下载", parent_widget)
-        
+
         # 字幕启用开关
         self.subtitleEnabledCard = InlineSwitchCard(
             FluentIcon.DOCUMENT,
@@ -1217,7 +1468,7 @@ class SettingsPage(QWidget):
             parent=self.subtitleGroup,
         )
         self.subtitleEnabledCard.checkedChanged.connect(self._on_subtitle_enabled_changed)
-        
+
         # 语言多选卡片 (NEW)
         config = config_manager.get_subtitle_config()
         current_languages = config.default_languages if config.default_languages else []
@@ -1230,7 +1481,7 @@ class SettingsPage(QWidget):
             parent=self.subtitleGroup,
         )
         self.subtitleLanguagesCard.selectionChanged.connect(self._on_subtitle_languages_changed)
-        
+
         # 嵌入类型下拉框卡片 (NEW)
         self.subtitleEmbedTypeCard = EmbedTypeComboCard(
             FluentIcon.VIDEO,
@@ -1240,7 +1491,7 @@ class SettingsPage(QWidget):
             parent=self.subtitleGroup,
         )
         self.subtitleEmbedTypeCard.valueChanged.connect(self._on_subtitle_embed_type_changed)
-        
+
         # 嵌入模式 (询问/总是/从不)
         self.subtitleEmbedModeCard = InlineComboBoxCard(
             FluentIcon.CHECKBOX,
@@ -1249,8 +1500,10 @@ class SettingsPage(QWidget):
             ["总是嵌入", "从不嵌入", "每次询问"],
             parent=self.subtitleGroup,
         )
-        self.subtitleEmbedModeCard.comboBox.currentIndexChanged.connect(self._on_subtitle_embed_mode_changed)
-        
+        self.subtitleEmbedModeCard.comboBox.currentIndexChanged.connect(
+            self._on_subtitle_embed_mode_changed
+        )
+
         # 字幕格式
         self.subtitleFormatCard = InlineComboBoxCard(
             FluentIcon.DOCUMENT,
@@ -1259,8 +1512,10 @@ class SettingsPage(QWidget):
             ["SRT", "ASS", "VTT"],
             parent=self.subtitleGroup,
         )
-        self.subtitleFormatCard.comboBox.currentIndexChanged.connect(self._on_subtitle_format_changed)
-        
+        self.subtitleFormatCard.comboBox.currentIndexChanged.connect(
+            self._on_subtitle_format_changed
+        )
+
         # 保留外置字幕文件开关（仅软/硬嵌入时有意义）
         self.subtitleKeepSeparateCard = InlineSwitchCard(
             FluentIcon.SAVE,
@@ -1268,8 +1523,10 @@ class SettingsPage(QWidget):
             "嵌入字幕后是否同时保留独立的字幕文件（.srt/.ass 等）",
             parent=self.subtitleGroup,
         )
-        self.subtitleKeepSeparateCard.checkedChanged.connect(self._on_subtitle_keep_separate_changed)
-        
+        self.subtitleKeepSeparateCard.checkedChanged.connect(
+            self._on_subtitle_keep_separate_changed
+        )
+
         # 添加卡片到组
         self.subtitleGroup.addSettingCard(self.subtitleEnabledCard)
         self.subtitleGroup.addSettingCard(self.subtitleLanguagesCard)
@@ -1277,14 +1534,14 @@ class SettingsPage(QWidget):
         self.subtitleGroup.addSettingCard(self.subtitleEmbedModeCard)
         self.subtitleGroup.addSettingCard(self.subtitleFormatCard)
         self.subtitleGroup.addSettingCard(self.subtitleKeepSeparateCard)
-        
+
         # 缩进依赖项
         self._indent_setting_card(self.subtitleLanguagesCard)
         self._indent_setting_card(self.subtitleEmbedTypeCard)
         self._indent_setting_card(self.subtitleEmbedModeCard)
         self._indent_setting_card(self.subtitleFormatCard)
         self._indent_setting_card(self.subtitleKeepSeparateCard)
-        
+
         layout.addWidget(self.subtitleGroup)
 
     def _init_about_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
@@ -1311,34 +1568,39 @@ class SettingsPage(QWidget):
             f"日志目录: {LOG_DIR}",
             self.logGroup,
         )
-        
+
         # 添加按钮到卡片
         self.viewLogBtn = PushButton("查看日志", self.logCard)
         self.viewLogBtn.clicked.connect(self._on_view_log_clicked)
-        
+
         self.openLogDirBtn = ToolButton(FluentIcon.FOLDER, self.logCard)
         self.openLogDirBtn.setToolTip("打开日志目录")
-        self.openLogDirBtn.installEventFilter(ToolTipFilter(self.openLogDirBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.openLogDirBtn.installEventFilter(
+            ToolTipFilter(self.openLogDirBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.openLogDirBtn.clicked.connect(self._on_open_log_dir)
-        
+
         self.cleanLogBtn = ToolButton(FluentIcon.DELETE, self.logCard)
         self.cleanLogBtn.setToolTip("清理所有日志")
-        self.cleanLogBtn.installEventFilter(ToolTipFilter(self.cleanLogBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.cleanLogBtn.installEventFilter(
+            ToolTipFilter(self.cleanLogBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.cleanLogBtn.clicked.connect(self._on_clean_log_clicked)
-        
+
         self.logCard.hBoxLayout.addWidget(self.viewLogBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.logCard.hBoxLayout.addSpacing(8)
         self.logCard.hBoxLayout.addWidget(self.openLogDirBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.logCard.hBoxLayout.addSpacing(8)
         self.logCard.hBoxLayout.addWidget(self.cleanLogBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.logCard.hBoxLayout.addSpacing(16)
-        
+
         self.logGroup.addSettingCard(self.logCard)
         layout.addWidget(self.logGroup)
 
     def _on_view_log_clicked(self):
         """打开日志查看器"""
         from .components.log_viewer_dialog import LogViewerDialog
+
         dialog = LogViewerDialog(self.window())
         dialog.exec()
 
@@ -1355,15 +1617,15 @@ class SettingsPage(QWidget):
     def _on_clean_log_clicked(self):
         """清理所有日志"""
         from qfluentwidgets import MessageBox
+
         box = MessageBox(
-            "确认清理",
-            f"确定要删除所有日志文件吗？\n\n日志目录: {LOG_DIR}",
-            self.window()
+            "确认清理", f"确定要删除所有日志文件吗？\n\n日志目录: {LOG_DIR}", self.window()
         )
         if box.exec():
             try:
                 if os.path.exists(LOG_DIR):
                     import shutil
+
                     for f in os.listdir(LOG_DIR):
                         fp = os.path.join(LOG_DIR, f)
                         try:
@@ -1423,16 +1685,18 @@ class SettingsPage(QWidget):
         self.proxyModeCard.comboBox.setCurrentIndex(proxy_index_map.get(proxy_mode, 0))
         self.proxyModeCard.comboBox.blockSignals(False)
         self._update_proxy_edit_visibility()
-        self.proxyEditCard.lineEdit.setText(str(config_manager.get("proxy_url") or "127.0.0.1:7890"))
+        self.proxyEditCard.lineEdit.setText(
+            str(config_manager.get("proxy_url") or "127.0.0.1:7890")
+        )
 
         # Cookie 配置从 auth_service 加载
         from ..auth.auth_service import AuthSourceType, auth_service
-        
+
         current_source = auth_service.current_source
-        
+
         self.cookieModeCard.comboBox.blockSignals(True)
         self.browserCard.comboBox.blockSignals(True)
-        
+
         # 设置 Cookie 模式
         if current_source == AuthSourceType.FILE:
             self.cookieModeCard.comboBox.setCurrentIndex(1)  # 手动文件
@@ -1440,7 +1704,7 @@ class SettingsPage(QWidget):
                 self.cookieFileCard.setContent(auth_service._current_file_path)
         else:
             self.cookieModeCard.comboBox.setCurrentIndex(0)  # 自动提取
-            
+
             # 设置浏览器（顺序与UI一致）
             browser_map = {
                 AuthSourceType.EDGE: 0,
@@ -1456,13 +1720,12 @@ class SettingsPage(QWidget):
             }
             browser_idx = browser_map.get(current_source, 0)
             self.browserCard.comboBox.setCurrentIndex(browser_idx)
-        
+
         self.cookieModeCard.comboBox.blockSignals(False)
         self.browserCard.comboBox.blockSignals(False)
-        
+
         # 触发可见性更新
         self._on_cookie_mode_changed(self.cookieModeCard.comboBox.currentIndex())
-
 
         self.poTokenCard.setValue(str(config_manager.get("youtube_po_token") or ""))
 
@@ -1478,7 +1741,7 @@ class SettingsPage(QWidget):
                 dependency_manager.check_update("deno")
                 dependency_manager.check_update("pot-provider")
                 config_manager.set("last_update_check", now)
-        
+
         self.jsRuntimePathCard.setContent(self._js_runtime_status_text())
         self.jsRuntimePathCard.setValue(str(config_manager.get("js_runtime_path") or ""))
 
@@ -1504,6 +1767,12 @@ class SettingsPage(QWidget):
         self.deletionPolicyCard.comboBox.setCurrentIndex(policy_map.get(policy, 0))
         self.deletionPolicyCard.comboBox.blockSignals(False)
 
+        # Preferred Audio Languages (Array Selection)
+        audio_langs = config_manager.get("preferred_audio_languages")
+        if not isinstance(audio_langs, list):
+            audio_langs = ["orig", "zh-Hans", "en"]
+        self.preferredAudioLanguageCard.set_selected_languages(audio_langs)
+
         # Playlist: skip authcheck
         skip_authcheck = bool(config_manager.get("playlist_skip_authcheck") or False)
         self.playlistSkipAuthcheckCard.switchButton.blockSignals(True)
@@ -1527,42 +1796,46 @@ class SettingsPage(QWidget):
         self.sponsorBlockCard.switchButton.blockSignals(True)
         self.sponsorBlockCard.switchButton.setChecked(sponsorblock_enabled)
         self.sponsorBlockCard.switchButton.blockSignals(False)
-        
+
         # SponsorBlock: 更新类别卡片描述和可见性
         self.sponsorBlockCategoriesCard.setContent(self._get_sponsorblock_categories_text())
         self._update_sponsorblock_categories_visibility(sponsorblock_enabled)
-        
+
         # Subtitle: enabled switch
         subtitle_enabled = bool(config_manager.get("subtitle_enabled", False))
         self.subtitleEnabledCard.switchButton.blockSignals(True)
         self.subtitleEnabledCard.switchButton.setChecked(subtitle_enabled)
         self.subtitleEnabledCard.switchButton.blockSignals(False)
-        
+
         # Subtitle: languages (NEW - 加载到多选卡片)
         subtitle_config = config_manager.get_subtitle_config()
-        subtitle_languages = subtitle_config.default_languages if subtitle_config.default_languages else ["zh-Hans", "en"]
+        subtitle_languages = (
+            subtitle_config.default_languages
+            if subtitle_config.default_languages
+            else ["zh-Hans", "en"]
+        )
         # 不需要阻塞信号，因为 set_selected_languages 不会触发信号
         self.subtitleLanguagesCard.set_selected_languages(subtitle_languages)
-        
+
         # Subtitle: embed type (NEW)
         self.subtitleEmbedTypeCard.comboBox.blockSignals(True)
         self.subtitleEmbedTypeCard.set_value(subtitle_config.embed_type)
         self.subtitleEmbedTypeCard.comboBox.blockSignals(False)
-        
+
         # Subtitle: embed mode
         embed_mode = str(config_manager.get("subtitle_embed_mode", "always"))
         embed_mode_map = {"always": 0, "never": 1, "ask": 2}
         self.subtitleEmbedModeCard.comboBox.blockSignals(True)
         self.subtitleEmbedModeCard.comboBox.setCurrentIndex(embed_mode_map.get(embed_mode, 0))
         self.subtitleEmbedModeCard.comboBox.blockSignals(False)
-        
+
         # Subtitle: format
         subtitle_format = str(config_manager.get("subtitle_format", "srt")).lower()
         format_map = {"srt": 0, "ass": 1, "vtt": 2}
         self.subtitleFormatCard.comboBox.blockSignals(True)
         self.subtitleFormatCard.comboBox.setCurrentIndex(format_map.get(subtitle_format, 0))
         self.subtitleFormatCard.comboBox.blockSignals(False)
-        
+
         # Subtitle: keep separate file
         keep_separate = bool(config_manager.get("subtitle_write_separate_file", False))
         self.subtitleKeepSeparateCard.switchButton.blockSignals(True)
@@ -1571,7 +1844,9 @@ class SettingsPage(QWidget):
 
         # VR Settings
         self.vrEacAutoConvertCard.switchButton.blockSignals(True)
-        self.vrEacAutoConvertCard.switchButton.setChecked(config_manager.get("vr_eac_auto_convert", False))
+        self.vrEacAutoConvertCard.switchButton.setChecked(
+            config_manager.get("vr_eac_auto_convert", False)
+        )
         self.vrEacAutoConvertCard.switchButton.blockSignals(False)
 
         vr_hw_mode = str(config_manager.get("vr_hw_accel_mode", "auto"))
@@ -1595,22 +1870,24 @@ class SettingsPage(QWidget):
         self.vrKeepSourceCard.switchButton.blockSignals(True)
         self.vrKeepSourceCard.switchButton.setChecked(config_manager.get("vr_keep_source", True))
         self.vrKeepSourceCard.switchButton.blockSignals(False)
-        
+
         # Update subtitle settings visibility
         self._update_subtitle_settings_visibility(subtitle_enabled)
 
     def _on_max_concurrent_changed(self, index: int):
         val = index + 1
         config_manager.set("max_concurrent_downloads", val)
-        
+
         # Risk warning
         if val > 3:
-            self.maxConcurrentCard.setContent(f"⚠️ 当前: {val} (高风险! 可能导致 YouTube 封禁 IP 429)")
+            self.maxConcurrentCard.setContent(
+                f"⚠️ 当前: {val} (高风险! 可能导致 YouTube 封禁 IP 429)"
+            )
             self.maxConcurrentCard.setTitle("最大同时下载数 (慎用)")
         else:
             self.maxConcurrentCard.setContent(f"当前: {val}")
             self.maxConcurrentCard.setTitle("最大同时下载数")
-            
+
         # Immediately apply new limit to pending queue
         download_manager.pump()
 
@@ -1631,18 +1908,30 @@ class SettingsPage(QWidget):
     def _on_clipboard_detect_changed(self, checked: bool) -> None:
         config_manager.set("clipboard_auto_detect", bool(checked))
         self.clipboardAutoDetectChanged.emit(bool(checked))
-        InfoBar.success("设置已更新", "剪贴板自动识别已开启" if checked else "剪贴板自动识别已关闭", duration=5000, parent=self)
+        InfoBar.success(
+            "设置已更新",
+            "剪贴板自动识别已开启" if checked else "剪贴板自动识别已关闭",
+            duration=5000,
+            parent=self,
+        )
 
     def _on_clipboard_window_to_front_changed(self, checked: bool) -> None:
         config_manager.set("clipboard_window_to_front", bool(checked))
-        InfoBar.success("设置已更新", "已开启解析后窗口置顶" if checked else "已关闭解析后窗口置顶", duration=5000, parent=self)
+        InfoBar.success(
+            "设置已更新",
+            "已开启解析后窗口置顶" if checked else "已关闭解析后窗口置顶",
+            duration=5000,
+            parent=self,
+        )
 
     def _on_clipboard_action_mode_changed(self, index: int) -> None:
         modes = ["smart", "standard", "vr", "subtitle", "cover"]
         if 0 <= index < len(modes):
             mode = modes[index]
             config_manager.set("clipboard_action_mode", mode)
-            InfoBar.success("设置已更新", f"剪贴板识别行为已更改为: {mode}", duration=5000, parent=self)
+            InfoBar.success(
+                "设置已更新", f"剪贴板识别行为已更改为: {mode}", duration=5000, parent=self
+            )
 
     def _on_deletion_policy_changed(self, index: int) -> None:
         # Combo texts order: Ask, KeepFiles, DeleteFiles
@@ -1656,7 +1945,9 @@ class SettingsPage(QWidget):
         config_manager.set("playlist_skip_authcheck", bool(checked))
         InfoBar.success(
             "设置已更新",
-            "已开启：加速播放列表解析（实验性）" if checked else "已关闭：加速播放列表解析（实验性）",
+            "已开启：加速播放列表解析（实验性）"
+            if checked
+            else "已关闭：加速播放列表解析（实验性）",
             duration=5000,
             parent=self,
         )
@@ -1666,7 +1957,9 @@ class SettingsPage(QWidget):
         config_manager.set("embed_thumbnail", bool(checked))
         InfoBar.success(
             "设置已更新",
-            "已开启封面嵌入（支持 MP4/MKV/MP3/M4A/FLAC/OGG/OPUS 等格式）" if checked else "已关闭封面嵌入",
+            "已开启封面嵌入（支持 MP4/MKV/MP3/M4A/FLAC/OGG/OPUS 等格式）"
+            if checked
+            else "已关闭封面嵌入",
             duration=5000,
             parent=self,
         )
@@ -1685,7 +1978,7 @@ class SettingsPage(QWidget):
         """处理 SponsorBlock 开关变更"""
         config_manager.set("sponsorblock_enabled", bool(checked))
         self._update_sponsorblock_categories_visibility(checked)
-        
+
         if checked:
             raw_categories = config_manager.get("sponsorblock_categories", [])
             categories = [c for c in raw_categories if isinstance(c, str) and c]
@@ -1723,11 +2016,11 @@ class SettingsPage(QWidget):
                 duration=3000,
                 parent=self,
             )
-    
+
     def _update_sponsorblock_categories_visibility(self, visible: bool) -> None:
         """更新 SponsorBlock 类别卡片的可见性"""
         self.sponsorBlockCategoriesCard.setVisible(visible)
-    
+
     def _get_sponsorblock_categories_text(self) -> str:
         """获取当前选中的 SponsorBlock 类别的描述文本"""
         raw_categories = config_manager.get(
@@ -1736,7 +2029,7 @@ class SettingsPage(QWidget):
         categories = [c for c in raw_categories if isinstance(c, str) and c]
         cat_names = {
             "sponsor": "赞助广告",
-            "selfpromo": "自我推广", 
+            "selfpromo": "自我推广",
             "interaction": "互动提醒",
             "intro": "片头",
             "outro": "片尾",
@@ -1750,25 +2043,25 @@ class SettingsPage(QWidget):
         if len(names) <= 3:
             return "已选择: " + ", ".join(names)
         return f"已选择 {len(names)} 个类别: " + ", ".join(names[:2]) + " 等"
-    
+
     def _show_sponsorblock_categories_dialog(self) -> None:
         """显示 SponsorBlock 类别选择对话框"""
         from .components.sponsorblock_dialog import SponsorBlockCategoriesDialog
-        
+
         # 获取当前选中的类别
         current_categories = config_manager.get("sponsorblock_categories", [])
-        
+
         # 创建并显示对话框
         dialog = SponsorBlockCategoriesDialog(current_categories, self)
-        
+
         if dialog.exec():
             # 保存选中的类别
             selected = dialog.selected_categories
             config_manager.set("sponsorblock_categories", selected)
-            
+
             # 更新卡片描述
             self.sponsorBlockCategoriesCard.setContent(self._get_sponsorblock_categories_text())
-            
+
             if selected:
                 InfoBar.success(
                     "类别已更新",
@@ -1791,7 +2084,12 @@ class SettingsPage(QWidget):
             config_manager.set("proxy_mode", mode)
             # Backward-compat shadow key
             config_manager.set("proxy_enabled", mode in {"http", "socks5"})
-            InfoBar.success("设置已更新", f"代理模式已切换为: {self.proxyModeCard.comboBox.currentText()}", duration=5000, parent=self)
+            InfoBar.success(
+                "设置已更新",
+                f"代理模式已切换为: {self.proxyModeCard.comboBox.currentText()}",
+                duration=5000,
+                parent=self,
+            )
             self._update_proxy_edit_visibility()
 
     def _update_proxy_edit_visibility(self) -> None:
@@ -1809,44 +2107,49 @@ class SettingsPage(QWidget):
     def _on_cookie_mode_changed(self, index: int) -> None:
         """Cookie 模式切换：0=浏览器提取, 1=手动文件"""
         from ..auth.auth_service import AuthSourceType, auth_service
-        
+
         if index == 0:
             # 浏览器提取模式
             browser_index = self.browserCard.comboBox.currentIndex()
             browser_map = [
-                AuthSourceType.EDGE, AuthSourceType.CHROME, AuthSourceType.CHROMIUM,
-                AuthSourceType.BRAVE, AuthSourceType.OPERA, AuthSourceType.OPERA_GX,
-                AuthSourceType.VIVALDI, AuthSourceType.ARC,
-                AuthSourceType.FIREFOX, AuthSourceType.LIBREWOLF,
+                AuthSourceType.EDGE,
+                AuthSourceType.CHROME,
+                AuthSourceType.CHROMIUM,
+                AuthSourceType.BRAVE,
+                AuthSourceType.OPERA,
+                AuthSourceType.OPERA_GX,
+                AuthSourceType.VIVALDI,
+                AuthSourceType.ARC,
+                AuthSourceType.FIREFOX,
+                AuthSourceType.LIBREWOLF,
             ]
-            source = browser_map[browser_index] if 0 <= browser_index < len(browser_map) else AuthSourceType.EDGE
+            source = (
+                browser_map[browser_index]
+                if 0 <= browser_index < len(browser_map)
+                else AuthSourceType.EDGE
+            )
             auth_service.set_source(source, auto_refresh=True)
-            
+
             self.browserCard.setVisible(True)
             self.refreshCookieCard.setVisible(True)
             self.cookieFileCard.setVisible(False)
-            
+
             InfoBar.success(
                 "已切换到自动提取",
                 f"将从 {auth_service.current_source_display} 自动提取 Cookie",
                 duration=3000,
-                parent=self
+                parent=self,
             )
         else:
             # 手动文件模式
             auth_service.set_source(AuthSourceType.FILE, auto_refresh=False)
-            
+
             self.browserCard.setVisible(False)
             self.refreshCookieCard.setVisible(False)
             self.cookieFileCard.setVisible(True)
-            
-            InfoBar.info(
-                "已切换到手动导入",
-                "请选择 cookies.txt 文件",
-                duration=3000,
-                parent=self
-            )
-        
+
+            InfoBar.info("已切换到手动导入", "请选择 cookies.txt 文件", duration=3000, parent=self)
+
         self._update_cookie_status()
 
     def _on_cookie_browser_changed(self, index: int) -> None:
@@ -1855,7 +2158,7 @@ class SettingsPage(QWidget):
 
         from ..auth.auth_service import AuthSourceType, auth_service
         from ..utils.admin_utils import is_admin
-        
+
         # 顺序与UI一致
         browser_map = [
             (AuthSourceType.EDGE, "Edge"),
@@ -1869,12 +2172,13 @@ class SettingsPage(QWidget):
             (AuthSourceType.FIREFOX, "Firefox"),
             (AuthSourceType.LIBREWOLF, "LibreWolf"),
         ]
-        
+
         if 0 <= index < len(browser_map):
             source, name = browser_map[index]
-            
+
             # Chromium 内核浏览器 v130+ 需要管理员权限
             from ..auth.auth_service import ADMIN_REQUIRED_BROWSERS
+
             if source in ADMIN_REQUIRED_BROWSERS and not is_admin():
                 box = MessageBox(
                     f"{name} 需要管理员权限",
@@ -1884,87 +2188,78 @@ class SettingsPage(QWidget):
                     "或者您可以：\n"
                     "• 选择 Firefox/LibreWolf 浏览器（无需管理员权限）\n"
                     "• 手动导出 Cookie 文件",
-                    self
+                    self,
                 )
                 box.yesButton.setText("以管理员身份重启")
                 box.cancelButton.setText("取消")
-                
+
                 if box.exec():
                     # 先保存选择
                     auth_service.set_source(source, auto_refresh=True)
                     from ..utils.admin_utils import restart_as_admin
+
                     restart_as_admin(f"提取 {name} Cookie")
                 return
-            
+
             # Firefox/Brave 或已是管理员，正常切换
             auth_service.set_source(source, auto_refresh=True)
-            
+
             InfoBar.info(
                 "正在切换浏览器",
                 f"正在从 {name} 提取 Cookies，请稍候...",
                 duration=3000,
-                parent=self
+                parent=self,
             )
-            
+
             # 清理旧worker
             if self._cookie_worker is not None:
                 self._cookie_worker.deleteLater()
-            
+
             # 创建Qt工作线程
             self._cookie_worker = CookieRefreshWorker(self)
-            
+
             # 连接信号（自动在主线程执行）
             def on_finished(success: bool, message: str, need_admin: bool = False):
                 if success:
                     InfoBar.success(
-                        "切换成功", 
-                        f"已从 {name} 提取 Cookies", 
-                        duration=8000, 
-                        parent=self
+                        "切换成功", f"已从 {name} 提取 Cookies", duration=8000, parent=self
                     )
                 else:
                     # 显示多行错误消息
-                    lines = message.split('\n')
+                    lines = message.split("\n")
                     if len(lines) > 1:
                         title = f"{name} - {lines[0]}"
-                        content = '\n'.join(lines[1:])
+                        content = "\n".join(lines[1:])
                     else:
                         title = f"{name} 提取失败"
                         content = message
-                    
+
                     # 如果需要管理员权限，显示带重启按钮的对话框
                     if need_admin:
                         from qfluentwidgets import MessageBox
-                        
-                        box = MessageBox(
-                            f"{name} 需要管理员权限",
-                            content,
-                            self
-                        )
+
+                        box = MessageBox(f"{name} 需要管理员权限", content, self)
                         box.yesButton.setText("以管理员身份重启")
                         box.cancelButton.setText("取消")
-                        
+
                         if box.exec():
                             from ..utils.admin_utils import restart_as_admin
+
                             restart_as_admin(f"提取 {name} Cookie")
                     else:
-                        InfoBar.error(
-                            title,
-                            content,
-                            duration=15000,
-                            parent=self
-                        )
-                
+                        InfoBar.error(title, content, duration=15000, parent=self)
+
                 # 总是更新Cookie状态显示
                 try:
                     self._update_cookie_status()
                 except Exception as e:
                     from ..utils.logger import logger
+
                     logger.error(f"更新Cookie状态显示失败: {e}")
-                
+
                 # 清理worker
                 self._cookie_worker = None
-            
+
             self._cookie_worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
             self._cookie_worker.start()
 
@@ -1974,14 +2269,15 @@ class SettingsPage(QWidget):
 
         from ..auth.auth_service import auth_service
         from ..utils.admin_utils import is_admin
-        
+
         current_source = auth_service.current_source
-        
+
         # 检查是否是 Chromium 内核浏览器且非管理员 - 直接提示重启
         from ..auth.auth_service import ADMIN_REQUIRED_BROWSERS
+
         if current_source in ADMIN_REQUIRED_BROWSERS and not is_admin():
             browser_name = auth_service.current_source_display
-            
+
             box = MessageBox(
                 f"{browser_name} 需要管理员权限",
                 f"{browser_name} 使用了 App-Bound 加密保护，\n"
@@ -1990,147 +2286,116 @@ class SettingsPage(QWidget):
                 "或者您可以：\n"
                 "• 切换到 Firefox/LibreWolf 浏览器（无需管理员权限）\n"
                 "• 手动导出 Cookie 文件",
-                self
+                self,
             )
             box.yesButton.setText("以管理员身份重启")
             box.cancelButton.setText("取消")
-            
+
             if box.exec():
                 from ..utils.admin_utils import restart_as_admin
+
                 restart_as_admin(f"提取 {browser_name} Cookie")
             return
-        
+
         # 非 Edge/Chrome 或已是管理员，正常刷新
         self._do_cookie_refresh()
-    
+
     def _do_cookie_refresh(self):
         """实际执行Cookie刷新（已确认权限或非Edge/Chrome）"""
         # 禁用按钮
         self.refreshCookieCard.setEnabled(False)
         self.refreshCookieCard.button.setText("刷新中...")
-        
+
         # 显示进度提示
-        InfoBar.info(
-            "正在刷新 Cookie",
-            "请稍候...",
-            duration=3000,
-            parent=self
-        )
-        
+        InfoBar.info("正在刷新 Cookie", "请稍候...", duration=3000, parent=self)
+
         # 清理旧worker
         if self._cookie_worker is not None:
             self._cookie_worker.deleteLater()
-        
+
         # 创建Qt工作线程
         self._cookie_worker = CookieRefreshWorker(self)
-        
+
         # 连接信号（自动在主线程执行）
         def on_finished(success: bool, message: str, need_admin: bool = False):
             # 1. 总是重置按钮状态
             self.refreshCookieCard.setEnabled(True)
             self.refreshCookieCard.button.setText("立即刷新")
-            
+
             # 2. 显示结果消息
             if success:
-                InfoBar.success(
-                    "刷新成功", 
-                    message, 
-                    duration=8000, 
-                    parent=self
-                )
+                InfoBar.success("刷新成功", message, duration=8000, parent=self)
             else:
                 # 显示多行错误消息
-                lines = message.split('\n')
+                lines = message.split("\n")
                 if len(lines) > 1:
                     title = lines[0]
-                    content = '\n'.join(lines[1:])
+                    content = "\n".join(lines[1:])
                 else:
                     title = "Cookie 刷新失败"
                     content = message
-                
-                InfoBar.error(
-                    title,
-                    content,
-                    duration=15000,
-                    parent=self
-                )
-            
+
+                InfoBar.error(title, content, duration=15000, parent=self)
+
             # 3. 总是更新Cookie状态显示
             try:
                 self._update_cookie_status()
             except Exception as e:
                 from ..utils.logger import logger
+
                 logger.error(f"更新Cookie状态显示失败: {e}")
-            
+
             # 清理worker
             self._cookie_worker = None
-        
+
         self._cookie_worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
         self._cookie_worker.start()
-    
+
     def _select_cookie_file(self):
         """选择 Cookie 文件并导入到 bin/cookies.txt"""
-        import shutil
 
         from ..auth.auth_service import AuthSourceType, auth_service
-        from ..auth.cookie_sentinel import cookie_sentinel
-        
+
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择 Cookies 文件",
-            "",
-            "Cookies 文件 (*.txt);;所有文件 (*.*)"
+            self, "选择 Cookies 文件", "", "Cookies 文件 (*.txt);;所有文件 (*.*)"
         )
-        
+
         if file_path:
-            # 先验证文件格式
-            status = auth_service.validate_file(file_path)
-            
+            # 验证提取写入一条龙导入
+            status = auth_service.import_manual_cookie_file(file_path)
+
             if not status.valid:
-                InfoBar.warning(
-                    "文件格式有问题",
-                    status.message,
-                    duration=5000,
-                    parent=self
-                )
+                InfoBar.error("文件格式有问题", status.message, duration=5000, parent=self)
                 return
-            
-            # 复制到统一的 bin/cookies.txt
+
             try:
-                target_path = cookie_sentinel.cookie_path
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(file_path, target_path)
-                
-                # 设置为文件模式（但实际使用统一路径）
-                auth_service.set_source(AuthSourceType.FILE, file_path=str(target_path), auto_refresh=False)
-                
+                # 设置为文件模式
+                auth_service.set_source(
+                    AuthSourceType.FILE, file_path=file_path, auto_refresh=False
+                )
+
                 self.cookieFileCard.setContent(f"已导入: {status.cookie_count} 个 Cookie")
                 InfoBar.success(
                     "导入成功",
                     f"已导入 {status.cookie_count} 个 Cookie 到 bin/cookies.txt",
                     duration=3000,
-                    parent=self
+                    parent=self,
                 )
             except Exception as e:
-                InfoBar.error(
-                    "导入失败",
-                    f"复制文件时出错: {e}",
-                    duration=5000,
-                    parent=self
-                )
+                InfoBar.error("导入失败", f"复制文件时出错: {e}", duration=5000, parent=self)
                 return
-            
+
             self._update_cookie_status()
-    
+
     def _open_cookie_location(self):
         """打开 Cookie 文件所在位置"""
         import os
         import subprocess
 
         from ..auth.cookie_sentinel import cookie_sentinel
-        
+
         cookie_path = cookie_sentinel.cookie_path
-        
+
         if cookie_path.exists():
             # Windows: 使用 explorer 选中文件
             subprocess.run(["explorer", "/select,", str(cookie_path)])
@@ -2141,60 +2406,64 @@ class SettingsPage(QWidget):
                 os.startfile(str(folder))
             else:
                 InfoBar.warning(
-                    "目录不存在",
-                    f"Cookie 目录尚未创建: {folder}",
-                    duration=3000,
-                    parent=self
+                    "目录不存在", f"Cookie 目录尚未创建: {folder}", duration=3000, parent=self
                 )
-    
+
     def _update_cookie_status(self):
         """更新 Cookie 状态显示"""
         try:
             from ..auth.cookie_sentinel import cookie_sentinel
-            
+
             info = cookie_sentinel.get_status_info()
             cookie_path = cookie_sentinel.cookie_path
-            
-            if info['exists']:
-                age = info['age_minutes']
+
+            if info["exists"]:
+                age = info["age_minutes"]
                 age_str = f"{int(age)}分钟前" if age is not None else "未知"
-                
+
                 # 显示实际来源，而不是配置来源
-                actual_display = info.get('actual_source_display') or info['source']
-                
+                actual_display = info.get("actual_source_display") or info["source"]
+
                 # 回退警告或来源不匹配警告
-                if info.get('using_fallback') or info.get('source_mismatch'):
+                if info.get("using_fallback") or info.get("source_mismatch"):
                     emoji = "⚠️"
                     # 显示实际来源并标注配置来源
-                    if info.get('source_mismatch') and info.get('actual_source_display'):
+                    if info.get("source_mismatch") and info.get("actual_source_display"):
                         source_text = f"{actual_display}（配置: {info['source']}）"
                     else:
                         source_text = actual_display
-                elif info['is_stale']:
+                elif info["is_stale"]:
                     emoji = "⚠️"
                     source_text = actual_display
                 else:
                     emoji = "✅"
                     source_text = actual_display
-                
-                status_text = f"{emoji} {source_text} | 更新于 {age_str} | {info['cookie_count']} 个 Cookie"
-                
+
+                status_text = (
+                    f"{emoji} {source_text} | 更新于 {age_str} | {info['cookie_count']} 个 Cookie"
+                )
+
                 # 如果有回退警告，添加提示
-                if info.get('fallback_warning'):
+                if info.get("fallback_warning"):
                     status_text += f"\n{info['fallback_warning']}"
             else:
                 status_text = f"❌ Cookie 文件不存在 ({cookie_path.name})"
-            
+
             self.cookieStatusCard.contentLabel.setText(status_text)
-            
+
         except Exception as e:
             self.cookieStatusCard.contentLabel.setText(f"状态获取失败: {e}")
-    
+
     def _on_js_runtime_changed(self, index: int) -> None:
         mapping = {0: "auto", 1: "deno", 2: "node", 3: "bun", 4: "quickjs"}
         mode = mapping.get(index, "auto")
         config_manager.set("js_runtime", mode)
-        InfoBar.success("设置已更新", f"JS Runtime 已切换为: {self.jsRuntimeCard.comboBox.currentText()}", duration=5000, parent=self)
+        InfoBar.success(
+            "设置已更新",
+            f"JS Runtime 已切换为: {self.jsRuntimeCard.comboBox.currentText()}",
+            duration=5000,
+            parent=self,
+        )
         self.jsRuntimePathCard.setContent(self._js_runtime_status_text())
 
     def _on_po_token_edited(self) -> None:
@@ -2282,11 +2551,13 @@ class SettingsPage(QWidget):
         try:
             p = Path(path)
             head = p.read_bytes()[:4096]
-            first_line = head.splitlines()[0].decode("utf-8", errors="ignore").strip() if head else ""
-
-            header_ok = first_line.startswith("# Netscape HTTP Cookie File") or first_line.startswith(
-                "# HTTP Cookie File"
+            first_line = (
+                head.splitlines()[0].decode("utf-8", errors="ignore").strip() if head else ""
             )
+
+            header_ok = first_line.startswith(
+                "# Netscape HTTP Cookie File"
+            ) or first_line.startswith("# HTTP Cookie File")
 
             # Heuristic: if file contains any '\n' but no '\r\n', it is likely LF-only.
             has_lf = b"\n" in head
@@ -2324,7 +2595,12 @@ class SettingsPage(QWidget):
 
         if path:
             if not Path(path).exists():
-                InfoBar.warning("路径可能无效", "未找到该文件，请确认 ffmpeg.exe 路径是否正确。", duration=15000, parent=self)
+                InfoBar.warning(
+                    "路径可能无效",
+                    "未找到该文件，请确认 ffmpeg.exe 路径是否正确。",
+                    duration=15000,
+                    parent=self,
+                )
             try:
                 self.ffmpegCard.setValue(path)
                 self.ffmpegCard.setContent(f"自定义: {path}")
@@ -2347,7 +2623,9 @@ class SettingsPage(QWidget):
                 pass
 
         # Auto-detect priority: bundled (_internal) > PATH
-        bundled = find_bundled_executable("ffmpeg.exe", "ffmpeg/ffmpeg.exe") if is_frozen() else None
+        bundled = (
+            find_bundled_executable("ffmpeg.exe", "ffmpeg/ffmpeg.exe") if is_frozen() else None
+        )
         if bundled is not None:
             return "已就绪（内置）"
 
@@ -2440,7 +2718,12 @@ class SettingsPage(QWidget):
         bun = shutil.which("bun") or shutil.which("bun.exe")
         if bun:
             return "bun", Path(bun), "PATH"
-        qjs = shutil.which("qjs") or shutil.which("qjs.exe") or shutil.which("quickjs") or shutil.which("quickjs.exe")
+        qjs = (
+            shutil.which("qjs")
+            or shutil.which("qjs.exe")
+            or shutil.which("quickjs")
+            or shutil.which("quickjs.exe")
+        )
         if qjs:
             return "quickjs", Path(qjs), "PATH"
 
@@ -2461,11 +2744,18 @@ class SettingsPage(QWidget):
 
         if preferred == "auto":
             if exe is None:
-                return "未就绪（解决：使用 full 包内置 Deno，或安装 deno 并加入 PATH，或在此处选择）"
+                return (
+                    "未就绪（解决：使用 full 包内置 Deno，或安装 deno 并加入 PATH，或在此处选择）"
+                )
             return f"已就绪（自动：{label} / {source_text or '未知'}）"
 
         if exe is None:
-            preferred_label = {"deno": "Deno", "node": "Node", "bun": "Bun", "quickjs": "QuickJS"}.get(preferred, preferred)
+            preferred_label = {
+                "deno": "Deno",
+                "node": "Node",
+                "bun": "Bun",
+                "quickjs": "QuickJS",
+            }.get(preferred, preferred)
             return f"未就绪: {preferred_label}（解决：优先使用内置，其次 PATH；也可在此处选择）"
         return f"已就绪（{source_text or '未知'}）"
 
@@ -2507,7 +2797,12 @@ class SettingsPage(QWidget):
     def _check_js_runtime(self) -> None:
         rid, exe, source = self._resolve_js_runtime_exe()
         if exe is None:
-            InfoBar.warning("未找到 JS Runtime", "请安装 deno/node/bun/quickjs 或在此处指定可执行文件路径。", duration=15000, parent=self)
+            InfoBar.warning(
+                "未找到 JS Runtime",
+                "请安装 deno/node/bun/quickjs 或在此处指定可执行文件路径。",
+                duration=15000,
+                parent=self,
+            )
             return
 
         candidates: list[list[str]] = [[str(exe), "--version"], [str(exe), "-v"], [str(exe), "-V"]]
@@ -2572,19 +2867,27 @@ class SettingsPage(QWidget):
         )
         self.ytDlpCard.setContent(self._yt_dlp_status_text())
 
+    def _on_preferred_audio_language_changed(self, languages: list[str]) -> None:
+        """多音轨语言偏好改变时"""
+        if not languages:
+            languages = ["orig", "zh-Hans", "en"]
+        config_manager.set("preferred_audio_languages", languages)
+
     def _on_subtitle_enabled_changed(self, checked: bool) -> None:
-        config_manager.set('subtitle_enabled', checked)
+        config_manager.set("subtitle_enabled", checked)
         self._update_subtitle_settings_visibility(checked)
-        status = '已启用' if checked else '已禁用'
-        InfoBar.success('字幕设置', f'字幕下载{status}', duration=3000, parent=self)
-    
+        status = "已启用" if checked else "已禁用"
+        InfoBar.success("字幕设置", f"字幕下载{status}", duration=3000, parent=self)
+
     def _on_subtitle_languages_changed(self, languages: list[str]) -> None:
         """语言选择改变回调"""
         if not languages:
-            languages = ['zh-Hans', 'en']
-        config_manager.set('subtitle_default_languages', languages)
-        InfoBar.success('语言设置', f'已选择字幕语言: {", ".join(languages)}', duration=3000, parent=self)
-    
+            languages = ["zh-Hans", "en"]
+        config_manager.set("subtitle_default_languages", languages)
+        InfoBar.success(
+            "语言设置", f"已选择字幕语言: {', '.join(languages)}", duration=3000, parent=self
+        )
+
     def _on_subtitle_embed_type_changed(self, embed_type: str) -> None:
         """嵌入类型改变回调"""
         if embed_type not in ("soft", "external", "hard"):
@@ -2592,31 +2895,36 @@ class SettingsPage(QWidget):
         config = config_manager.get_subtitle_config()
         config.embed_type = cast(Literal["soft", "external", "hard"], embed_type)
         config_manager.set_subtitle_config(config)
-        type_names = {'soft': '软嵌入', 'external': '外置文件', 'hard': '硬嵌入'}
-        InfoBar.success('嵌入类型', f'字幕嵌入类型: {type_names.get(embed_type, embed_type)}', duration=3000, parent=self)
+        type_names = {"soft": "软嵌入", "external": "外置文件", "hard": "硬嵌入"}
+        InfoBar.success(
+            "嵌入类型",
+            f"字幕嵌入类型: {type_names.get(embed_type, embed_type)}",
+            duration=3000,
+            parent=self,
+        )
         # 嵌入类型变更时联动可见性
         self._update_keep_separate_visibility()
-    
+
     def _on_subtitle_keep_separate_changed(self, checked: bool) -> None:
         """保留外置字幕文件开关改变"""
-        config_manager.set('subtitle_write_separate_file', checked)
-        status = '保留' if checked else '不保留'
-        InfoBar.success('字幕文件', f'嵌入后{status}外置字幕文件', duration=3000, parent=self)
-    
+        config_manager.set("subtitle_write_separate_file", checked)
+        status = "保留" if checked else "不保留"
+        InfoBar.success("字幕文件", f"嵌入后{status}外置字幕文件", duration=3000, parent=self)
+
     def _on_subtitle_embed_mode_changed(self, index: int) -> None:
-        mode_map = {0: 'always', 1: 'never', 2: 'ask'}
-        mode = mode_map.get(index, 'always')
-        config_manager.set('subtitle_embed_mode', mode)
-        display_map = {'always': '总是嵌入', 'never': '从不嵌入', 'ask': '每次询问'}
+        mode_map = {0: "always", 1: "never", 2: "ask"}
+        mode = mode_map.get(index, "always")
+        config_manager.set("subtitle_embed_mode", mode)
+        display_map = {"always": "总是嵌入", "never": "从不嵌入", "ask": "每次询问"}
         display_text = display_map.get(mode, mode)
-        InfoBar.success('嵌入模式', f'字幕嵌入策略: {display_text}', duration=3000, parent=self)
-    
+        InfoBar.success("嵌入模式", f"字幕嵌入策略: {display_text}", duration=3000, parent=self)
+
     def _on_subtitle_format_changed(self, index: int) -> None:
-        format_map = {0: 'srt', 1: 'ass', 2: 'vtt'}
-        fmt = format_map.get(index, 'srt')
-        config_manager.set('subtitle_format', fmt)
-        InfoBar.success('格式设置', f'字幕格式: {fmt.upper()}', duration=3000, parent=self)
-    
+        format_map = {0: "srt", 1: "ass", 2: "vtt"}
+        fmt = format_map.get(index, "srt")
+        config_manager.set("subtitle_format", fmt)
+        InfoBar.success("格式设置", f"字幕格式: {fmt.upper()}", duration=3000, parent=self)
+
     def _update_keep_separate_visibility(self) -> None:
         """根据嵌入类型更新「保留外置字幕文件」开关的可见性"""
         # enabled = self.subtitleEnabledCard.switchButton.isChecked() # No longer check enabled
@@ -2627,15 +2935,15 @@ class SettingsPage(QWidget):
     def _update_vr_hardware_status(self) -> None:
         """更新 VR 硬件状态 Banner"""
         self.vrHardwareStatusCard.setContent("检测中...")
-        QThread.msleep(100) # Give UI a chance to update
-        
+        QThread.msleep(100)  # Give UI a chance to update
+
         # 强制刷新硬件检测缓存，确保能检测到最新的环境变化
         hardware_manager.refresh_hardware_status()
-        
+
         mem_gb = hardware_manager.get_system_memory_gb()
         has_gpu = hardware_manager.has_dedicated_gpu()
         encoders = hardware_manager.get_gpu_encoders()
-        
+
         status_text = f"内存: {mem_gb} GB"
         if has_gpu:
             status_text += f" | GPU 加速: 可用 ({', '.join(encoders)})"
@@ -2647,11 +2955,11 @@ class SettingsPage(QWidget):
         else:
             status_text += " | GPU 加速: 不可用"
             desc = "未检测到硬件编码器，将使用 CPU 转码 (较慢)。"
-            
+
         self.vrHardwareStatusCard.setTitle(status_text)
         self.vrHardwareStatusCard.setContent(desc)
         # TODO: Update icon if possible, currently SettingCard doesn't support changing icon easily
-        
+
     def _on_vr_eac_auto_convert_changed(self, checked: bool) -> None:
         config_manager.set("vr_eac_auto_convert", checked)
         if checked:
@@ -2661,11 +2969,11 @@ class SettingsPage(QWidget):
                 duration=5000,
                 parent=self,
             )
-        
+
     def _on_vr_hw_accel_changed(self, index: int) -> None:
         mode_map = {0: "auto", 1: "cpu", 2: "gpu"}
         config_manager.set("vr_hw_accel_mode", mode_map.get(index, "auto"))
-        
+
     def _on_vr_max_resolution_changed(self, index: int) -> None:
         res_map = {0: 2160, 1: 3200, 2: 4320}
         val = res_map.get(index, 2160)
@@ -2677,14 +2985,14 @@ class SettingsPage(QWidget):
                 duration=5000,
                 parent=self,
             )
-            
+
     def _on_vr_cpu_priority_changed(self, index: int) -> None:
         pri_map = {0: "low", 1: "medium", 2: "high"}
         config_manager.set("vr_cpu_priority", pri_map.get(index, "low"))
 
     def _on_vr_keep_source_changed(self, checked: bool) -> None:
         config_manager.set("vr_keep_source", checked)
-    
+
     def _update_subtitle_settings_visibility(self, enabled: bool) -> None:
         # 用户希望关闭字幕下载时，依然保留选项显示以便修改
         # 这样即使全局关闭，用户在单次下载中想开启时，配置已经是预期的
@@ -2692,8 +3000,7 @@ class SettingsPage(QWidget):
         self.subtitleEmbedTypeCard.setVisible(True)
         self.subtitleEmbedModeCard.setVisible(True)
         self.subtitleFormatCard.setVisible(True)
-        
+
         # 仅根据嵌入类型更新「保留外置字幕」可见性，不再依赖总开关
         embed_type = self.subtitleEmbedTypeCard.get_value()
         self.subtitleKeepSeparateCard.setVisible(embed_type in ("soft", "hard"))
-

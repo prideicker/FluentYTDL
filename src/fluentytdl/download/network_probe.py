@@ -21,9 +21,9 @@ class NetworkStatus:
     """网络探测结果。"""
 
     latency_ms: float | None  # RTT 中位数 (ms)，None 表示不可达
-    packet_loss: float         # 丢包率 0.0 ~ 1.0
-    is_reachable: bool         # 至少有一次探测成功
-    timestamp: float           # time.monotonic()
+    packet_loss: float  # 丢包率 0.0 ~ 1.0
+    is_reachable: bool  # 至少有一次探测成功
+    timestamp: float  # time.monotonic()
 
 
 class NetworkProbe:

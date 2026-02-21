@@ -141,9 +141,7 @@ class DownloadItemCard(CardWidget):
         # 1. 左侧缩略图 (16:9)
         self.iconLabel = QLabel(self)
         self.iconLabel.setFixedSize(80, 45)
-        self.iconLabel.setStyleSheet(
-            "background-color: rgba(0, 0, 0, 0.1); border-radius: 6px;"
-        )
+        self.iconLabel.setStyleSheet("background-color: rgba(0, 0, 0, 0.1); border-radius: 6px;")
         self.iconLabel.setScaledContents(True)
         self.hLayout.addWidget(self.iconLabel)
 
@@ -170,20 +168,35 @@ class DownloadItemCard(CardWidget):
         # 3. 右侧按钮区
         self.actionBtn = TransparentToolButton(FluentIcon.PAUSE, self)
         self.actionBtn.setToolTip("暂停任务")
-        self.actionBtn.installEventFilter(ToolTipFilter(self.actionBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.actionBtn.installEventFilter(
+            ToolTipFilter(self.actionBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.actionBtn.clicked.connect(self.on_action_clicked)
 
         self.folderBtn = TransparentToolButton(FluentIcon.FOLDER, self)
         self.folderBtn.setToolTip("打开文件夹")
-        self.folderBtn.installEventFilter(ToolTipFilter(self.folderBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.folderBtn.installEventFilter(
+            ToolTipFilter(self.folderBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.folderBtn.setEnabled(False)
         self.folderBtn.clicked.connect(self._open_output_location)
 
         self.deleteBtn = TransparentToolButton(FluentIcon.DELETE, self)
         self.deleteBtn.setToolTip("删除任务")
-        self.deleteBtn.installEventFilter(ToolTipFilter(self.deleteBtn, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.deleteBtn.installEventFilter(
+            ToolTipFilter(self.deleteBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.deleteBtn.clicked.connect(self.on_delete_clicked)
 
+        self.reportBtn = TransparentToolButton(FluentIcon.GITHUB, self)
+        self.reportBtn.setToolTip("反馈此错误")
+        self.reportBtn.installEventFilter(
+            ToolTipFilter(self.reportBtn, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
+        self.reportBtn.setVisible(False)
+        self.reportBtn.clicked.connect(self.on_report_clicked)
+
+        self.hLayout.addWidget(self.reportBtn)
         self.hLayout.addWidget(self.actionBtn)
         self.hLayout.addWidget(self.folderBtn)
         self.hLayout.addWidget(self.deleteBtn)
@@ -230,17 +243,23 @@ class DownloadItemCard(CardWidget):
         self.worker.completed.connect(self.on_finished, Qt.ConnectionType.UniqueConnection)
         self.worker.error.connect(self.on_error, Qt.ConnectionType.UniqueConnection)
         try:
-            self.worker.output_path_ready.connect(self._on_output_path_ready, Qt.ConnectionType.UniqueConnection)
+            self.worker.output_path_ready.connect(
+                self._on_output_path_ready, Qt.ConnectionType.UniqueConnection
+            )
         except Exception:
             pass
         # Cookie 错误检测
         try:
-            self.worker.cookie_error_detected.connect(self._on_cookie_error, Qt.ConnectionType.UniqueConnection)
+            self.worker.cookie_error_detected.connect(
+                self._on_cookie_error, Qt.ConnectionType.UniqueConnection
+            )
         except Exception:
             pass
         # Also forward to MainWindow if it provides a structured error dialog.
         try:
-            self.worker.error.connect(self._forward_error_to_window, Qt.ConnectionType.UniqueConnection)
+            self.worker.error.connect(
+                self._forward_error_to_window, Qt.ConnectionType.UniqueConnection
+            )
         except Exception:
             pass
 
@@ -252,32 +271,33 @@ class DownloadItemCard(CardWidget):
                 handler(err_data)
         except Exception:
             pass
-    
+
     def _on_cookie_error(self, error_message: str) -> None:
         """
         处理 Cookie 错误
-        
+
         弹出修复对话框，引导用户修复 Cookie
         """
         try:
             from ...auth.cookie_sentinel import cookie_sentinel
             from .cookie_repair_dialog import CookieRepairDialog
-            
+
             # 创建修复对话框
             dialog = CookieRepairDialog(error_message, parent=self.window())
-            
+
             # 连接自动修复信号
             def on_auto_repair():
                 success, message = cookie_sentinel.force_refresh_with_uac()
                 dialog.show_repair_result(success, message)
-                
+
                 if success:
                     # 修复成功，自动重试下载
                     from PySide6.QtCore import QTimer
+
                     QTimer.singleShot(2000, lambda: self._retry_download())
-            
+
             dialog.repair_requested.connect(on_auto_repair)
-            
+
             # 连接手动导入信号
             def on_manual_import():
                 # 打开设置页面的验证选项卡
@@ -295,14 +315,15 @@ class DownloadItemCard(CardWidget):
                         )
                 except Exception:
                     pass
-            
+
             dialog.manual_import_requested.connect(on_manual_import)
-            
+
             # 显示对话框
             dialog.exec()
-            
+
         except Exception as e:
             from ...utils.logger import logger
+
             logger.error(f"显示 Cookie 修复对话框失败: {e}", exc_info=True)
 
     def _retry_download(self) -> None:
@@ -436,15 +457,27 @@ class DownloadItemCard(CardWidget):
             position=InfoBarPosition.TOP_RIGHT,
         )
 
+        # Issue URL handler
+        issue_url = err_data.get("issue_url")
+        if issue_url:
+            self.reportBtn.setVisible(True)
+            self._current_issue_url = issue_url
+
         # If format is not available, offer downgrade/reselect.
         lower = (err_msg or "").lower()
         if (
             "requested format is not available" in lower
             or "no video formats" in lower
             or "no formats" in lower
-            or "requested format" in lower and "not available" in lower
+            or "requested format" in lower
+            and "not available" in lower
         ):
             self._maybe_handle_format_unavailable(err_msg)
+
+    def on_report_clicked(self) -> None:
+        issue_url = getattr(self, "_current_issue_url", None)
+        if issue_url:
+            QDesktopServices.openUrl(QUrl(issue_url))
 
     def _maybe_handle_format_unavailable(self, err_msg: str) -> None:
         raw_height = self.opts.get("__fluentytdl_quality_height")
@@ -497,7 +530,9 @@ class DownloadItemCard(CardWidget):
                 self.folderBtn.setEnabled(False)
                 self.actionBtn.setIcon(FluentIcon.PAUSE)
                 self.actionBtn.setToolTip("暂停任务")
-                self.statusLabel.setText("已手动调整格式，开始下载..." if started else "已手动调整格式，排队中...")
+                self.statusLabel.setText(
+                    "已手动调整格式，开始下载..." if started else "已手动调整格式，排队中..."
+                )
             return
 
         next_height = self._next_lower_height(current_height)
@@ -528,7 +563,9 @@ class DownloadItemCard(CardWidget):
         self.actionBtn.setIcon(FluentIcon.PAUSE)
         self.actionBtn.setToolTip("暂停任务")
         self.statusLabel.setText(
-            f"自动降档至 {next_height}p，开始下载..." if started else f"自动降档至 {next_height}p，排队中..."
+            f"自动降档至 {next_height}p，开始下载..."
+            if started
+            else f"自动降档至 {next_height}p，排队中..."
         )
 
     @staticmethod

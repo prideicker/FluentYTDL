@@ -33,17 +33,17 @@ from .badges import QualityCellWidget
 def _analyze_format_tags(r: dict) -> list[tuple[str, str]]:
     """Generates badge data for format details: [(text, color_style), ...]"""
     tags = []
-    
+
     # 1. HDR
     dyn = str(r.get("dynamic_range") or "SDR").upper()
     if dyn != "SDR":
         tags.append((dyn, "gold"))
-        
+
     # 2. FPS
     fps = r.get("fps")
     if fps and fps > 30:
         tags.append((f"{int(fps)}FPS", "red"))
-        
+
     # 3. Codec
     # Video
     vc = str(r.get("vcodec") or "none").lower()
@@ -53,14 +53,14 @@ def _analyze_format_tags(r: dict) -> list[tuple[str, str]]:
         tags.append(("VP9", "green"))
     elif "avc1" in vc or "h264" in vc:
         tags.append(("H.264", "gray"))
-        
+
     # Audio
     ac = str(r.get("acodec") or "none").lower()
     if "opus" in ac:
         tags.append(("Opus", "green"))
     elif "mp4a" in ac or "aac" in ac:
         tags.append(("AAC", "gray"))
-        
+
     return tags
 
 
@@ -146,6 +146,7 @@ QTableWidget::item:hover {
 
 # ── 辅助函数 ──────────────────────────────────────────────────
 
+
 def _format_size(value: Any) -> str:
     try:
         n = int(value)
@@ -177,6 +178,7 @@ def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | Non
 
 
 # ── 简易模式预设列表 ────────────────────────────────────────
+
 
 class VRPresetWidget(QWidget):
     """VR 简易模式：场景化预设卡片列表"""
@@ -252,6 +254,7 @@ class VRPresetWidget(QWidget):
 
 # ── 专业模式格式表 ──────────────────────────────────────────
 
+
 class VRFormatTableWidget(QWidget):
     """VR 专业模式：双表格选择视频+音频 format_id，含投影/立体 badge"""
 
@@ -270,7 +273,13 @@ class VRFormatTableWidget(QWidget):
 
         # 模式下拉
         self.mode_combo = ComboBox(self)
-        self.mode_combo.addItems(["\u7ec4\u5408 (\u89c6\u9891 + \u97f3\u9891)", "\u4ec5\u89c6\u9891", "\u4ec5\u97f3\u9891"])
+        self.mode_combo.addItems(
+            [
+                "\u7ec4\u5408 (\u89c6\u9891 + \u97f3\u9891)",
+                "\u4ec5\u89c6\u9891",
+                "\u4ec5\u97f3\u9891",
+            ]
+        )
         self.mode_combo.setCurrentIndex(0)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         layout.addWidget(self.mode_combo)
@@ -303,10 +312,12 @@ class VRFormatTableWidget(QWidget):
 
         # Video Section
         self.video_container = QFrame(self.split_container)
-        self.video_container.setStyleSheet(".QFrame { background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 8px; }")
+        self.video_container.setStyleSheet(
+            ".QFrame { background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 8px; }"
+        )
         v_layout = QVBoxLayout(self.video_container)
         v_layout.setContentsMargins(8, 8, 8, 8)
-        
+
         self.video_label = StrongBodyLabel("\u89c6\u9891\u6d41", self.video_container)
         v_layout.addWidget(self.video_label)
 
@@ -323,11 +334,21 @@ class VRFormatTableWidget(QWidget):
         self.video_table.setWordWrap(False)
         try:
             self.video_table.verticalHeader().setDefaultSectionSize(42)
-            self.video_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            self.video_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-            self.video_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-            self.video_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-            self.video_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+            self.video_table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.ResizeMode.Fixed
+            )
+            self.video_table.horizontalHeader().setSectionResizeMode(
+                1, QHeaderView.ResizeMode.Fixed
+            )
+            self.video_table.horizontalHeader().setSectionResizeMode(
+                2, QHeaderView.ResizeMode.Fixed
+            )
+            self.video_table.horizontalHeader().setSectionResizeMode(
+                3, QHeaderView.ResizeMode.Fixed
+            )
+            self.video_table.horizontalHeader().setSectionResizeMode(
+                4, QHeaderView.ResizeMode.Stretch
+            )
             self.video_table.setColumnWidth(0, 60)
             self.video_table.setColumnWidth(1, 130)
             self.video_table.setColumnWidth(2, 100)
@@ -337,12 +358,14 @@ class VRFormatTableWidget(QWidget):
         self.video_table.setMaximumHeight(220)
         self.video_table.itemSelectionChanged.connect(self._on_video_selected)
         v_layout.addWidget(self.video_table)
-        
+
         split_layout.addWidget(self.video_container)
 
         # Audio Section
         self.audio_container = QFrame(self.split_container)
-        self.audio_container.setStyleSheet(".QFrame { background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 8px; }")
+        self.audio_container.setStyleSheet(
+            ".QFrame { background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 8px; }"
+        )
         a_layout = QVBoxLayout(self.audio_container)
         a_layout.setContentsMargins(8, 8, 8, 8)
 
@@ -362,9 +385,15 @@ class VRFormatTableWidget(QWidget):
         self.audio_table.setWordWrap(False)
         try:
             self.audio_table.verticalHeader().setDefaultSectionSize(42)
-            self.audio_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            self.audio_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-            self.audio_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            self.audio_table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.ResizeMode.Fixed
+            )
+            self.audio_table.horizontalHeader().setSectionResizeMode(
+                1, QHeaderView.ResizeMode.Fixed
+            )
+            self.audio_table.horizontalHeader().setSectionResizeMode(
+                2, QHeaderView.ResizeMode.Stretch
+            )
             self.audio_table.setColumnWidth(0, 60)
             self.audio_table.setColumnWidth(1, 130)
         except Exception:
@@ -372,9 +401,9 @@ class VRFormatTableWidget(QWidget):
         self.audio_table.setMaximumHeight(180)
         self.audio_table.itemSelectionChanged.connect(self._on_audio_selected)
         a_layout.addWidget(self.audio_table)
-        
+
         split_layout.addWidget(self.audio_container)
-        
+
         layout.addWidget(self.split_container)
 
         # 选择摘要
@@ -465,20 +494,27 @@ class VRFormatTableWidget(QWidget):
             iw = IconWidget(FluentIcon.MUSIC)
             iw.setFixedSize(16, 16)
             layout.addWidget(iw)
-            
+
             self.audio_table.setItem(i, 0, QTableWidgetItem(""))
             self.audio_table.setCellWidget(i, 0, container)
-            
+
             # Col 1: Quality
-            q_w = QualityCellWidget([], f"{abr}kbps", parent=self.audio_table, alignment=Qt.AlignmentFlag.AlignCenter)
+            q_w = QualityCellWidget(
+                [], f"{abr}kbps", parent=self.audio_table, alignment=Qt.AlignmentFlag.AlignCenter
+            )
             self.audio_table.setCellWidget(i, 1, q_w)
 
             # Col 2: Details (Badges + Text)
             detail_text = f"{ext} • {acodec} • {sz} • {fid}"
             detail_badges = _analyze_format_tags(f)
-            
-            d_w = QualityCellWidget(detail_badges, detail_text, parent=self.audio_table, alignment=Qt.AlignmentFlag.AlignCenter)
-            
+
+            d_w = QualityCellWidget(
+                detail_badges,
+                detail_text,
+                parent=self.audio_table,
+                alignment=Qt.AlignmentFlag.AlignCenter,
+            )
+
             item = QTableWidgetItem("")
             self.audio_table.setItem(i, 2, item)
             self.audio_table.setCellWidget(i, 2, d_w)
@@ -540,7 +576,7 @@ class VRFormatTableWidget(QWidget):
             iw = IconWidget(FluentIcon.VIDEO)
             iw.setFixedSize(16, 16)
             layout.addWidget(iw)
-            
+
             self.video_table.setItem(i, 0, QTableWidgetItem(""))
             self.video_table.setCellWidget(i, 0, container)
 
@@ -556,7 +592,11 @@ class VRFormatTableWidget(QWidget):
             except Exception:
                 pass
             self.video_table.setCellWidget(
-                i, 1, QualityCellWidget(badges, res_str, parent=self.video_table, alignment=Qt.AlignmentFlag.AlignCenter)
+                i,
+                1,
+                QualityCellWidget(
+                    badges, res_str, parent=self.video_table, alignment=Qt.AlignmentFlag.AlignCenter
+                ),
             )
 
             # Col 2: 立体模式 badge
@@ -570,7 +610,14 @@ class VRFormatTableWidget(QWidget):
             else:
                 stereo_badge.append(("?", "gray"))
             self.video_table.setCellWidget(
-                i, 2, QualityCellWidget(stereo_badge, "", parent=self.video_table, alignment=Qt.AlignmentFlag.AlignCenter)
+                i,
+                2,
+                QualityCellWidget(
+                    stereo_badge,
+                    "",
+                    parent=self.video_table,
+                    alignment=Qt.AlignmentFlag.AlignCenter,
+                ),
             )
 
             # Col 3: 投影类型 badge (颜色区分可播性)
@@ -585,16 +632,25 @@ class VRFormatTableWidget(QWidget):
             else:
                 proj_badge.append(("?", "gray"))
             self.video_table.setCellWidget(
-                i, 3, QualityCellWidget(proj_badge, "", parent=self.video_table, alignment=Qt.AlignmentFlag.AlignCenter)
+                i,
+                3,
+                QualityCellWidget(
+                    proj_badge, "", parent=self.video_table, alignment=Qt.AlignmentFlag.AlignCenter
+                ),
             )
 
             # Col 4: Details (Badges + Text)
             detail_text = f"{ext} • {vcodec} • {sz} • {fid}"
             detail_badges = _analyze_format_tags(f)
-            
+
             # Use Left alignment for details as it can be long
-            d_w = QualityCellWidget(detail_badges, detail_text, parent=self.video_table, alignment=Qt.AlignmentFlag.AlignCenter)
-            
+            d_w = QualityCellWidget(
+                detail_badges,
+                detail_text,
+                parent=self.video_table,
+                alignment=Qt.AlignmentFlag.AlignCenter,
+            )
+
             item = QTableWidgetItem("")
             self.video_table.setItem(i, 4, item)
             self.video_table.setCellWidget(i, 4, d_w)
@@ -641,7 +697,9 @@ class VRFormatTableWidget(QWidget):
             parts.append(f"\u89c6\u9891: {self._selected_video_id}")
         if mode != 1 and self._selected_audio_id:
             parts.append(f"\u97f3\u9891: {self._selected_audio_id}")
-        self.summary_label.setText("  |  ".join(parts) if parts else "\u8bf7\u9009\u62e9\u683c\u5f0f")
+        self.summary_label.setText(
+            "  |  ".join(parts) if parts else "\u8bf7\u9009\u62e9\u683c\u5f0f"
+        )
 
     # ── 公开接口 ──
 
@@ -692,6 +750,7 @@ class VRFormatTableWidget(QWidget):
 
 
 # ── 组合控件：简易/专业切换 ─────────────────────────────────
+
 
 class VRFormatSelectorWidget(QWidget):
     """VR 格式选择器：简易模式预设 + 专业模式表格"""

@@ -63,7 +63,9 @@ class DownloadManager(QObject):
                 continue
         self.task_updated.emit()
 
-    def create_worker(self, url: str, opts: dict[str, Any], cached_info: dict[str, Any] | None = None) -> DownloadWorker:
+    def create_worker(
+        self, url: str, opts: dict[str, Any], cached_info: dict[str, Any] | None = None
+    ) -> DownloadWorker:
         worker = DownloadWorker(url, opts, cached_info=cached_info)
         self.active_workers.append(worker)
 

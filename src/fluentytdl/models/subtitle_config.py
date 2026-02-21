@@ -14,23 +14,23 @@ from typing import Literal
 class SubtitleConfig:
     """
     字幕配置
-    
+
     控制字幕下载、嵌入、格式转换等行为。
     """
-    
+
     # ========== 基础配置 ==========
-    
+
     enabled: bool = False
     """是否启用字幕下载（全局开关）"""
-    
+
     default_languages: list[str] = field(default_factory=lambda: ["zh-Hans", "en"])
     """默认字幕语言优先级列表（按优先级排序）"""
-    
+
     enable_auto_captions: bool = True
     """是否启用自动生成字幕（当手动字幕不可用时）"""
-    
+
     # ========== 嵌入配置 ==========
-    
+
     embed_type: Literal["soft", "external", "hard"] = "soft"
     """
     字幕嵌入类型：
@@ -38,7 +38,7 @@ class SubtitleConfig:
     - external: 外置独立文件（.srt/.ass，兼容性最佳）
     - hard: 硬嵌入到视频画面（烧录，不可关闭，最多2语言）
     """
-    
+
     embed_mode: Literal["always", "never", "ask"] = "always"
     """
     字幕嵌入模式（仅 embed_type="soft" 时有效）：
@@ -46,31 +46,31 @@ class SubtitleConfig:
     - never: 总是保存为单独文件
     - ask: 每次下载时询问
     """
-    
+
     write_separate_file: bool = False
     """是否同时保存单独的字幕文件（即使嵌入到视频）"""
-    
+
     # ========== 格式配置 ==========
-    
+
     format: Literal["srt", "ass", "vtt", "lrc"] = "srt"
     """字幕格式偏好"""
-    
+
     # ========== 质量与后处理 ==========
-    
+
     quality_check: bool = True
     """是否启用字幕质量检查（检测空文件、损坏文件）"""
-    
+
     remove_ads: bool = False
     """是否自动移除字幕中的广告内容（实验性功能）"""
-    
+
     # ========== 高级选项 ==========
-    
+
     fallback_to_english: bool = True
     """当首选语言不可用时，是否自动回退到英语"""
-    
+
     max_languages: int = 2
     """最多下载字幕语言数量（防止过多字幕文件）"""
-    
+
     def to_dict(self) -> dict:
         """转换为字典格式（用于保存到 JSON）"""
         return {
@@ -86,7 +86,7 @@ class SubtitleConfig:
             "fallback_to_english": self.fallback_to_english,
             "max_languages": self.max_languages,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> SubtitleConfig:
         """从字典创建配置对象"""

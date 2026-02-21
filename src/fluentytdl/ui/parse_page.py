@@ -25,7 +25,7 @@ class ParsePage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("parsePage")
-        
+
         # 设置页面背景色（类似侧边栏的浅灰底色）
         self.setStyleSheet("""
             #parsePage {
@@ -73,9 +73,7 @@ class ParsePage(QWidget):
         )
         self.cardLayout.addWidget(self.instructionLabel)
 
-        self.hintLabel = CaptionLabel(
-            "提示：如需自动识别剪贴板，请到“设置 → 体验”开启。", self
-        )
+        self.hintLabel = CaptionLabel("提示：如需自动识别剪贴板，请到“设置 → 体验”开启。", self)
         self.cardLayout.addWidget(self.hintLabel)
 
         # 输入框行

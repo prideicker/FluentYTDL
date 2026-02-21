@@ -110,127 +110,129 @@ class SimplePresetWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        
+
         # 主布局
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # 创建滚动区域
         scroll_area = ScrollArea(self)
         scroll_area.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         scroll_area.setWidgetResizable(True)
         scroll_area.setMaximumHeight(450)  # 限制最大高度
-        
+
         # 滚动内容容器
         content_widget = QWidget()
         content_widget.setStyleSheet("background-color: transparent;")
         self.v_layout = QVBoxLayout(content_widget)
         self.v_layout.setSpacing(12)
         self.v_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         self.btn_group = QButtonGroup(self)
-        
+
         # Define presets
         # (id, title, description, format_selector, post_args)
         self.presets = [
             # === 推荐选项 ===
             (
-                "best_mp4", 
-                "🎬 最佳画质 (MP4)", 
-                "推荐。自动选择最佳画质并封装为 MP4，兼容性最好。", 
+                "best_mp4",
+                "🎬 最佳画质 (MP4)",
+                "推荐。自动选择最佳画质并封装为 MP4，兼容性最好。",
                 "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
-                {"merge_output_format": "mp4"}
+                {"merge_output_format": "mp4"},
             ),
             (
-                "best_raw", 
-                "🎯 最佳画质 (原盘)", 
-                "追求极致画质。通常为 WebM/MKV 格式，适合本地播放。", 
+                "best_raw",
+                "🎯 最佳画质 (原盘)",
+                "追求极致画质。通常为 WebM/MKV 格式，适合本地播放。",
                 "bestvideo+bestaudio/best",
-                {}
+                {},
             ),
             # === 分辨率限制 ===
             (
-                "2160p", 
-                "📺 2160p 4K (MP4)", 
-                "限制最高分辨率为 4K，超高清画质。", 
+                "2160p",
+                "📺 2160p 4K (MP4)",
+                "限制最高分辨率为 4K，超高清画质。",
                 "bv*[height<=2160][ext=mp4]+ba[ext=m4a]/b[height<=2160][ext=mp4] / bv*[height<=2160]+ba/b[height<=2160]",
-                {"merge_output_format": "mp4"}
+                {"merge_output_format": "mp4"},
             ),
             (
-                "1440p", 
-                "📺 1440p 2K (MP4)", 
-                "限制最高分辨率为 2K，高清画质。", 
+                "1440p",
+                "📺 1440p 2K (MP4)",
+                "限制最高分辨率为 2K，高清画质。",
                 "bv*[height<=1440][ext=mp4]+ba[ext=m4a]/b[height<=1440][ext=mp4] / bv*[height<=1440]+ba/b[height<=1440]",
-                {"merge_output_format": "mp4"}
+                {"merge_output_format": "mp4"},
             ),
             (
-                "1080p", 
-                "📺 1080p 高清 (MP4)", 
-                "限制最高分辨率为 1080p，平衡画质与体积。", 
+                "1080p",
+                "📺 1080p 高清 (MP4)",
+                "限制最高分辨率为 1080p，平衡画质与体积。",
                 "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4] / bv*[height<=1080]+ba/b[height<=1080]",
-                {"merge_output_format": "mp4"}
+                {"merge_output_format": "mp4"},
             ),
             (
-                "720p", 
-                "📺 720p 标清 (MP4)", 
-                "限制最高分辨率为 720p，适合移动设备。", 
+                "720p",
+                "📺 720p 标清 (MP4)",
+                "限制最高分辨率为 720p，适合移动设备。",
                 "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4] / bv*[height<=720]+ba/b[height<=720]",
-                {"merge_output_format": "mp4"}
+                {"merge_output_format": "mp4"},
             ),
             (
-                "480p", 
-                "📺 480p (MP4)", 
-                "限制最高分辨率为 480p，节省空间。", 
+                "480p",
+                "📺 480p (MP4)",
+                "限制最高分辨率为 480p，节省空间。",
                 "bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4] / bv*[height<=480]+ba/b[height<=480]",
-                {"merge_output_format": "mp4"}
+                {"merge_output_format": "mp4"},
             ),
             (
-                "360p", 
-                "📺 360p (MP4)", 
-                "限制最高分辨率为 360p，最小体积。", 
+                "360p",
+                "📺 360p (MP4)",
+                "限制最高分辨率为 360p，最小体积。",
                 "bv*[height<=360][ext=mp4]+ba[ext=m4a]/b[height<=360][ext=mp4] / bv*[height<=360]+ba/b[height<=360]",
-                {"merge_output_format": "mp4"}
+                {"merge_output_format": "mp4"},
             ),
             # === 纯音频 ===
             (
-                "audio_mp3", 
-                "🎵 纯音频 (MP3 - 320k)", 
-                "仅下载音频并转码为 MP3。", 
+                "audio_mp3",
+                "🎵 纯音频 (MP3 - 320k)",
+                "仅下载音频并转码为 MP3。",
                 "bestaudio/best",
-                {"extract_audio": True, "audio_format": "mp3", "audio_quality": "320K"}
+                {"extract_audio": True, "audio_format": "mp3", "audio_quality": "320K"},
             ),
         ]
-        
+
         self.radios = []
-        
+
         for i, (pid, title, desc, fmt, args) in enumerate(self.presets):
             container = QFrame(self)
-            container.setStyleSheet(".QFrame { background-color: rgba(255, 255, 255, 0.05); border-radius: 6px; border: 1px solid rgba(0,0,0,0.05); }")
+            container.setStyleSheet(
+                ".QFrame { background-color: rgba(255, 255, 255, 0.05); border-radius: 6px; border: 1px solid rgba(0,0,0,0.05); }"
+            )
             h_layout = QHBoxLayout(container)
-            
+
             rb = RadioButton(title, container)
             # Store preset data in dynamic properties for easy retrieval
             rb.setProperty("preset_id", pid)
             rb.setProperty("format_str", fmt)
             rb.setProperty("extra_args", args)
-            
+
             self.btn_group.addButton(rb, i)
             self.radios.append(rb)
-            
+
             desc_label = CaptionLabel(desc, container)
             desc_label.setTextColor(QColor(120, 120, 120), QColor(150, 150, 150))
             desc_label.setWordWrap(True)
-            
+
             h_layout.addWidget(rb)
             h_layout.addWidget(desc_label, 1)
-            
+
             self.v_layout.addWidget(container)
-            
+
         # 设置滚动区域
         scroll_area.setWidget(content_widget)
         main_layout.addWidget(scroll_area)
-        
+
         # Select first by default
         if self.radios:
             self.radios[0].setChecked(True)
@@ -243,7 +245,7 @@ class SimplePresetWidget(QWidget):
         return {
             "format": btn.property("format_str"),
             "extra": btn.property("extra_args"),
-            "id": btn.property("preset_id")
+            "id": btn.property("preset_id"),
         }
 
 
@@ -366,7 +368,9 @@ class PlaylistActionWidget(QWidget):
 
         self.qualityButton = PushButton("待加载", self)
         self.qualityButton.setToolTip("点击获取信息/选择格式")
-        self.qualityButton.installEventFilter(ToolTipFilter(self.qualityButton, showDelay=300, position=ToolTipPosition.BOTTOM))
+        self.qualityButton.installEventFilter(
+            ToolTipFilter(self.qualityButton, showDelay=300, position=ToolTipPosition.BOTTOM)
+        )
         self.qualityButton.setMinimumWidth(140)
 
         top.addWidget(self.loadingRing)
@@ -398,7 +402,7 @@ def _infer_entry_url(entry: dict[str, Any]) -> str:
 def _infer_entry_thumbnail(entry: dict[str, Any]) -> str:
     """推断视频条目的缩略图 URL，优先使用中等质量以加速加载"""
     thumb = str(entry.get("thumbnail") or "").strip()
-    
+
     # 尝试从 thumbnails 列表中找到合适尺寸的缩略图
     thumbs = entry.get("thumbnails")
     if isinstance(thumbs, list) and thumbs:
@@ -412,7 +416,7 @@ def _infer_entry_thumbnail(entry: dict[str, Any]) -> str:
                 u = str(t.get("url") or "").strip()
                 if u:
                     return u
-        
+
         # 如果没有找到首选，选择宽度在 200-400 之间的
         for t in thumbs:
             if not isinstance(t, dict):
@@ -422,7 +426,7 @@ def _infer_entry_thumbnail(entry: dict[str, Any]) -> str:
                 u = str(t.get("url") or "").strip()
                 if u:
                     return u
-        
+
         # 最后回退到第一个可用的
         for t in thumbs:
             if not isinstance(t, dict):
@@ -430,7 +434,7 @@ def _infer_entry_thumbnail(entry: dict[str, Any]) -> str:
             u = str(t.get("url") or t.get("src") or "").strip()
             if u:
                 return u
-    
+
     # 如果有直接的 thumbnail 字段，尝试转换为中等质量
     if thumb:
         # YouTube URL 优化：maxresdefault/hqdefault -> mqdefault
@@ -439,7 +443,7 @@ def _infer_entry_thumbnail(entry: dict[str, Any]) -> str:
                 if high_res in thumb:
                     return thumb.replace(high_res, "mqdefault")
         return thumb
-    
+
     return ""
 
 
@@ -468,7 +472,7 @@ def _clean_video_formats(info: dict[str, Any]) -> list[dict[str, Any]]:
                 res_str += f" {int(float(fps))}fps"
         except Exception:
             pass
-        
+
         # Add filesize to text
         sz = _format_size(f.get("filesize") or f.get("filesize_approx"))
         display_text = f"{res_str} - {ext} ({sz})"
@@ -566,21 +570,21 @@ class PlaylistFormatDialog(MessageBoxBase):
     def __init__(self, info: dict[str, Any], parent=None, *, vr_mode: bool = False):
         super().__init__(parent)
         self.widget.setMinimumSize(700, 500)
-        
+
         self.titleLabel = SubtitleLabel("选择格式", self)
         self.viewLayout.addWidget(self.titleLabel)
-        
+
         if vr_mode:
             self.selector = VRFormatSelectorWidget(info, self)
         else:
             self.selector = VideoFormatSelectorWidget(info, self)
-            
+
         self.viewLayout.addWidget(self.selector)
-        
+
         # Override buttons
         self.yesButton.setText("应用")
         self.cancelButton.setText("取消")
-        
+
         # Connect selector signal to valid state (optional, defaults are usually valid)
         # self.selector.selectionChanged.connect(self._validate_selection)
 
@@ -609,7 +613,7 @@ class SelectionDialog(MessageBoxBase):
         except Exception:
             self._download_dir = ""
         self._download_dir_edit: LineEdit | None = None
-        
+
         # 缓存字幕用户选择，避免在 get_selected_tasks() 中重复弹窗
         self._subtitle_embed_choice: bool | None = None
         self._subtitle_choice_made = False
@@ -657,7 +661,7 @@ class SelectionDialog(MessageBoxBase):
         self._idle_timer = QTimer(self)
         self._idle_timer.setInterval(2000)
         self._idle_timer.timeout.connect(self._on_idle_tick)
-        
+
         # 缩略图延迟加载定时器（等待表格布局完成）
         self._thumb_init_timer = QTimer(self)
         self._thumb_init_timer.setSingleShot(True)
@@ -711,7 +715,9 @@ class SelectionDialog(MessageBoxBase):
         self.retryLayout.addWidget(self.retryHint)
 
         self.cookies_combo = ComboBox(self.retryWidget)
-        self.cookies_combo.addItems(["不使用 Cookies", "Edge Cookies", "Chrome Cookies", "Firefox Cookies"])
+        self.cookies_combo.addItems(
+            ["不使用 Cookies", "Edge Cookies", "Chrome Cookies", "Firefox Cookies"]
+        )
         self.retryLayout.addWidget(self.cookies_combo)
 
         self.retryBtn = PrimaryPushButton("重试解析", self.retryWidget)
@@ -895,7 +901,9 @@ class SelectionDialog(MessageBoxBase):
         # Rebuild content each time (retry can be triggered)
         self._clear_content_layout()
 
-        self._is_playlist = str(info.get("_type") or "").lower() == "playlist" or bool(info.get("entries"))
+        self._is_playlist = str(info.get("_type") or "").lower() == "playlist" or bool(
+            info.get("entries")
+        )
         self._apply_dialog_size_for_mode()
         if self._is_playlist:
             self.titleLabel.show()
@@ -972,7 +980,9 @@ class SelectionDialog(MessageBoxBase):
 
         options: YoutubeServiceOptions | None = None
         if cookies_from_browser:
-            options = YoutubeServiceOptions(auth=YtDlpAuthOptions(cookies_from_browser=cookies_from_browser))
+            options = YoutubeServiceOptions(
+                auth=YtDlpAuthOptions(cookies_from_browser=cookies_from_browser)
+            )
 
         self._current_options = options
 
@@ -1118,20 +1128,20 @@ class SelectionDialog(MessageBoxBase):
             self._subtitle_selector.embedCheck.setChecked(False)
             self._subtitle_selector.embedCheck.hide()
             self.contentLayout.addWidget(self._subtitle_selector)
-            
+
         elif self._mode == "cover":
             self.yesButton.setText("下载封面")
-            
+
             self._cover_selector = CoverSelectorWidget(info, self.contentWidget)
             self.contentLayout.addWidget(self._cover_selector)
-            
+
         elif self._vr_mode:
             self._format_selector = VRFormatSelectorWidget(info, self.contentWidget)
             self.contentLayout.addWidget(self._format_selector)
         else:
             self._format_selector = VideoFormatSelectorWidget(info, self.contentWidget)
             self.contentLayout.addWidget(self._format_selector)
-        
+
         if self._mode not in ("subtitle", "cover"):
             self._ensure_download_dir_bar()
 
@@ -1188,15 +1198,17 @@ class SelectionDialog(MessageBoxBase):
                 self.preset_combo.addItem(title, userData=pid)
         else:
             # 普通模式使用分辨率预设
-            self.preset_combo.addItems([
-                "最高质量(自动)",
-                "2160p(严格)",
-                "1440p(严格)",
-                "1080p(严格)",
-                "720p(严格)",
-                "480p(严格)",
-                "360p(严格)",
-            ])
+            self.preset_combo.addItems(
+                [
+                    "最高质量(自动)",
+                    "2160p(严格)",
+                    "1440p(严格)",
+                    "1080p(严格)",
+                    "720p(严格)",
+                    "480p(严格)",
+                    "360p(严格)",
+                ]
+            )
         self.preset_combo.currentIndexChanged.connect(self._on_playlist_preset_changed)
 
         toolbar.addWidget(self.selectAllBtn)
@@ -1253,10 +1265,10 @@ class SelectionDialog(MessageBoxBase):
         self._idle_timer.start()
         self._enqueue_detail_rows([0, 1, 2], priority=True)
         self._maybe_start_next_detail()
-        
+
         # 延迟加载缩略图（等待表格布局完成）
         self._thumb_init_timer.start()
-        
+
         self._ensure_download_dir_bar()
 
     def _build_playlist_rows(self, info: dict[str, Any]) -> None:
@@ -1374,7 +1386,9 @@ class SelectionDialog(MessageBoxBase):
             self._open_row_format_picker(row)
 
     def _current_playlist_preset_height(self) -> int | None:
-        preset_text = self.preset_combo.currentText() if self.preset_combo is not None else "最高质量(自动)"
+        preset_text = (
+            self.preset_combo.currentText() if self.preset_combo is not None else "最高质量(自动)"
+        )
         height_map = {
             "2160p(严格)": 2160,
             "1440p(严格)": 1440,
@@ -1460,7 +1474,7 @@ class SelectionDialog(MessageBoxBase):
             vid = str(data.get("override_format_id") or "").strip()
             if not vid:
                 return None
-            for vf in (data.get("video_formats") or []):
+            for vf in data.get("video_formats") or []:
                 if str(vf.get("id") or "") == vid:
                     ext = str(vf.get("ext") or "").strip().lower()
                     return ext or None
@@ -1519,7 +1533,9 @@ class SelectionDialog(MessageBoxBase):
                 )
             )
             if chosen_audio is not None:
-                aw.infoLabel.setText(_format_info_line("", chosen_audio.get("filesize"), chosen_audio.get("ext")))
+                aw.infoLabel.setText(
+                    _format_info_line("", chosen_audio.get("filesize"), chosen_audio.get("ext"))
+                )
             else:
                 aw.infoLabel.setText("-")
             return
@@ -1543,8 +1559,12 @@ class SelectionDialog(MessageBoxBase):
                     if str(f.get("id") or "") == override_id:
                         chosen_fmt = f
                         break
-                v_line = _format_info_line("视频 ", (chosen_fmt or {}).get("filesize"), (chosen_fmt or {}).get("ext"))
-                a_line = _format_info_line("音频 ", (chosen_audio or {}).get("filesize"), (chosen_audio or {}).get("ext"))
+                v_line = _format_info_line(
+                    "视频 ", (chosen_fmt or {}).get("filesize"), (chosen_fmt or {}).get("ext")
+                )
+                a_line = _format_info_line(
+                    "音频 ", (chosen_audio or {}).get("filesize"), (chosen_audio or {}).get("ext")
+                )
                 aw.infoLabel.setText(v_line + "\n" + a_line)
                 return
 
@@ -1566,7 +1586,7 @@ class SelectionDialog(MessageBoxBase):
                 pid = None
             else:
                 pid = self.preset_combo.itemData(self.preset_combo.currentIndex())
-            
+
             # 简单的 Python 端模拟匹配
             best = None
             if pid == "vr_compat":  # 优先 MP4
@@ -1582,7 +1602,7 @@ class SelectionDialog(MessageBoxBase):
                     if str(raw.get("__vr_stereo_mode") or "").startswith("stereo"):
                         best = f
                         break
-            elif pid == "vr_panorama": # 优先 Mono
+            elif pid == "vr_panorama":  # 优先 Mono
                 for f in fmts:
                     raw = f.get("_raw") or {}
                     if str(raw.get("__vr_stereo_mode") or "") == "mono":
@@ -1596,14 +1616,14 @@ class SelectionDialog(MessageBoxBase):
             fid = best.get("id")
             if fid:
                 data["override_format_id"] = str(fid)
-            
+
             # VR 模式下通常不需要显示音频组合，直接显示 VR 格式描述
             data["override_text"] = best.get("text")
             data["manual_override"] = False
 
             aw.set_loading(False)
             aw.qualityButton.setText(str(data["override_text"] or ""))
-            
+
             # 显示详细信息
             raw = best.get("_raw") or {}
             sz = _format_size(raw.get("filesize") or raw.get("filesize_approx"))
@@ -1627,7 +1647,11 @@ class SelectionDialog(MessageBoxBase):
                 aw.set_loading(False)
                 aw.qualityButton.setText("无匹配(点选)")
                 if mode == 0:
-                    a_line = _format_info_line("音频 ", (chosen_audio or {}).get("filesize"), (chosen_audio or {}).get("ext"))
+                    a_line = _format_info_line(
+                        "音频 ",
+                        (chosen_audio or {}).get("filesize"),
+                        (chosen_audio or {}).get("ext"),
+                    )
                     aw.infoLabel.setText("可手动选择\n" + a_line)
                 else:
                     aw.infoLabel.setText("可手动选择")
@@ -1663,7 +1687,9 @@ class SelectionDialog(MessageBoxBase):
         )
         aw.qualityButton.setText(f"{data.get('override_text') or ''} + {audio_brief}")
         v_line = _format_info_line("视频 ", best.get("filesize"), best.get("ext"))
-        a_line = _format_info_line("音频 ", (chosen_audio or {}).get("filesize"), (chosen_audio or {}).get("ext"))
+        a_line = _format_info_line(
+            "音频 ", (chosen_audio or {}).get("filesize"), (chosen_audio or {}).get("ext")
+        )
         aw.infoLabel.setText(v_line + "\n" + a_line)
 
     def _on_playlist_preset_changed(self, _index: int) -> None:
@@ -1757,7 +1783,7 @@ class SelectionDialog(MessageBoxBase):
             # 加入待加载队列
             self._thumb_pending.append(url)
             self._thumb_requested.add(url)
-        
+
         # 启动并发加载
         self._process_thumb_queue()
 
@@ -1788,7 +1814,7 @@ class SelectionDialog(MessageBoxBase):
         # 减少并发计数，触发下一批加载
         self._thumb_inflight = max(0, self._thumb_inflight - 1)
         self._process_thumb_queue()
-        
+
         if self._is_closing:
             return
         if not self._is_playlist:
@@ -1861,7 +1887,7 @@ class SelectionDialog(MessageBoxBase):
             # Clear advanced selection
             data["custom_selection_data"] = None
             data["custom_summary"] = None
-            
+
             self._auto_apply_row_preset(row)
         self._update_download_btn_state()
 
@@ -2021,18 +2047,18 @@ class SelectionDialog(MessageBoxBase):
                 data["custom_selection_data"] = sel
                 data["custom_summary"] = dialog.get_summary()
                 data["manual_override"] = True
-                
+
                 # Clear legacy fields to avoid confusion
                 data["override_format_id"] = None
                 data["override_text"] = None
                 data["audio_override_format_id"] = None
                 data["audio_override_text"] = None
                 data["audio_manual_override"] = False
-                
+
                 # Update UI
                 self._auto_apply_row_preset(row)
             else:
-                # User selected nothing or invalid -> reset? 
+                # User selected nothing or invalid -> reset?
                 # Or just treat as cancel.
                 # For now treat as cancel or do nothing.
                 pass
@@ -2043,41 +2069,41 @@ class SelectionDialog(MessageBoxBase):
     def get_selected_tasks(self) -> list[tuple[str, str, dict[str, Any], str | None]]:
         """Returns list of (title, url, ydl_opts, thumbnail_url)."""
         tasks = []
-        
+
         # 1. Single Video Mode
         if not self._is_playlist:
             if not self.video_info:
                 print("[DEBUG] get_selected_tasks: video_info is None")
                 return []
-                
+
             info = self.video_info
             url = _infer_entry_url(info)
             title = str(info.get("title") or "Unknown")
             thumb = str(info.get("thumbnail") or "")
-            
+
             ydl_opts: dict[str, Any] = {}
-            
+
             # Mode specific handling
             if self._mode == "subtitle":
                 if hasattr(self, "_subtitle_selector"):
                     opts = self._subtitle_selector.get_opts()
                     ydl_opts.update(opts)
-                
+
                 # Force subtitle download only
                 ydl_opts["skip_download"] = True
                 ydl_opts["writethumbnail"] = False
                 ydl_opts["embedthumbnail"] = False
                 ydl_opts["addmetadata"] = False
                 ydl_opts["embedsubtitles"] = False
-                
+
                 # Disable SponsorBlock and other video-specific processing
                 ydl_opts["sponsorblock_remove"] = None
                 ydl_opts["sponsorblock_mark"] = None
                 ydl_opts["postprocessors"] = []
-                
+
                 tasks.append((f"[字幕] {title}", url, ydl_opts, thumb))
                 return tasks
-                
+
             elif self._mode == "cover":
                 # Cover specific handling
                 if hasattr(self, "_cover_selector"):
@@ -2086,31 +2112,31 @@ class SelectionDialog(MessageBoxBase):
                     # Note: We must ensure download_manager can handle it.
                     # Usually if it's a direct image link, yt-dlp works but might need generic extractor.
                     # Or we treat it as a direct download.
-                    
+
                     # Also, we might want to set a specific filename.
                     _ = self._cover_selector.get_selected_ext()
-                    
+
                     # Use "outtmpl" to name the file properly (Title.jpg)
                     # We rely on yt-dlp to download the file at 'url'
-                    
+
                     # If 'url' is the image URL, yt-dlp might download it as a generic file.
                     # We need to make sure we don't try to extract info from it again if possible,
                     # or just let yt-dlp handle the generic file download.
-                    
+
                     # Force overwrite the task URL to the image URL
-                    
+
                     # Options for direct file download
-                    ydl_opts["skip_download"] = False # We WANT to download the image file
-                    ydl_opts["writethumbnail"] = False # We are downloading the image itself
+                    ydl_opts["skip_download"] = False  # We WANT to download the image file
+                    ydl_opts["writethumbnail"] = False  # We are downloading the image itself
                     ydl_opts["embedthumbnail"] = False
                     ydl_opts["addmetadata"] = False
                     ydl_opts["embedsubtitles"] = False
-                    
+
                     # Disable SponsorBlock
                     ydl_opts["sponsorblock_remove"] = None
                     ydl_opts["sponsorblock_mark"] = None
                     ydl_opts["postprocessors"] = []
-                    
+
                     # Set output template to use video title
                     # Note: We rely on sanitize_filename to make it safe
                     safe_title = sanitize_filename(title)
@@ -2122,19 +2148,19 @@ class SelectionDialog(MessageBoxBase):
                     ydl_opts["embedthumbnail"] = False
                     ydl_opts["addmetadata"] = False
                     ydl_opts["embedsubtitles"] = False
-                    
+
                     # Disable SponsorBlock
                     ydl_opts["sponsorblock_remove"] = None
                     ydl_opts["sponsorblock_mark"] = None
                     ydl_opts["postprocessors"] = []
-                
+
                 tasks.append((f"[封面] {title}", url, ydl_opts, thumb))
                 return tasks
-            
+
             # Delegate to the format selector component
             has_selector = hasattr(self, "_format_selector")
             print(f"[DEBUG] get_selected_tasks: has_format_selector={has_selector}")
-            
+
             if has_selector:
                 sel = self._format_selector.get_selection_result()
                 print(f"[DEBUG] get_selected_tasks: selection result = {sel}")
@@ -2153,8 +2179,12 @@ class SelectionDialog(MessageBoxBase):
                             if vr_id in selected_format:
                                 ydl_opts["__fluentytdl_use_android_vr"] = True
                                 ydl_opts["__android_vr_format_ids"] = android_vr_ids
-                                print(f"[DEBUG] get_selected_tasks: VR format {vr_id} detected, enabling android_vr client")
-                                print(f"[DEBUG] get_selected_tasks: android_vr has {len(android_vr_ids)} formats available")
+                                print(
+                                    f"[DEBUG] get_selected_tasks: VR format {vr_id} detected, enabling android_vr client"
+                                )
+                                print(
+                                    f"[DEBUG] get_selected_tasks: android_vr has {len(android_vr_ids)} formats available"
+                                )
                                 break
 
                     # VR 模式：始终使用 android_vr 客户端
@@ -2169,16 +2199,20 @@ class SelectionDialog(MessageBoxBase):
                 # 没有格式选择器，使用默认格式
                 print("[DEBUG] get_selected_tasks: No format selector, using default")
                 ydl_opts["format"] = "bestvideo+bestaudio/best"
-            
+
             # 【关键修复】集成字幕服务到新格式选择器路径
             if self.video_info:
                 # 优先使用缓存的用户选择（在 accept() 中已询问）
                 if self._subtitle_choice_made:
-                    print(f"[DEBUG] get_selected_tasks: Using cached subtitle choice: {self._subtitle_embed_choice}")
+                    print(
+                        f"[DEBUG] get_selected_tasks: Using cached subtitle choice: {self._subtitle_embed_choice}"
+                    )
                     embed_override = self._subtitle_embed_choice
                 else:
                     # 如果没有缓存，再询问（不应该发生，但作为后备）
-                    print("[DEBUG] get_selected_tasks: No cached choice, calling _check_subtitle_and_ask()")
+                    print(
+                        "[DEBUG] get_selected_tasks: No cached choice, calling _check_subtitle_and_ask()"
+                    )
                     try:
                         embed_override = self._check_subtitle_and_ask()
                         print(f"[DEBUG] get_selected_tasks: embed_override = {embed_override}")
@@ -2188,23 +2222,27 @@ class SelectionDialog(MessageBoxBase):
                         return []
                     except Exception as e:
                         # 其他异常
-                        print(f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}")
+                        print(
+                            f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}"
+                        )
                         import traceback
+
                         traceback.print_exc()
                         # 继续下载，但不设置字幕
                         embed_override = None
-                
+
                 subtitle_opts = subtitle_service.apply(
                     video_id=self.video_info.get("id", ""),
                     video_info=self.video_info,
                 )
                 ydl_opts.update(subtitle_opts)
-                
+
                 # 如果用户明确选择了嵌入选项，需要根据 embed_type 来决定行为
                 if embed_override is not None:
                     from ...core.config_manager import config_manager as cfg
+
                     embed_type = cfg.get_subtitle_config().embed_type
-                    
+
                     if embed_type == "soft":
                         # 软嵌入：用户选择覆盖 embedsubtitles
                         ydl_opts["embedsubtitles"] = embed_override
@@ -2214,17 +2252,25 @@ class SelectionDialog(MessageBoxBase):
                     elif embed_type == "hard":
                         # 硬嵌入（烧录）尚未实现，自动降级为软嵌入
                         ydl_opts["embedsubtitles"] = embed_override
-                        print("[DEBUG] get_selected_tasks: hard embed not implemented, using soft embed instead")
-                    
-                    print(f"[DEBUG] get_selected_tasks: embed_type={embed_type}, embed_override={embed_override}, final embedsubtitles={ydl_opts.get('embedsubtitles')}")
-                
+                        print(
+                            "[DEBUG] get_selected_tasks: hard embed not implemented, using soft embed instead"
+                        )
+
+                    print(
+                        f"[DEBUG] get_selected_tasks: embed_type={embed_type}, embed_override={embed_override}, final embedsubtitles={ydl_opts.get('embedsubtitles')}"
+                    )
+
                 # 确保容器格式兼容字幕嵌入
                 _ensure_subtitle_compatible_container(ydl_opts)
-                
+
                 print(f"[DEBUG] get_selected_tasks: subtitle_opts = {subtitle_opts}")
-                print(f"[DEBUG] get_selected_tasks: final embedsubtitles = {ydl_opts.get('embedsubtitles')}")
-                print(f"[DEBUG] get_selected_tasks: final merge_output_format = {ydl_opts.get('merge_output_format')}")
-            
+                print(
+                    f"[DEBUG] get_selected_tasks: final embedsubtitles = {ydl_opts.get('embedsubtitles')}"
+                )
+                print(
+                    f"[DEBUG] get_selected_tasks: final merge_output_format = {ydl_opts.get('merge_output_format')}"
+                )
+
             self._apply_download_dir_to_opts(ydl_opts)
             tasks.append((title, url, ydl_opts, thumb))
             return tasks
@@ -2233,36 +2279,36 @@ class SelectionDialog(MessageBoxBase):
         for _i, row_data in enumerate(self._playlist_rows):
             if not row_data.get("selected"):
                 continue
-            
+
             # ... (Playlist logic unchanged) ...
             url = str(row_data.get("url"))
             title = str(row_data.get("title"))
             thumb = str(row_data.get("thumbnail"))
-            
+
             # Base opts
             row_opts = {}
-            
+
             # Check for manual overrides (from detail view)
             # ...
             # For simplicity, if we haven't loaded detail, we rely on generic "best"
             # If we have detail, we use the specific format IDs calculated in _auto_apply_row_preset
-            
+
             ov_fid = row_data.get("override_format_id")
             aud_fid = row_data.get("audio_best_format_id")
             aud_manual_fid = row_data.get("audio_override_format_id")
-            
+
             # Audio-only mode (global combo)
             mode = int(self.type_combo.currentIndex()) if self.type_combo else 0
-            
-            if mode == 2: # Audio only
+
+            if mode == 2:  # Audio only
                 if aud_manual_fid:
                     row_opts["format"] = aud_manual_fid
                 elif aud_fid:
                     row_opts["format"] = aud_fid
                 else:
                     row_opts["format"] = "bestaudio/best"
-            
-            elif mode == 1: # Video only
+
+            elif mode == 1:  # Video only
                 if ov_fid:
                     row_opts["format"] = ov_fid
                 else:
@@ -2272,16 +2318,18 @@ class SelectionDialog(MessageBoxBase):
                         row_opts["format"] = f"bv*[height<={h}]+ba/b[height<={h}]"
                     else:
                         row_opts["format"] = "bestvideo+bestaudio/best"
-                        
-            else: # AV Muxed
+
+            else:  # AV Muxed
                 if ov_fid:
                     # Specific video selected
-                    target_audio = aud_manual_fid if row_data.get("audio_manual_override") else aud_fid
+                    target_audio = (
+                        aud_manual_fid if row_data.get("audio_manual_override") else aud_fid
+                    )
                     if target_audio:
                         row_opts["format"] = f"{ov_fid}+{target_audio}"
                         # TODO: merge container logic for playlist?
                         # For now let yt-dlp decide or use mkv
-                        row_opts["merge_output_format"] = "mkv" 
+                        row_opts["merge_output_format"] = "mkv"
                     else:
                         row_opts["format"] = f"{ov_fid}+bestaudio/best"
                 else:
@@ -2292,56 +2340,59 @@ class SelectionDialog(MessageBoxBase):
                         row_opts["merge_output_format"] = "mkv"
                     else:
                         row_opts["format"] = "bestvideo+bestaudio/best"
-            
+
             self._apply_download_dir_to_opts(row_opts)
             tasks.append((title, url, row_opts, thumb))
-            
+
         return tasks
-    
+
     def _check_subtitle_and_ask(self) -> bool | None:
         """
         检查字幕配置并弹出询问对话框
-        
+
         Returns:
             None: 不需要嵌入或使用默认配置
             True: 用户选择嵌入
             False: 用户选择不嵌入
-            
+
         Raises:
             ValueError: 用户取消下载
         """
         print("[DEBUG] _check_subtitle_and_ask: Method called")
-        
+
         if not self.video_info:
             print("[DEBUG] _check_subtitle_and_ask: No video_info, returning None")
             return None
-        
+
         from ...core.config_manager import config_manager
         from ...processing.subtitle_manager import extract_subtitle_tracks
-        
+
         subtitle_config = config_manager.get_subtitle_config()
-        print(f"[DEBUG] _check_subtitle_and_ask: subtitle_enabled={subtitle_config.enabled}, embed_mode={subtitle_config.embed_mode}")
-        
+        print(
+            f"[DEBUG] _check_subtitle_and_ask: subtitle_enabled={subtitle_config.enabled}, embed_mode={subtitle_config.embed_mode}"
+        )
+
         if not subtitle_config.enabled:
             print("[DEBUG] _check_subtitle_and_ask: Subtitle disabled, returning None")
             return None
-        
+
         # 检查视频是否有字幕
         tracks = extract_subtitle_tracks(self.video_info)
         print(f"[DEBUG] _check_subtitle_and_ask: Found {len(tracks)} subtitle tracks")
-        
+
         if not tracks:
             # 视频没有字幕，提示用户
             print("[DEBUG] _check_subtitle_and_ask: No subtitles, showing warning dialog")
             box = MessageBox(
                 "⚠️ 无可用字幕",
-                "此视频没有可用字幕。\n\n"
-                "是否继续下载（无字幕）？",
+                "此视频没有可用字幕。\n\n是否继续下载（无字幕）？",
                 parent=self,
             )
             box.yesButton.setText("继续下载")
             box.cancelButton.setText("取消")
-            print("[DEBUG] _check_subtitle_and_ask: About to call box.exec() for no subtitle warning")
+            print(
+                "[DEBUG] _check_subtitle_and_ask: About to call box.exec() for no subtitle warning"
+            )
             result = box.exec()
             print(f"[DEBUG] _check_subtitle_and_ask: box.exec() returned {result}")
             if not result:
@@ -2349,15 +2400,17 @@ class SelectionDialog(MessageBoxBase):
                 raise ValueError("用户取消下载：无字幕")
             print("[DEBUG] _check_subtitle_and_ask: User continue, returning None")
             return None
-        
+
         # 有字幕，检查是否需要询问嵌入模式
         if subtitle_config.embed_mode == "ask":
             available_langs = [t.lang_code for t in tracks[:5]]
             lang_display = ", ".join(available_langs)
             if len(tracks) > 5:
                 lang_display += f" 等 {len(tracks)} 种语言"
-            
-            print(f"[DEBUG] _check_subtitle_and_ask: embed_mode is 'ask', showing confirmation dialog with langs: {lang_display}")
+
+            print(
+                f"[DEBUG] _check_subtitle_and_ask: embed_mode is 'ask', showing confirmation dialog with langs: {lang_display}"
+            )
             box = MessageBox(
                 "📝 字幕嵌入确认",
                 f"检测到可用字幕：{lang_display}\n\n"
@@ -2367,11 +2420,15 @@ class SelectionDialog(MessageBoxBase):
             )
             box.yesButton.setText("嵌入字幕")
             box.cancelButton.setText("仅下载文件")
-            print("[DEBUG] _check_subtitle_and_ask: About to call box.exec() for embed confirmation")
+            print(
+                "[DEBUG] _check_subtitle_and_ask: About to call box.exec() for embed confirmation"
+            )
             result = box.exec()
-            print(f"[DEBUG] _check_subtitle_and_ask: box.exec() returned {result} (type: {type(result)})")
+            print(
+                f"[DEBUG] _check_subtitle_and_ask: box.exec() returned {result} (type: {type(result)})"
+            )
             return bool(result)
-        
+
         print("[DEBUG] _check_subtitle_and_ask: Returning None (use config default)")
         return None  # 使用配置默认值
 
@@ -2401,7 +2458,7 @@ class SelectionDialog(MessageBoxBase):
         else:
             # 单个视频下载
             print("[DEBUG] accept: Single video mode")
-            
+
             # 【关键修复】无论是否有格式选择器，都需要在这里询问字幕
             # 因为 accept() 是在对话框关闭前执行，此时 MessageBox 能正常工作
             # get_selected_tasks() 是在对话框关闭后执行，MessageBox 可能无法正常工作
@@ -2415,22 +2472,24 @@ class SelectionDialog(MessageBoxBase):
                     # 用户取消下载
                     print("[DEBUG] accept: User cancelled")
                     return
-            
+
             # 检查是否有格式选择器
             print("[DEBUG] accept: Checking for format selector")
             has_selector = hasattr(self, "_format_selector")
             print(f"[DEBUG] accept: has_format_selector={has_selector}")
-            
+
             if has_selector:
                 # 有格式选择器：字幕选择已完成，格式处理在 get_selected_tasks() 中完成
-                print("[DEBUG] accept: Has format selector, subtitle choice done, format will be handled in get_selected_tasks")
+                print(
+                    "[DEBUG] accept: Has format selector, subtitle choice done, format will be handled in get_selected_tasks"
+                )
                 # 不设置 download_tasks，让 MainWindow 调用 get_selected_tasks()
                 super().accept()
                 return
-            
+
             # 没有格式选择器：使用旧流程（get_download_options）
             print("[DEBUG] accept: No format selector, using legacy flow")
-            
+
             if self.video_info is not None:
                 title = str(self.video_info.get("title") or "未命名任务")
                 thumb = str(self.video_info.get("thumbnail") or "").strip() or None
@@ -2442,7 +2501,9 @@ class SelectionDialog(MessageBoxBase):
                     "url": self.url,
                     "title": title,
                     "thumbnail": thumb,
-                    "opts": self.get_download_options(embed_subtitles_override=self._subtitle_embed_choice),
+                    "opts": self.get_download_options(
+                        embed_subtitles_override=self._subtitle_embed_choice
+                    ),
                 }
             ]
         super().accept()
@@ -2453,7 +2514,9 @@ class SelectionDialog(MessageBoxBase):
             return []
 
         mode = int(self.type_combo.currentIndex()) if self.type_combo is not None else 0
-        preset_text = self.preset_combo.currentText() if self.preset_combo is not None else "最高质量(自动)"
+        preset_text = (
+            self.preset_combo.currentText() if self.preset_combo is not None else "最高质量(自动)"
+        )
 
         # VR 模式预设解析
         vr_preset_fmt = None
@@ -2531,7 +2594,9 @@ class SelectionDialog(MessageBoxBase):
                 opts["__fluentytdl_use_android_vr"] = True
                 # 如果详情已加载，传递 VR 格式 ID 以供过滤
                 if data.get("detail"):
-                    opts["__android_vr_format_ids"] = data["detail"].get("__android_vr_format_ids", [])
+                    opts["__android_vr_format_ids"] = data["detail"].get(
+                        "__android_vr_format_ids", []
+                    )
 
             # NEW: Advanced selection
             if data.get("custom_selection_data"):
@@ -2556,19 +2621,21 @@ class SelectionDialog(MessageBoxBase):
             # VR 模式自动/简单选择
             if self._vr_mode:
                 if bool(data.get("manual_override")) and data.get("override_format_id"):
-                     opts["format"] = f"{data['override_format_id']}+bestaudio/best"
+                    opts["format"] = f"{data['override_format_id']}+bestaudio/best"
                 else:
-                     opts["format"] = vr_preset_fmt or "bestvideo+bestaudio/best"
-                     opts.update(vr_preset_args)
-                
+                    opts["format"] = vr_preset_fmt or "bestvideo+bestaudio/best"
+                    opts.update(vr_preset_args)
+
                 opts["writethumbnail"] = False
                 opts["addmetadata"] = True
-                tasks.append({
-                    "url": url,
-                    "title": str(data.get("title") or "未命名任务"),
-                    "thumbnail": str(data.get("thumbnail") or "").strip() or None,
-                    "opts": opts,
-                })
+                tasks.append(
+                    {
+                        "url": url,
+                        "title": str(data.get("title") or "未命名任务"),
+                        "thumbnail": str(data.get("thumbnail") or "").strip() or None,
+                        "opts": opts,
+                    }
+                )
                 continue
 
             # 0=音视频，1=仅视频，2=仅音频
@@ -2585,7 +2652,7 @@ class SelectionDialog(MessageBoxBase):
             try:
                 vid = str(data.get("override_format_id") or "").strip()
                 if vid:
-                    for vf in (data.get("video_formats") or []):
+                    for vf in data.get("video_formats") or []:
                         if str(vf.get("id") or "") == vid:
                             video_ext = str(vf.get("ext") or "").strip() or None
                             break
@@ -2600,7 +2667,7 @@ class SelectionDialog(MessageBoxBase):
                 )
                 aid = str(aid or "").strip()
                 if aid:
-                    for af in (data.get("audio_formats") or []):
+                    for af in data.get("audio_formats") or []:
                         if str(af.get("id") or "") == aid:
                             audio_ext = str(af.get("ext") or "").strip() or None
                             break
@@ -2689,7 +2756,7 @@ class SelectionDialog(MessageBoxBase):
             # 1. 过滤
             compatible_ids = set(info.get("__android_vr_format_ids") or [])
             should_filter = bool(compatible_ids)
-            
+
             candidates = []
             for f in formats:
                 if f.get("vcodec") in (None, "none"):
@@ -2722,7 +2789,7 @@ class SelectionDialog(MessageBoxBase):
                 stereo = str(f.get("__vr_stereo_mode") or "unknown")
                 proj = str(f.get("__vr_projection") or "unknown")
                 vc = str(f.get("vcodec") or "")[:4]
-                
+
                 # 唯一键：高度+立体+投影+编码
                 # 这样可以显示不同版本的同一分辨率（比如 VP9 vs AV1）
                 # 简化起见，我们只取最高质量的每个分辨率变体
@@ -2736,7 +2803,7 @@ class SelectionDialog(MessageBoxBase):
                 fps = f.get("fps")
                 if fps and fps > 30:
                     res_str += f" {int(fps)}fps"
-                
+
                 stereo_str = ""
                 if stereo == "stereo_tb":
                     stereo_str = " [3D TB]"
@@ -2744,7 +2811,7 @@ class SelectionDialog(MessageBoxBase):
                     stereo_str = " [3D SBS]"
                 elif stereo == "mono":
                     stereo_str = " [2D]"
-                
+
                 proj_str = ""
                 if proj == "equirectangular":
                     proj_str = " (Equi)"
@@ -2752,18 +2819,20 @@ class SelectionDialog(MessageBoxBase):
                     proj_str = " (Mesh)"
                 elif proj == "eac":
                     proj_str = " (EAC)"
-                
+
                 ext = f.get("ext") or "?"
-                
+
                 display_text = f"{res_str}{stereo_str}{proj_str} - {ext} ({vc})"
-                
-                self.video_formats.append({
-                    "text": display_text,
-                    "id": f.get("format_id"),
-                    "height": h,
-                    # 保存完整对象以便后续使用
-                    "_raw": f 
-                })
+
+                self.video_formats.append(
+                    {
+                        "text": display_text,
+                        "id": f.get("format_id"),
+                        "height": h,
+                        # 保存完整对象以便后续使用
+                        "_raw": f,
+                    }
+                )
         else:
             # 普通模式
             for f in formats:
@@ -2794,7 +2863,7 @@ class SelectionDialog(MessageBoxBase):
                     seen_res.add(h)
 
             self.video_formats.sort(key=lambda x: x["height"], reverse=True)
-            
+
         self._update_format_list()
 
     def _update_format_list(self) -> None:
@@ -2815,7 +2884,7 @@ class SelectionDialog(MessageBoxBase):
     def get_download_options(self, embed_subtitles_override: bool | None = None) -> dict[str, Any]:
         """
         返回构建好的 yt-dlp options
-        
+
         Args:
             embed_subtitles_override: 覆盖字幕嵌入选项 (None=使用配置默认, True=嵌入, False=不嵌入)
         """
@@ -2824,7 +2893,9 @@ class SelectionDialog(MessageBoxBase):
         # Prefer new single-video table selection if available
         mode_combo = self._single_mode_combo
         if mode_combo is not None:
-            mode = int(mode_combo.currentIndex())  # 0=assemble, 1=muxed-only, 2=video-only, 3=audio-only
+            mode = int(
+                mode_combo.currentIndex()
+            )  # 0=assemble, 1=muxed-only, 2=video-only, 3=audio-only
 
             def _find_single_ext(fid: str | None) -> str | None:
                 if not fid:
@@ -2850,7 +2921,9 @@ class SelectionDialog(MessageBoxBase):
             else:
                 # assemble
                 if self._single_selected_video_id and self._single_selected_audio_id:
-                    opts["format"] = f"{self._single_selected_video_id}+{self._single_selected_audio_id}"
+                    opts["format"] = (
+                        f"{self._single_selected_video_id}+{self._single_selected_audio_id}"
+                    )
                     v_ext = _find_single_ext(self._single_selected_video_id)
                     a_ext = _find_single_ext(self._single_selected_audio_id)
                     merge_fmt = _choose_lossless_merge_container(v_ext, a_ext)
@@ -2864,7 +2937,7 @@ class SelectionDialog(MessageBoxBase):
             # Do not download thumbnail files during download.
             opts["writethumbnail"] = False
             opts["addmetadata"] = True
-            
+
             # 集成字幕服务
             if self.video_info:
                 subtitle_opts = subtitle_service.apply(
@@ -2872,19 +2945,20 @@ class SelectionDialog(MessageBoxBase):
                     video_info=self.video_info,
                 )
                 opts.update(subtitle_opts)
-                
+
                 # 根据 embed_type 应用覆盖选项
                 if embed_subtitles_override is not None:
                     from ...core.config_manager import config_manager as cfg
+
                     embed_type = cfg.get_subtitle_config().embed_type
                     if embed_type in ("soft", "hard"):
                         # soft/hard 都走软嵌入路径（hard 暂未实现，降级处理）
                         opts["embedsubtitles"] = embed_subtitles_override
                     else:
                         opts["embedsubtitles"] = False
-                
+
                 _ensure_subtitle_compatible_container(opts)
-            
+
             return opts
 
         # Fallback to legacy combo selection (for safety)
@@ -2899,7 +2973,7 @@ class SelectionDialog(MessageBoxBase):
             opts["format"] = "bestaudio/best"
         opts["writethumbnail"] = False
         opts["addmetadata"] = True
-        
+
         # 集成字幕服务
         if self.video_info:
             subtitle_opts = subtitle_service.apply(
@@ -2907,16 +2981,17 @@ class SelectionDialog(MessageBoxBase):
                 video_info=self.video_info,
             )
             opts.update(subtitle_opts)
-            
+
             # 根据 embed_type 应用覆盖选项
             if embed_subtitles_override is not None:
                 from ...core.config_manager import config_manager as cfg
+
                 embed_type = cfg.get_subtitle_config().embed_type
                 if embed_type in ("soft", "hard"):
                     opts["embedsubtitles"] = embed_subtitles_override
                 else:
                     opts["embedsubtitles"] = False
-            
+
             _ensure_subtitle_compatible_container(opts)
-        
+
         return opts

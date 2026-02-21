@@ -23,18 +23,18 @@ if TYPE_CHECKING:
 class EnvironmentChecker:
     """
     环境自检
-    
+
     单例模式，检查录制所需的基础设施。
     """
-    
+
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
@@ -42,7 +42,7 @@ class EnvironmentChecker:
         self._ffprobe_exe = None
         self._encoders = []
         self._initialized = True
-    
+
     def check_all(self) -> dict:
         """运行所有检查"""
         results = {
@@ -58,21 +58,16 @@ class EnvironmentChecker:
         self._ffprobe_exe = None
         self._encoders = []
         self.check_all()
-    
+
     def check_ffmpeg(self) -> bool:
         """检查 FFmpeg 是否可用，返回最优引用方式 (优先使用内置)"""
         import shutil
-        
+
         # 1. 优先检查应用内置目录 (bin, tools, assets/bin)
         # 这确保了如果应用自带了 Full 版本，会优先使用它，而不是系统 PATH 中可能的 Essentials 版本
         app_root = Path(sys.argv[0]).parent
-        search_paths = [
-            app_root / "bin", 
-            app_root / "tools", 
-            app_root / "assets" / "bin",
-            app_root
-        ]
-        
+        search_paths = [app_root / "bin", app_root / "tools", app_root / "assets" / "bin", app_root]
+
         for folder in search_paths:
             p = folder / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
             if p.exists():
@@ -86,42 +81,43 @@ class EnvironmentChecker:
             self._ffmpeg_exe = "ffmpeg"
             logger.info(f"使用系统 FFmpeg: {path}")
             return True
-                
+
         return False
-    
+
     def check_ffprobe(self) -> bool:
         """检查 FFprobe 是否可用"""
         try:
             subprocess.run(
-                ["ffprobe", "-version"], 
-                capture_output=True, 
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                ["ffprobe", "-version"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
             self._ffprobe_exe = "ffprobe"
             return True
         except Exception:
             import shutil
+
             path = shutil.which("ffprobe")
             if path:
                 self._ffprobe_exe = path
                 return True
         return False
-    
+
     def check_gpu_encoders(self) -> list[str]:
         """检测可用的 GPU 编码器"""
         if not self._ffmpeg_exe:
             return []
-            
+
         encoders = []
         try:
             result = subprocess.run(
-                [self._ffmpeg_exe, "-encoders"], 
-                capture_output=True, 
+                [self._ffmpeg_exe, "-encoders"],
+                capture_output=True,
                 text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
             output = result.stdout
-            
+
             # NVIDIA NVENC
             if "h264_nvenc" in output:
                 encoders.append("h264_nvenc")
@@ -131,27 +127,27 @@ class EnvironmentChecker:
             # AMD AMF
             if "h264_amf" in output:
                 encoders.append("h264_amf")
-                
+
             self._encoders = encoders
         except Exception as e:
             logger.error(f"检测 GPU 编码器失败: {e}")
-            
+
         return encoders
-    
+
     def get_best_encoder(self) -> str:
         """获取最佳编码器（优先 GPU）"""
         if not self._encoders:
             self.check_gpu_encoders()
-            
+
         if "h264_nvenc" in self._encoders:
             return "h264_nvenc"
         if "h264_qsv" in self._encoders:
             return "h264_qsv"
         if "h264_amf" in self._encoders:
             return "h264_amf"
-            
+
         return "libx264"  # 兜底 CPU
-    
+
     def check_disk_permission(self, directory: str | Path) -> bool:
         """检查目录写入权限"""
         path = Path(directory)
@@ -160,7 +156,7 @@ class EnvironmentChecker:
                 path.mkdir(parents=True, exist_ok=True)
             except Exception:
                 return False
-        
+
         # 尝试写入临时文件
         test_file = path / ".write_test"
         try:
@@ -179,6 +175,7 @@ class EnvironmentChecker:
 
 # 导出单例获取函数
 _checker = None
+
 
 def get_environment_checker() -> EnvironmentChecker:
     global _checker

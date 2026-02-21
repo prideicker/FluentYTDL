@@ -30,6 +30,7 @@ from .strategy import DownloadMode, DownloadStrategy
 
 # ── 回调协议 ──────────────────────────────────────────────
 
+
 class ProgressCallback(Protocol):
     def __call__(self, data: dict[str, Any]) -> None: ...
 
@@ -47,6 +48,7 @@ class PathCallback(Protocol):
 
 
 # ── 容器决策 ──────────────────────────────────────────────
+
 
 def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | None) -> str | None:
     """复用与 format_selector.py / selection_dialog.py 相同的容器决策逻辑。"""
@@ -99,6 +101,7 @@ def determine_merge_container(
 
 # ── Win32 工具 ────────────────────────────────────────────
 
+
 def _win_hide_kwargs() -> dict[str, Any]:
     """Windows: 隐藏子进程窗口。"""
     kw: dict[str, Any] = {}
@@ -118,13 +121,12 @@ def _win_hide_kwargs() -> dict[str, Any]:
     return kw
 
 
-
-
 # ── 执行器 ────────────────────────────────────────────────
+
 
 class DownloadExecutor:
     """原生下载执行器 (Native Only)。
-    
+
     仅使用 yt-dlp 原生管线。
     """
 
@@ -167,7 +169,9 @@ class DownloadExecutor:
 
         # 总是使用原生管线
         return self._execute_native(
-            url, ydl_opts, strategy,
+            url,
+            ydl_opts,
+            strategy,
             on_progress=on_progress,
             on_status=on_status,
             on_path=on_path,
@@ -205,30 +209,46 @@ class DownloadExecutor:
                 # 快速预提取信息 (不下载)
                 # 仅当有缓存信息时才进行动态优化，避免额外的网络请求导致启动延迟
                 if cached_info_dict:
-                    logger.debug("[Executor][Native] Using cached info for dynamic concurrency check")
+                    logger.debug(
+                        "[Executor][Native] Using cached info for dynamic concurrency check"
+                    )
                     info = self._parse_stream_info(cached_info_dict, check_protocol=False)
-                    
+
                     filesize = info.get("filesize") or info.get("filesize_approx") or 0
-                    
+
                     if filesize > 0:
                         size_mb = filesize / (1024 * 1024)
                         new_N = 1
                         if size_mb < 10:
                             new_N = 1
                         elif size_mb < 50:
-                            new_N = min(4, strategy.concurrent_fragments if strategy.concurrent_fragments > 1 else 4)
+                            new_N = min(
+                                4,
+                                strategy.concurrent_fragments
+                                if strategy.concurrent_fragments > 1
+                                else 4,
+                            )
                         else:
                             # > 50MB
-                            new_N = min(8, strategy.concurrent_fragments if strategy.concurrent_fragments > 1 else 8)
+                            new_N = min(
+                                8,
+                                strategy.concurrent_fragments
+                                if strategy.concurrent_fragments > 1
+                                else 8,
+                            )
                             # 极速模式特权
                             if strategy.mode == DownloadMode.SPEED:
                                 new_N = 16 if size_mb > 100 else 8
-                        
+
                         if new_N != strategy.concurrent_fragments:
-                            logger.info(f"[Executor][Native] Dynamic concurrency: size={size_mb:.2f}MB, N={new_N}")
+                            logger.info(
+                                f"[Executor][Native] Dynamic concurrency: size={size_mb:.2f}MB, N={new_N}"
+                            )
                             strategy = dataclasses.replace(strategy, concurrent_fragments=new_N)
                 else:
-                    logger.debug("[Executor][Native] No cached info, skipping dynamic concurrency check to avoid delay")
+                    logger.debug(
+                        "[Executor][Native] No cached info, skipping dynamic concurrency check to avoid delay"
+                    )
 
             except Exception as e:
                 logger.warning(f"[Executor][Native] Dynamic concurrency check failed: {e}")
@@ -299,16 +319,18 @@ class DownloadExecutor:
             parsed = self._ytdlp_parser.parse_line(line)
 
             if parsed.type == "progress" and parsed.progress:
-                on_progress({
-                    "status": parsed.progress.status,
-                    "downloaded_bytes": parsed.progress.downloaded_bytes,
-                    "total_bytes": parsed.progress.total_bytes,
-                    "speed": parsed.progress.speed,
-                    "eta": parsed.progress.eta,
-                    "filename": parsed.progress.filename,
-                    "info_dict": parsed.progress.info_dict,
-                    "label": label,
-                })
+                on_progress(
+                    {
+                        "status": parsed.progress.status,
+                        "downloaded_bytes": parsed.progress.downloaded_bytes,
+                        "total_bytes": parsed.progress.total_bytes,
+                        "speed": parsed.progress.speed,
+                        "eta": parsed.progress.eta,
+                        "filename": parsed.progress.filename,
+                        "info_dict": parsed.progress.info_dict,
+                        "label": label,
+                    }
+                )
                 if parsed.progress.filename:
                     p = _abs(parsed.progress.filename)
                     dest_paths.add(p)
@@ -358,7 +380,7 @@ class DownloadExecutor:
                         is_valid = True
                 except OSError:
                     pass
-            
+
             if is_valid:
                 logger.warning(f"yt-dlp 退出码 {rc} (非零)，但输出文件有效。忽略错误。")
             else:
@@ -366,7 +388,6 @@ class DownloadExecutor:
                 raise RuntimeError(f"yt-dlp 退出码 {rc}:\n{last_lines}")
 
         return output_path
-
 
     # ── 子步骤 ────────────────────────────────────────────
 
@@ -396,14 +417,16 @@ class DownloadExecutor:
         # 克隆选项并强制跳过下载
         opts = ydl_opts.copy()
         opts["skip_download"] = True
-        
+
         # 移除可能冲突的格式选项
         opts.pop("format", None)
-        
+
         # 这里的 callbacks 只需要 status，以及部分 progress (如下载字幕时)
         # 我们传入 on_progress，但标记为 "补充"
         self._execute_native(
-            url, opts, strategy,
+            url,
+            opts,
+            strategy,
             on_progress=on_progress,
             on_status=on_status,
             on_path=lambda path: None,
@@ -435,7 +458,7 @@ class DownloadExecutor:
             val = ydl_opts.get(key)
             if isinstance(val, str) and val.strip():
                 cmd += [flag, val.strip()]
-        
+
         cookies_from_browser = ydl_opts.get("cookiesfrombrowser")
         if isinstance(cookies_from_browser, (list, tuple)) and cookies_from_browser:
             cmd += ["--cookies-from-browser", str(cookies_from_browser[0])]
@@ -488,22 +511,24 @@ class DownloadExecutor:
 
         return self._parse_stream_info(info, check_protocol=check_protocol)
 
-    def _parse_stream_info(self, info: dict[str, Any], check_protocol: bool = True) -> dict[str, Any]:
+    def _parse_stream_info(
+        self, info: dict[str, Any], check_protocol: bool = True
+    ) -> dict[str, Any]:
         """从 yt-dlp JSON 信息中提取流 URL。"""
         result: dict[str, Any] = {
             "title": info.get("title") or info.get("id") or "video",
         }
 
         requested_formats = info.get("requested_formats")
-        
+
         # Debug Log
         if requested_formats:
-             logger.debug("[Executor] requested_formats: {}", [
-                (f.get("format_id"), f.get("vcodec"), f.get("acodec")) 
-                for f in requested_formats
-            ])
+            logger.debug(
+                "[Executor] requested_formats: {}",
+                [(f.get("format_id"), f.get("vcodec"), f.get("acodec")) for f in requested_formats],
+            )
         else:
-             logger.debug("[Executor] No requested_formats found, using single format info.")
+            logger.debug("[Executor] No requested_formats found, using single format info.")
 
         if not requested_formats:
             # 没有 requested_formats → 可能是预合流或单文件
@@ -513,11 +538,11 @@ class DownloadExecutor:
                 # Check protocol compatibility for Aria2
                 proto = info.get("protocol", "")
                 if check_protocol and proto in ("m3u8", "m3u8_native", "rtsp"):
-                     raise RuntimeError(f"流协议 {proto} 需要 yt-dlp native 处理")
+                    raise RuntimeError(f"流协议 {proto} 需要 yt-dlp native 处理")
 
                 vcodec = info.get("vcodec")
                 acodec = info.get("acodec")
-                is_audio_only = (vcodec == "none" and acodec != "none")
+                is_audio_only = vcodec == "none" and acodec != "none"
 
                 fmt_info = {
                     "url": stream_url,
@@ -525,7 +550,7 @@ class DownloadExecutor:
                     "http_headers": info.get("http_headers", {}),
                     "filesize": info.get("filesize") or info.get("filesize_approx"),
                 }
-                
+
                 if is_audio_only:
                     result["audio"] = fmt_info
                 else:
@@ -536,9 +561,7 @@ class DownloadExecutor:
         for fmt in requested_formats:
             proto = fmt.get("protocol", "")
             if check_protocol and proto in ("m3u8", "m3u8_native", "rtsp"):
-                raise RuntimeError(
-                    f"流协议 {proto} 需要 yt-dlp native 处理"
-                )
+                raise RuntimeError(f"流协议 {proto} 需要 yt-dlp native 处理")
 
             # 提取信息
             stream_url = fmt.get("url", "")
@@ -548,7 +571,7 @@ class DownloadExecutor:
             headers = fmt.get("http_headers", {})
             ext = fmt.get("ext", "")
             filesize = fmt.get("filesize") or fmt.get("filesize_approx")
-            
+
             fmt_data = {
                 "url": stream_url,
                 "ext": ext,
@@ -560,7 +583,7 @@ class DownloadExecutor:
             acodec = fmt.get("acodec")
             has_video = vcodec and vcodec != "none"
             has_audio = acodec and acodec != "none"
-            
+
             # 判定类型
             if has_video:
                 # 任何包含视频流的都视为视频 (包括 Muxed)
@@ -571,8 +594,6 @@ class DownloadExecutor:
                 result["audio"] = fmt_data
 
         return result
-
-
 
     def _resolve_output_dir(self, ydl_opts: dict[str, Any]) -> str:
         """解析输出目录。"""
@@ -587,6 +608,7 @@ class DownloadExecutor:
         # 从配置获取
         try:
             from ..core.config_manager import config_manager
+
             d = str(config_manager.get("download_dir") or "").strip()
             if d:
                 os.makedirs(d, exist_ok=True)
@@ -620,12 +642,11 @@ class DownloadExecutor:
 # ── 工具查找 ──────────────────────────────────────────────
 
 
-
-
 def _find_ffmpeg() -> str | None:
     """查找 ffmpeg 可执行文件。"""
     try:
         from ..core.config_manager import config_manager
+
         ffmpeg_path = str(config_manager.get("ffmpeg_path") or "").strip()
         if ffmpeg_path and Path(ffmpeg_path).exists():
             return ffmpeg_path
@@ -633,6 +654,7 @@ def _find_ffmpeg() -> str | None:
         pass
     try:
         from ..utils.paths import locate_runtime_tool
+
         return str(locate_runtime_tool("ffmpeg.exe", "ffmpeg/ffmpeg.exe"))
     except Exception:
         pass
@@ -640,6 +662,7 @@ def _find_ffmpeg() -> str | None:
 
 
 # ── 辅助函数 ──────────────────────────────────────────────
+
 
 def _decode_line(raw: bytes) -> str:
     """健壮的行解码 (UTF-8 → GBK → replace)。"""

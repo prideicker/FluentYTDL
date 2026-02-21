@@ -62,4 +62,3 @@ class PathManager:
         except Exception:
             pass
         return None
-
