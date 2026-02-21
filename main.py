@@ -47,6 +47,10 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
 
+    # === 强制使用明亮主题 (避免深色模式下一黑一白) ===
+    import qfluentwidgets
+    qfluentwidgets.setTheme(qfluentwidgets.Theme.LIGHT)
+
     # Set application icon from assets/logo.png if available (comprehensive replacement)
     try:
         root_dir = Path(__file__).resolve().parent
