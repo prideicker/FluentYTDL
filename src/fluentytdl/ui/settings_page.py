@@ -968,15 +968,15 @@ class SettingsPage(QWidget):
         layout.addWidget(self.networkGroup)
 
     def _init_account_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
-        """初始化账号与 Cookie 设置组"""
-        self.accountGroup = SettingCardGroup("账号验证 (Cookie)", parent_widget)
+        """初始化账号与认证设置组"""
+        self.accountGroup = SettingCardGroup("账号验证", parent_widget)
 
-        # === Cookie Sentinel 配置 ===
+        # === Cookie Sentinel 配置组 ===
         self.cookieModeCard = InlineComboBoxCard(
             FluentIcon.PEOPLE,
-            "Cookie 验证方式",
-            "选择 Cookie 来源（Cookie 卫士会自动维护生命周期）",
-            ["🚀 自动从浏览器提取", "📄 手动导入 cookies.txt"],
+            "Cookie 来源",
+            "选择 Cookie 获取方式（Cookie 卫士会自动维护生命周期）",
+            ["🚀 自动从本地浏览器提取", "📄 手动导入 cookies.txt 文件"],
             self.accountGroup,
         )
         self.cookieModeCard.comboBox.currentIndexChanged.connect(self._on_cookie_mode_changed)
@@ -996,6 +996,7 @@ class SettingsPage(QWidget):
                 "Arc",
                 "Firefox",
                 "LibreWolf",
+                "百分浏览器 (Cent)",
             ],
             self.accountGroup,
         )
@@ -1025,12 +1026,11 @@ class SettingsPage(QWidget):
         self.cookieStatusCard = PushSettingCard(
             "打开位置",
             FluentIcon.INFO,
-            "Cookie 文件",
-            "显示当前 Cookie 信息",
+            "Cookie 状态检测",
+            "显示当前关联的 Cookie 存活状态",
             self.accountGroup,
         )
         self.cookieStatusCard.clicked.connect(self._open_cookie_location)
-        self._update_cookie_status()
 
         self.accountGroup.addSettingCard(self.cookieModeCard)
         self.accountGroup.addSettingCard(self.browserCard)
@@ -1717,6 +1717,7 @@ class SettingsPage(QWidget):
                 AuthSourceType.ARC: 7,
                 AuthSourceType.FIREFOX: 8,
                 AuthSourceType.LIBREWOLF: 9,
+                AuthSourceType.CENT: 10,
             }
             browser_idx = browser_map.get(current_source, 0)
             self.browserCard.comboBox.setCurrentIndex(browser_idx)
@@ -1724,7 +1725,7 @@ class SettingsPage(QWidget):
         self.cookieModeCard.comboBox.blockSignals(False)
         self.browserCard.comboBox.blockSignals(False)
 
-        # 触发可见性更新
+        # 触发可见性更新 (Cookie sub-options)
         self._on_cookie_mode_changed(self.cookieModeCard.comboBox.currentIndex())
 
         self.poTokenCard.setValue(str(config_manager.get("youtube_po_token") or ""))
@@ -2122,6 +2123,7 @@ class SettingsPage(QWidget):
                 AuthSourceType.ARC,
                 AuthSourceType.FIREFOX,
                 AuthSourceType.LIBREWOLF,
+                AuthSourceType.CENT,
             ]
             source = (
                 browser_map[browser_index]
@@ -2171,6 +2173,7 @@ class SettingsPage(QWidget):
             (AuthSourceType.ARC, "Arc"),
             (AuthSourceType.FIREFOX, "Firefox"),
             (AuthSourceType.LIBREWOLF, "LibreWolf"),
+            (AuthSourceType.CENT, "百分浏览器 (Cent)"),
         ]
 
         if 0 <= index < len(browser_map):

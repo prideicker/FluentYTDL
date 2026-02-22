@@ -76,6 +76,8 @@ class AuthSourceType(str, Enum):
     # Firefox 内核浏览器（无需管理员权限）
     FIREFOX = "firefox"  # Firefox
     LIBREWOLF = "librewolf"  # LibreWolf
+    # 其它第三方定制
+    CENT = "centbrowser" # 百分浏览器
     # 其他
     FILE = "file"  # 手动导入的 cookies.txt
 
@@ -93,6 +95,7 @@ BROWSER_SOURCES = [
     AuthSourceType.ARC,
     AuthSourceType.FIREFOX,
     AuthSourceType.LIBREWOLF,
+    AuthSourceType.CENT,
 ]
 
 # 需要管理员权限的浏览器（Chromium 内核 v130+）
@@ -105,6 +108,7 @@ ADMIN_REQUIRED_BROWSERS = [
     AuthSourceType.OPERA_GX,
     AuthSourceType.VIVALDI,
     AuthSourceType.ARC,
+    AuthSourceType.CENT,
 ]
 
 # 各平台需要的 Cookie 域名
@@ -213,6 +217,7 @@ class AuthService:
             AuthSourceType.ARC: "Arc 浏览器",
             AuthSourceType.FIREFOX: "Firefox 浏览器",
             AuthSourceType.LIBREWOLF: "LibreWolf 浏览器",
+            AuthSourceType.CENT: "百分浏览器 (Cent)",
             AuthSourceType.FILE: "手动导入文件",
         }
         return names.get(self._current_source, "未知")
@@ -473,12 +478,36 @@ class AuthService:
         cookies = None
 
         try:
-            # 首先尝试直接提取
-            extractor = getattr(rookiepy, browser, None)
-            if extractor is None:
-                raise RuntimeError(f"rookiepy 不支持 {browser}")
-
-            cookies = extractor(domains)
+            if browser == "centbrowser":
+                import os
+                
+                # 百分浏览器的默认配置路径
+                local_appdata = os.environ.get('LOCALAPPDATA', '')
+                cent_user_data_dir = Path(local_appdata) / "CentBrowser" / "User Data"
+                
+                if not cent_user_data_dir.exists():
+                    raise FileNotFoundError(f"未找到百分浏览器数据目录: {cent_user_data_dir}")
+                
+                key_path = str(cent_user_data_dir / "Local State")
+                db_path_network = cent_user_data_dir / "Default" / "Network" / "Cookies"
+                db_path_legacy = cent_user_data_dir / "Default" / "Cookies"
+                
+                if db_path_network.exists():
+                    db_path = str(db_path_network)
+                elif db_path_legacy.exists():
+                    db_path = str(db_path_legacy)
+                else:
+                    raise FileNotFoundError("未找到百分浏览器的 Cookie 数据库文件。")
+                
+                logger.info(f"使用自建提取器提取 CentBrowser Cookie: {db_path}")
+                cookies = self._extract_centbrowser_manual(key_path, db_path, domains)
+            else:
+                # 原生支持组直接提取
+                extractor = getattr(rookiepy, browser, None)
+                if extractor is None:
+                    raise RuntimeError(f"rookiepy 不支持 {browser}")
+                cookies = extractor(domains)
+                
             logger.info(f"从 {browser} 提取到 {len(cookies)} 个 Cookie")
 
             # 使用 CookieCleaner 进行合规清洗
@@ -563,6 +592,95 @@ class AuthService:
         )
 
         return str(cache_file)
+
+    def _extract_centbrowser_manual(self, key_path: str, db_path: str, domains: list[str]) -> list[dict]:
+        import base64
+        import ctypes
+        import ctypes.wintypes
+        import json
+        import sqlite3
+        
+        try:
+            from yt_dlp.aes import aes_gcm_decrypt_and_verify
+            from yt_dlp.utils import bytes_to_intlist, intlist_to_bytes
+        except ImportError as e:
+            raise RuntimeError(f"未能导入 yt-dlp 依赖项，CentBrowser 提取需要：{e}") from e
+
+        # DPAPI hook
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [('cbData', ctypes.wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_char))]
+
+        def dpapi_decrypt(encrypted_data: bytes) -> bytes | None:
+            CryptUnprotectData = ctypes.windll.crypt32.CryptUnprotectData
+            CryptUnprotectData.argtypes = [ctypes.POINTER(DATA_BLOB), ctypes.POINTER(ctypes.c_wchar_p), ctypes.POINTER(DATA_BLOB), ctypes.c_void_p, ctypes.c_void_p, ctypes.wintypes.DWORD, ctypes.POINTER(DATA_BLOB)]
+            CryptUnprotectData.restype = ctypes.wintypes.BOOL
+            blob_in = DATA_BLOB(len(encrypted_data), ctypes.cast(encrypted_data, ctypes.POINTER(ctypes.c_char)))
+            blob_out = DATA_BLOB()
+            if CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+                out_data = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+                ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+                return out_data
+            return None
+
+        with open(key_path, encoding='utf-8') as f:
+            local_state = json.load(f)
+
+        encrypted_key = base64.b64decode(local_state['os_crypt']['encrypted_key'])
+        decrypted_key = dpapi_decrypt(encrypted_key[5:])
+        if not decrypted_key:
+            raise RuntimeError("DPAPI 解密失败 (可能当前非提取设备，或需要特定的系统支持)")
+
+        cookies = []
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT host_key, name, path, encrypted_value, is_secure, expires_utc, is_httponly, samesite FROM cookies")
+            
+            for row in cursor.fetchall():
+                host_key = row["host_key"]
+                if domains and not any(host_key.endswith(d) for d in domains):
+                    continue
+                    
+                encrypted_value = row["encrypted_value"]
+                if not encrypted_value or not encrypted_value.startswith(b'v10'):
+                    continue
+                    
+                nonce = encrypted_value[3:15]
+                ciphertext = encrypted_value[15:-16]
+                tag = encrypted_value[-16:]
+                
+                try:
+                    pt_ints = aes_gcm_decrypt_and_verify(
+                        bytes_to_intlist(ciphertext),
+                        bytes_to_intlist(decrypted_key),
+                        bytes_to_intlist(tag),
+                        bytes_to_intlist(nonce)
+                    )
+                    plaintext_bytes = intlist_to_bytes(pt_ints)
+                    
+                    if len(plaintext_bytes) > 32 and not plaintext_bytes.isascii():
+                        try:
+                            plaintext = plaintext_bytes[32:].decode("utf-8")
+                        except UnicodeDecodeError:
+                            continue
+                    else:
+                        plaintext = plaintext_bytes.decode("utf-8", errors="ignore")
+                        
+                    cookies.append({
+                        "domain": host_key,
+                        "name": row["name"],
+                        "path": row["path"],
+                        "value": plaintext,
+                        "secure": bool(row["is_secure"]),
+                        "expires": int(max(0, (row["expires_utc"] / 1000000) - 11644473600)) if row["expires_utc"] else 0,
+                        "http_only": bool(row["is_httponly"]),
+                        "same_site": row["samesite"] if "samesite" in row.keys() else 0
+                    })
+                except Exception:
+                    continue
+                    
+        return cookies
 
     def _write_netscape_file(self, cookies: list[dict], output_path: Path) -> None:
         """将 Cookie 写入 Netscape 格式文件"""
