@@ -612,9 +612,11 @@ class AuthService:
 
         def dpapi_decrypt(encrypted_data: bytes) -> bytes | None:
             CryptUnprotectData = ctypes.windll.crypt32.CryptUnprotectData
-            CryptUnprotectData.argtypes = [ctypes.POINTER(DATA_BLOB), ctypes.POINTER(ctypes.c_wchar_p), ctypes.POINTER(DATA_BLOB), ctypes.c_void_p, ctypes.c_void_p, ctypes.wintypes.DWORD, ctypes.POINTER(DATA_BLOB)]
+            CryptUnprotectData.argtypes = [ctypes.POINTER(DATA_BLOB), ctypes.POINTER(ctypes.c_wchar_p), ctypes.POINTER(DATA_BLOB), ctypes.c_void_p, ctypes.c_void_p, ctypes.wintypes.DWORD, ctypes.POINTER(DATA_BLOB)]  # pyright: ignore
             CryptUnprotectData.restype = ctypes.wintypes.BOOL
-            blob_in = DATA_BLOB(len(encrypted_data), ctypes.cast(encrypted_data, ctypes.POINTER(ctypes.c_char)))
+            blob_in = DATA_BLOB()
+            blob_in.cbData = len(encrypted_data)
+            blob_in.pbData = ctypes.cast(ctypes.c_char_p(encrypted_data), ctypes.POINTER(ctypes.c_char))
             blob_out = DATA_BLOB()
             if CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
                 out_data = ctypes.string_at(blob_out.pbData, blob_out.cbData)
