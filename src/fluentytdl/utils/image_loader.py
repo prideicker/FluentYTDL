@@ -21,10 +21,10 @@ from .logger import logger
 _global_manager: QNetworkAccessManager | None = None
 _global_manager_initialized: bool = False
 # P4: 全局单例 ImageLoader，避免每个窗口重复创建 Signal
-_global_image_loader: "ImageLoader | None" = None
+_global_image_loader: ImageLoader | None = None
 
 
-def get_image_loader() -> "ImageLoader":
+def get_image_loader() -> ImageLoader:
     """获取全局单例 ImageLoader（P4）"""
     global _global_image_loader
     if _global_image_loader is None:

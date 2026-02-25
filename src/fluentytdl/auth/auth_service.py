@@ -22,7 +22,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from ..core.config_manager import config_manager
 from ..utils.logger import logger
 from .cookie_cleaner import CookieCleaner
 

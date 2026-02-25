@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -385,7 +385,7 @@ def probe_cookie_and_ip(cookie_file: str | None = None, timeout: float = 15.0) -
         return {
             "cookie_ok": False,
             "ip_ok": True,
-            "detail": f"❌ Cookie 无效 — 不带 Cookie 可正常解析，IP 无风控",
+            "detail": "❌ Cookie 无效 — 不带 Cookie 可正常解析，IP 无风控",
             "latency_ms": total_ms,
             "with_cookie": r1,
             "without_cookie": r2,
@@ -403,11 +403,10 @@ def probe_cookie_and_ip(cookie_file: str | None = None, timeout: float = 15.0) -
         }
 
     # 两者都触发身份验证或 403 → IP 被风控
-    cookie_status = cookie_file is not None  # 有文件但可能失效
     return {
         "cookie_ok": False,
         "ip_ok": False,
-        "detail": f"❌ IP 被风控 (有无 Cookie 均触发验证)，建议更换代理节点",
+        "detail": "❌ IP 被风控 (有无 Cookie 均触发验证)，建议更换代理节点",
         "latency_ms": total_ms,
         "with_cookie": r1,
         "without_cookie": r2,

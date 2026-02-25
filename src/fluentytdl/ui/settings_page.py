@@ -2618,6 +2618,7 @@ class SettingsPage(QWidget):
                 import time as _time
 
                 results = {}
+                info = None
 
                 # Step 1: Cookie 文件
                 try:
@@ -2638,7 +2639,7 @@ class SettingsPage(QWidget):
 
                 # Step 2: Cookie 有效性
                 try:
-                    if results.get("file"):
+                    if results.get("file") and info is not None:
                         valid = info.get("cookie_valid", False)
                         msg = info.get("cookie_valid_msg", "")
                         if valid:

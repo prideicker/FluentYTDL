@@ -809,7 +809,7 @@ class DownloadConfigWindow(FramelessWindow):
             parent = self.parent()
             while parent is not None:
                 if hasattr(parent, "show_settings_network"):
-                    parent.show_settings_network()
+                    getattr(parent, "show_settings_network")()
                     return
                 parent = parent.parent()
         except Exception:
@@ -858,7 +858,8 @@ class DownloadConfigWindow(FramelessWindow):
         403 模糊错误 → 异步探测 YouTube 连通性后决定显示哪个面板。
         探测期间显示加载提示。
         """
-        self._error_label.setText(f"{friendly_title}\n\n正在诊断原因（检测网络连通性）...")
+        if self._error_label:
+            self._error_label.setText(f"{friendly_title}\n\n正在诊断原因（检测网络连通性）...")
 
         from PySide6.QtCore import QThread
         from PySide6.QtCore import Signal as QSignal
@@ -879,20 +880,22 @@ class DownloadConfigWindow(FramelessWindow):
                 return
             if reachable:
                 # 网络通 → Cookie 问题
-                self._error_label.setText(
-                    "需要验证 (Cookie 缺失或失效)\n\n"
-                    "网络连通正常，YouTube 拒绝了请求。\n"
-                    "这通常表示 Cookie 已失效或未配置，请在下方重新获取。"
-                )
+                if self._error_label:
+                    self._error_label.setText(
+                        "需要验证 (Cookie 缺失或失效)\n\n"
+                        "网络连通正常，YouTube 拒绝了请求。\n"
+                        "这通常表示 Cookie 已失效或未配置，请在下方重新获取。"
+                    )
                 self.retryWidget.show()
                 self.networkDiagWidget.hide()
             else:
                 # 网络不通 → 网络问题
-                self._error_label.setText(
-                    "网络连接异常\n\n"
-                    "无法连接到 YouTube 服务器。\n"
-                    "请检查代理/VPN 是否正常运行，或在下方进行网络诊断。"
-                )
+                if self._error_label:
+                    self._error_label.setText(
+                        "网络连接异常\n\n"
+                        "无法连接到 YouTube 服务器。\n"
+                        "请检查代理/VPN 是否正常运行，或在下方进行网络诊断。"
+                    )
                 self.retryWidget.hide()
                 self.networkDiagWidget.show()
                 self._netProbeResult.setText("⚠️ 自动探测：无法连接 YouTube")

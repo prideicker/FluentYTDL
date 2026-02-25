@@ -2,17 +2,33 @@ import json
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Optional, Dict, List, Any
+from typing import Any
+
+
+class CookieHTTPServer(HTTPServer):
+    """HTTPServer subclass with explicit cookie-related attributes."""
+
+    received_cookies: list[dict[str, Any]]
+    shutdown_event: threading.Event
+    auth_token: str
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.received_cookies = []
+        self.shutdown_event = threading.Event()
+        self.auth_token = ""
 
 
 class CookieReceiverHandler(BaseHTTPRequestHandler):
     """Handles POST requests containing cookie data with token authentication."""
-    
+
+    server: CookieHTTPServer  # type: ignore[assignment]
+
     def do_POST(self):
         if self.path == "/submit_cookies":
             try:
                 # Validate auth token
-                expected_token = getattr(self.server, 'auth_token', None)
+                expected_token = self.server.auth_token
                 if expected_token:
                     auth_header = self.headers.get("X-Auth-Token", "")
                     if auth_header != expected_token:
@@ -33,8 +49,7 @@ class CookieReceiverHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b'{"status": "ok", "message": "Cookies received successfully"}')
                     
                     # Signal that we are done
-                    if hasattr(self.server, 'shutdown_event'):
-                        self.server.shutdown_event.set()
+                    self.server.shutdown_event.set()
                         
                 else:
                     self.send_error(400, "Invalid payload format: Expected list of cookies")
@@ -61,12 +76,12 @@ class LocalCookieServer:
     """Manages the lifecycle of the local HTTP server with token authentication."""
 
     def __init__(self):
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: CookieHTTPServer | None = None
+        self._thread: threading.Thread | None = None
         self._shutdown_event = threading.Event()
         self._port: int = 0
         self._auth_token: str = ""
-        self._cookies: List[Dict[str, Any]] = []
+        self._cookies: list[dict[str, Any]] = []
 
     def start(self, port: int = 0) -> int:
         """
@@ -85,10 +100,10 @@ class LocalCookieServer:
         self._auth_token = secrets.token_hex(16)
 
         # Create server with random port (port 0 lets OS pick)
-        self._server = HTTPServer(('127.0.0.1', port), CookieReceiverHandler)
+        self._server = CookieHTTPServer(('127.0.0.1', port), CookieReceiverHandler)
         self._port = self._server.server_port
         
-        # Attach state to the server instance so the handler can access it
+        # Configure server attributes
         self._server.received_cookies = []
         self._server.shutdown_event = self._shutdown_event
         self._server.auth_token = self._auth_token
@@ -100,7 +115,7 @@ class LocalCookieServer:
         
         return self._port
 
-    def wait_for_cookies(self, timeout: float = 300.0) -> Optional[List[Dict[str, Any]]]:
+    def wait_for_cookies(self, timeout: float = 300.0) -> list[dict[str, Any]] | None:
         """
         Blocks until cookies are received or timeout occurs.
         Returns the list of cookies if successful, None otherwise.

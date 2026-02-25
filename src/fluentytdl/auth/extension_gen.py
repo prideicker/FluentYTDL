@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
+
 
 class ExtensionGenerator:
     """
@@ -25,7 +26,7 @@ class ExtensionGenerator:
 
     def _create_manifest(self, output_dir: Path) -> None:
         """Creates the manifest.json file."""
-        manifest: Dict[str, Any] = {
+        manifest: dict[str, Any] = {
             "manifest_version": 3,
             "name": "FluentYTDL Auth Helper",
             "version": "1.0",
