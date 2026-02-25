@@ -1134,5 +1134,29 @@ class MainWindow(FluentWindow):
                     f"[MainWindow] Cookie状态检查：正常（{auth_service.last_status.cookie_count}个Cookie）"
                 )
 
+            # 延迟 10 秒后执行一次带节流的 Cookie+IP 探测（后台线程）
+            QTimer.singleShot(10000, self._startup_cookie_probe)
+
         except Exception as e:
             logger.error(f"[MainWindow] Cookie状态检查失败: {e}")
+
+    def _startup_cookie_probe(self) -> None:
+        """启动后延迟执行一次带节流的 Cookie+IP 探测"""
+        try:
+            from ..auth.cookie_probe_throttle import cookie_probe_throttle
+
+            if not cookie_probe_throttle.should_probe():
+                return
+
+            import threading
+
+            def _probe():
+                result = cookie_probe_throttle.probe_if_allowed()
+                if result and not result.get("cookie_ok"):
+                    from ..utils.logger import logger
+
+                    logger.warning(f"[StartupProbe] Cookie 服务端无效: {result.get('detail', '')}")
+
+            threading.Thread(target=_probe, daemon=True, name="StartupCookieProbe").start()
+        except Exception:
+            pass

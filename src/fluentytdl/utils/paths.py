@@ -104,7 +104,7 @@ def find_bundled_executable(*relative_candidates: str) -> Path | None:
             if (
                 parts
                 and parts[0].lower()
-                in {"ffmpeg", "js", "deno", "node", "bun", "quickjs", "yt-dlp", "yt_dlp"}
+                in {"ffmpeg", "js", "node", "bun", "quickjs", "yt-dlp", "yt_dlp"}
                 and len(parts) >= 2
             ):
                 stripped = Path(*parts[1:])

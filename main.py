@@ -77,6 +77,7 @@ def main() -> None:
 
     from fluentytdl.core.config_manager import config_manager
     from fluentytdl.ui.reimagined_main_window import MainWindow
+    
 
     # 2. 创建主窗口
     window = MainWindow()

@@ -211,7 +211,6 @@ class YoutubeService:
                 ydl_opts["proxy"] = ""
 
         # Cookies: 统一通过 Cookie Sentinel 管理
-        # 新架构：所有 Cookie 统一写入 bin/cookies.txt，yt-dlp 始终读取该文件
         # 优先级: options.auth.cookies_file (直接指定) > Cookie Sentinel
         has_valid_cookie = False
         cookiefile = None

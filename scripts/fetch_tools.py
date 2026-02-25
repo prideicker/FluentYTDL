@@ -219,75 +219,6 @@ def fetch_ffmpeg(dest_dir: Path) -> None:
     print(f"  ✓ ffmpeg (yt-dlp) 已安装到 {dest_dir}")
 
 
-def fetch_deno(dest_dir: Path) -> None:
-    """获取 deno"""
-    print("\n🔧 获取 deno...")
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    release = github_api("/repos/denoland/deno/releases/latest")
-    tag = release.get("tag_name", "unknown")
-    print(f"  最新版本: {tag}")
-
-    # 查找 Windows zip
-    zip_asset = next(
-        (a for a in release["assets"] if "x86_64-pc-windows-msvc.zip" in a["name"]), None
-    )
-    if not zip_asset:
-        raise RuntimeError("未找到 deno Windows zip 资产")
-
-    # 查找校验文件
-    checksum_asset = next(
-        (a for a in release["assets"] if a["name"] == zip_asset["name"] + ".sha256sum"), None
-    ) or next((a for a in release["assets"] if a["name"] == zip_asset["name"] + ".sha256"), None)
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        zip_path = tmp_path / "deno.zip"
-
-        download_file(zip_asset["browser_download_url"], zip_path)
-
-        # 校验
-        if checksum_asset:
-            checksum_path = tmp_path / "checksum.txt"
-            download_file(checksum_asset["browser_download_url"], checksum_path)
-            hash_content = checksum_path.read_text(encoding="utf-8").strip()
-
-            # deno 的 sha256sum 文件可能有多种格式:
-            # 1. "hash  filename"
-            # 2. 纯 hash
-            # 3. 多行格式，包含 "ALGORITHM" 等头信息
-            expected_hash = None
-            for line in hash_content.splitlines():
-                line = line.strip()
-                # 跳过空行和头信息行
-                if not line or line.startswith("ALGORITHM") or "=" in line:
-                    continue
-                # 提取哈希值 (64个十六进制字符)
-                parts = line.split()
-                if parts:
-                    candidate = parts[0]
-                    # 验证是否是有效的 SHA256 (64个十六进制字符)
-                    if len(candidate) == 64 and all(
-                        c in "0123456789abcdefABCDEF" for c in candidate
-                    ):
-                        expected_hash = candidate
-                        break
-
-            if expected_hash:
-                if not verify_sha256(zip_path, expected_hash):
-                    raise RuntimeError("deno zip 校验失败")
-            else:
-                print("  ⚠ 无法解析校验文件格式，跳过校验")
-        else:
-            print("  ⚠ 未找到校验文件，跳过校验")
-
-        # 解压
-        print("  📦 解压中...")
-        with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(dest_dir)
-
-    print(f"  ✓ deno {tag} 已安装到 {dest_dir}")
-
 
 def fetch_atomicparsley(dest_dir: Path) -> None:
     """获取 AtomicParsley (用于嵌入封面)"""
@@ -389,7 +320,6 @@ def main():
     checks = [
         TARGET_DIR / "yt-dlp" / "yt-dlp.exe",
         TARGET_DIR / "ffmpeg" / "ffmpeg.exe",
-        TARGET_DIR / "deno" / "deno.exe",
         TARGET_DIR / "pot-provider" / "bgutil-pot-provider.exe",
         TARGET_DIR / "atomicparsley" / "AtomicParsley.exe",
     ]
@@ -410,7 +340,6 @@ def main():
     try:
         fetch_yt_dlp(TARGET_DIR / "yt-dlp")
         fetch_ffmpeg(TARGET_DIR / "ffmpeg")
-        fetch_deno(TARGET_DIR / "deno")
         fetch_pot_provider(TARGET_DIR / "pot-provider")
         fetch_atomicparsley(TARGET_DIR / "atomicparsley")
     except Exception as e:

@@ -20,6 +20,49 @@ from .logger import logger
 # 全局共享的 QNetworkAccessManager（复用 HTTP 连接）
 _global_manager: QNetworkAccessManager | None = None
 _global_manager_initialized: bool = False
+# P4: 全局单例 ImageLoader，避免每个窗口重复创建 Signal
+_global_image_loader: "ImageLoader | None" = None
+
+
+def get_image_loader() -> "ImageLoader":
+    """获取全局单例 ImageLoader（P4）"""
+    global _global_image_loader
+    if _global_image_loader is None:
+        _global_image_loader = ImageLoader()
+    return _global_image_loader
+
+
+def trim_disk_cache(max_mb: int = 50) -> None:
+    """清理磁盘缓存，删除最旧的文件直到总大小低于 max_mb（P5）"""
+    import tempfile
+    from pathlib import Path as _Path
+
+    cache_dir = _Path(tempfile.gettempdir()) / "fluentytdl_thumb_cache"
+    if not cache_dir.exists():
+        return
+    try:
+        files = sorted(
+            cache_dir.iterdir(),
+            key=lambda f: f.stat().st_atime if f.is_file() else float("inf"),
+        )
+        total = sum(f.stat().st_size for f in files if f.is_file())
+        max_bytes = max_mb * 1024 * 1024
+        removed = 0
+        for f in files:
+            if total <= max_bytes:
+                break
+            if f.is_file():
+                size = f.stat().st_size
+                try:
+                    f.unlink()
+                    total -= size
+                    removed += 1
+                except Exception:
+                    pass
+        if removed:
+            logger.info(f"[ImageLoader] 磁盘缓存清理：删除 {removed} 个旧文件，当前 {total // 1024 // 1024} MB")
+    except Exception as e:
+        logger.warning(f"[ImageLoader] 磁盘缓存清理失败: {e}")
 
 
 def _get_global_manager() -> QNetworkAccessManager:
@@ -36,6 +79,9 @@ def _get_global_manager() -> QNetworkAccessManager:
 
             cache_dir = Path(tempfile.gettempdir()) / "fluentytdl_thumb_cache"
             cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # P5：初始化时裁剪超限缓存
+            trim_disk_cache(max_mb=50)
 
             disk_cache = QNetworkDiskCache()
             disk_cache.setCacheDirectory(str(cache_dir))

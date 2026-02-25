@@ -1,5 +1,14 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class ErrorCategory(Enum):
+    """错误分类"""
+    COOKIE = "cookie"        # 确定是 Cookie / 身份验证问题
+    NETWORK = "network"      # 确定是网络连接问题
+    AMBIGUOUS = "ambiguous"  # 403 等模糊情况，需要探测
+    OTHER = "other"          # 其他错误
 
 
 @dataclass
@@ -8,10 +17,12 @@ class ErrorDefinition:
     title: str
     description: str
     action: str
+    category: ErrorCategory = ErrorCategory.OTHER
 
 
 # 常见错误特征和对应的中文提示方案
 YTDLP_ERRORS = [
+    # ==================== Cookie 类（确定性高） ====================
     ErrorDefinition(
         keywords=[
             "Sign in to confirm you're not a bot",
@@ -19,37 +30,113 @@ YTDLP_ERRORS = [
         ],
         title="需要验证 (Cookie 缺失或失效)",
         description="YouTube 限制了对此视频的访问，必须进行身份验证。",
-        action="请前往「设置 > 账号验证」，或者直接提取浏览器的 Cookie。",
-    ),
-    ErrorDefinition(
-        keywords=["Video unavailable in your country", "Geo-restricted"],
-        title="地区限制 (视频在此国家不可用)",
-        description="由于版权或区域限制，当前网络节点无法访问该视频。",
-        action="请尝试开启代理，并在「设置 > 网络连接」中配置正确的代理地址，或更换代理节点。",
+        action="请在下方选择认证方式：登录 YouTube、从浏览器提取、或手动导入 Cookie 文件。",
+        category=ErrorCategory.COOKIE,
     ),
     ErrorDefinition(
         keywords=["Members only content"],
         title="会员专属视频",
         description="这是 YouTube 频道的会员专享内容，您的账号尚未加入该频道会员，或者未加载您的会员 Cookie。",
         action="请确保使用的 Cookie 关联的账号已购买该频道会员，并在「设置」中重新提取 Cookie。",
-    ),
-    ErrorDefinition(
-        keywords=["Premiere"],
-        title="首映未开始",
-        description="该视频属于首映状态，尚未正式开启播放或您没有观看权限。",
-        action="请等待视频正式首映后再尝试下载。",
+        category=ErrorCategory.COOKIE,
     ),
     ErrorDefinition(
         keywords=["Private video"],
         title="私人视频",
         description="该视频已被上传者设置为私有，必须拥有观看权限的账号才能访问。",
         action="请确认您有权限访问，并更新 Cookie。",
+        category=ErrorCategory.COOKIE,
     ),
     ErrorDefinition(
-        keywords=["Connection reset by peer", "Timeout", "Connection refused"],
-        title="网络连接失败",
-        description="无法连接到解析服务器，可能是网络不稳定或被拦截。",
-        action="请检查您的代理软件是否运行正常，或者在「设置」中手动配置代理。",
+        keywords=["Sign in to confirm your age"],
+        title="年龄限制 (需要登录验证)",
+        description="该视频有年龄限制，必须使用已验证年龄的账号才能访问。",
+        action="请在下方选择认证方式，使用已通过年龄验证的 YouTube 账号。",
+        category=ErrorCategory.COOKIE,
+    ),
+    # ==================== 网络类（确定性高） ====================
+    ErrorDefinition(
+        keywords=[
+            "Connection reset by peer",
+            "Connection refused",
+            "Connection timed out",
+            "Read timed out",
+            "Timed out",
+        ],
+        title="网络连接超时或被拒绝",
+        description="无法与 YouTube 服务器建立连接，通常是网络环境问题。",
+        action="请检查代理是否正常运行，或在「设置 > 网络连接」中配置代理。",
+        category=ErrorCategory.NETWORK,
+    ),
+    ErrorDefinition(
+        keywords=[
+            "SSL: CERTIFICATE_VERIFY_FAILED",
+            "CERTIFICATE_VERIFY_FAILED",
+            "ssl.SSLCertVerificationError",
+            "certificate verify failed",
+        ],
+        title="SSL 证书验证失败",
+        description="HTTPS 连接被干扰，证书无法通过验证。可能是网络环境篡改了证书。",
+        action="请检查代理软件是否正确配置了证书信任，或更换网络环境。",
+        category=ErrorCategory.NETWORK,
+    ),
+    ErrorDefinition(
+        keywords=[
+            "urlopen error",
+            "URLError",
+            "Name or service not known",
+            "getaddrinfo failed",
+            "Errno 11001",
+        ],
+        title="DNS 解析失败",
+        description="无法解析 YouTube 的域名，通常是 DNS 被污染或网络不通。",
+        action="请检查网络连接和代理配置，确保能正常访问国际网站。",
+        category=ErrorCategory.NETWORK,
+    ),
+    ErrorDefinition(
+        keywords=[
+            "HTTP Error 429",
+            "429 Too Many Requests",
+            "Too Many Requests",
+        ],
+        title="请求频率过高 (429 限流)",
+        description="YouTube 检测到短时间内请求过多，暂时限制了访问。",
+        action="请等待几分钟后重试，或更换代理节点/IP。",
+        category=ErrorCategory.NETWORK,
+    ),
+    ErrorDefinition(
+        keywords=[
+            "proxy",
+            "ProxyError",
+            "Cannot connect to proxy",
+            "SOCKSHTTPSConnectionPool",
+        ],
+        title="代理连接失败",
+        description="无法连接到配置的代理服务器。",
+        action="请检查代理软件是否正在运行，以及「设置 > 网络连接」中的代理地址是否正确。",
+        category=ErrorCategory.NETWORK,
+    ),
+    # ==================== 模糊类 (403) ====================
+    ErrorDefinition(
+        keywords=["HTTP Error 403"],
+        title="访问被拒绝 (403)",
+        description="YouTube 拒绝了此请求。可能是 Cookie 失效，也可能是网络节点被封锁。",
+        action="正在自动诊断原因，请稍候...",
+        category=ErrorCategory.AMBIGUOUS,
+    ),
+    # ==================== 其他类 ====================
+    ErrorDefinition(
+        keywords=["Video unavailable in your country", "Geo-restricted"],
+        title="地区限制 (视频在此国家不可用)",
+        description="由于版权或区域限制，当前网络节点无法访问该视频。",
+        action="请尝试开启代理，并在「设置 > 网络连接」中配置正确的代理地址，或更换代理节点。",
+        category=ErrorCategory.NETWORK,
+    ),
+    ErrorDefinition(
+        keywords=["Premiere"],
+        title="首映未开始",
+        description="该视频属于首映状态，尚未正式开启播放或您没有观看权限。",
+        action="请等待视频正式首映后再尝试下载。",
     ),
     ErrorDefinition(
         keywords=["Requested format is not available"],
@@ -70,6 +157,25 @@ YTDLP_ERRORS = [
         action="请清理磁盘空间，或者在「设置 > 下载选项」中更换下载保存路径。",
     ),
 ]
+
+
+def classify_error(error_msg: str) -> ErrorCategory:
+    """
+    对 yt-dlp 原始错误进行分类，返回错误类别。
+
+    Returns:
+        ErrorCategory.COOKIE / NETWORK / AMBIGUOUS / OTHER
+    """
+    if not error_msg:
+        return ErrorCategory.OTHER
+    clean = " ".join(error_msg.splitlines()).lower()
+
+    for err_def in YTDLP_ERRORS:
+        for keyword in err_def.keywords:
+            if keyword.lower() in clean:
+                return err_def.category
+
+    return ErrorCategory.OTHER
 
 
 def parse_ytdlp_error(error_msg: str) -> tuple[str, str]:
@@ -106,6 +212,225 @@ def parse_ytdlp_error(error_msg: str) -> tuple[str, str]:
     if len(fallback) > 100:
         fallback = fallback[:97] + "..."
     return "解析或下载失败", f"原始信息：\n{fallback}"
+
+
+def probe_youtube_connectivity(timeout: float = 5.0) -> bool:
+    """
+    HEAD 请求 youtube.com 检测网络连通性（不经过 yt-dlp）。
+    会自动读取应用内代理配置。
+
+    Returns:
+        True = 网络可达, False = 网络不通
+    """
+    import urllib.request
+
+    try:
+        from ..core.config_manager import config_manager
+
+        proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
+        proxy_url = str(config_manager.get("proxy_url", "") or "").strip()
+    except Exception:
+        proxy_mode = "off"
+        proxy_url = ""
+
+    try:
+        req = urllib.request.Request(
+            "https://www.youtube.com/",
+            method="HEAD",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+
+        handlers: list = []
+        if proxy_mode == "manual" and proxy_url:
+            lower = proxy_url.lower()
+            if not (lower.startswith("http://") or lower.startswith("https://") or lower.startswith("socks5://")):
+                proxy_url = "http://" + proxy_url
+            handlers.append(urllib.request.ProxyHandler({"https": proxy_url, "http": proxy_url}))
+        elif proxy_mode == "system":
+            pass  # 默认使用系统代理
+        else:
+            handlers.append(urllib.request.ProxyHandler({}))  # 无代理
+
+        opener = urllib.request.build_opener(*handlers)
+        resp = opener.open(req, timeout=timeout)
+        return resp.status < 400
+    except Exception:
+        return False
+
+
+def _run_ytdlp_probe(cookie_file: str | None = None, timeout: float = 15.0) -> dict:
+    """
+    内部工具：用 yt-dlp 解析一个已知公开视频，返回结果。
+
+    Args:
+        cookie_file: Cookie 文件路径，None 表示不使用 Cookie
+        timeout: 超时秒数
+
+    Returns:
+        {"ok": bool, "category": ErrorCategory, "stderr": str, "latency_ms": int}
+    """
+    import subprocess
+    import time as _time
+
+    try:
+        from ..youtube.yt_dlp_cli import prepare_yt_dlp_env, resolve_yt_dlp_exe
+
+        exe = resolve_yt_dlp_exe()
+        if exe is None:
+            return {"ok": False, "category": ErrorCategory.OTHER, "stderr": "yt-dlp 未安装", "latency_ms": -1}
+
+        env = prepare_yt_dlp_env()
+
+        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        cmd = [
+            str(exe),
+            "--dump-json",
+            "--no-cache-dir",
+            "--no-warnings",
+            "--socket-timeout", "10",
+            test_url,
+        ]
+
+        if cookie_file:
+            cmd.extend(["--cookies", cookie_file])
+
+        # 代理配置
+        try:
+            from ..core.config_manager import config_manager
+            proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
+            proxy_url = str(config_manager.get("proxy_url", "") or "").strip()
+            if proxy_mode == "manual" and proxy_url:
+                cmd.extend(["--proxy", proxy_url])
+        except Exception:
+            pass
+
+        start = _time.monotonic()
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+        latency_ms = int((_time.monotonic() - start) * 1000)
+
+        if proc.returncode == 0:
+            return {"ok": True, "category": ErrorCategory.OTHER, "stderr": "", "latency_ms": latency_ms}
+
+        stderr = proc.stderr or ""
+        return {"ok": False, "category": classify_error(stderr), "stderr": stderr, "latency_ms": latency_ms}
+
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "category": ErrorCategory.NETWORK, "stderr": f"超时 ({timeout}s)", "latency_ms": int(timeout * 1000)}
+    except Exception as e:
+        return {"ok": False, "category": ErrorCategory.OTHER, "stderr": str(e), "latency_ms": -1}
+
+
+def probe_cookie_and_ip(cookie_file: str | None = None, timeout: float = 15.0) -> dict:
+    """
+    综合探测 Cookie 有效性 + IP 风控状态。
+
+    策略：
+    1. 先带 Cookie 解析 → 成功 = Cookie 有效 + IP 正常，结束
+    2. 失败 → 不带 Cookie 解析 → 对比结果确定根因
+
+    Returns:
+        {
+            "cookie_ok": bool,        # Cookie 是否有效
+            "ip_ok": bool,            # IP 是否无风控
+            "detail": str,            # 详细描述
+            "latency_ms": int,        # 总耗时
+            "with_cookie": dict,      # 带 Cookie 探测原始结果
+            "without_cookie": dict | None,  # 不带 Cookie 探测原始结果（仅失败时有）
+        }
+    """
+    import time as _time
+    start = _time.monotonic()
+
+    # ====== 第 1 步：带 Cookie 探测 ======
+    if cookie_file:
+        r1 = _run_ytdlp_probe(cookie_file=cookie_file, timeout=timeout)
+    else:
+        # 没有 Cookie 文件就直接跳到无 Cookie 探测
+        r1 = {"ok": False, "category": ErrorCategory.OTHER, "stderr": "无 Cookie 文件", "latency_ms": 0}
+
+    if r1["ok"]:
+        # 成功 → Cookie 有效 + IP 正常
+        total_ms = int((_time.monotonic() - start) * 1000)
+        return {
+            "cookie_ok": True,
+            "ip_ok": True,
+            "detail": f"✅ Cookie 有效且 IP 无风控 ({r1['latency_ms']}ms)",
+            "latency_ms": total_ms,
+            "with_cookie": r1,
+            "without_cookie": None,
+        }
+
+    # ====== 第 2 步：不带 Cookie 探测（用于对比） ======
+    r2 = _run_ytdlp_probe(cookie_file=None, timeout=timeout)
+    total_ms = int((_time.monotonic() - start) * 1000)
+
+    #  交叉判定表：
+    #  r1(有cookie) | r2(无cookie) | 结论
+    #  ─────────────┼──────────────┼─────────────────
+    #  失败 COOKIE  | 成功         | Cookie 失效，IP 正常
+    #  失败 COOKIE  | 失败 COOKIE  | IP 被风控 (两者都触发验证)
+    #  失败 NETWORK | 失败 NETWORK | 网络不通
+    #  失败 AMBIG   | 成功         | Cookie 问题导致 403
+    #  失败 AMBIG   | 失败         | IP 被封
+
+    if r2["ok"]:
+        # 无 Cookie 能过 → Cookie 是问题所在
+        return {
+            "cookie_ok": False,
+            "ip_ok": True,
+            "detail": f"❌ Cookie 无效 — 不带 Cookie 可正常解析，IP 无风控",
+            "latency_ms": total_ms,
+            "with_cookie": r1,
+            "without_cookie": r2,
+        }
+
+    # 两者都失败
+    if r1["category"] == ErrorCategory.NETWORK or r2["category"] == ErrorCategory.NETWORK:
+        return {
+            "cookie_ok": False,
+            "ip_ok": False,
+            "detail": f"❌ 网络不通: {r2['stderr'][:60]}",
+            "latency_ms": total_ms,
+            "with_cookie": r1,
+            "without_cookie": r2,
+        }
+
+    # 两者都触发身份验证或 403 → IP 被风控
+    cookie_status = cookie_file is not None  # 有文件但可能失效
+    return {
+        "cookie_ok": False,
+        "ip_ok": False,
+        "detail": f"❌ IP 被风控 (有无 Cookie 均触发验证)，建议更换代理节点",
+        "latency_ms": total_ms,
+        "with_cookie": r1,
+        "without_cookie": r2,
+    }
+
+
+def probe_ip_risk_control(timeout: float = 15.0) -> dict:
+    """
+    仅检测 IP 风控（无 Cookie），向后兼容。
+
+    Returns:
+        {"blocked": bool, "detail": str, "latency_ms": int}
+    """
+    r = _run_ytdlp_probe(cookie_file=None, timeout=timeout)
+    if r["ok"]:
+        return {"blocked": False, "detail": "未检测到风控", "latency_ms": r["latency_ms"]}
+    if r["category"] in (ErrorCategory.COOKIE, ErrorCategory.AMBIGUOUS):
+        return {"blocked": True, "detail": "触发身份验证 (IP 被风控)", "latency_ms": r["latency_ms"]}
+    if r["category"] == ErrorCategory.NETWORK:
+        return {"blocked": True, "detail": f"网络错误: {r['stderr'][:80]}", "latency_ms": r["latency_ms"]}
+    short = r["stderr"].strip()[:100] if r["stderr"].strip() else "未知错误"
+    return {"blocked": False, "detail": f"解析异常但非风控: {short}", "latency_ms": r["latency_ms"]}
+
 
 
 def generate_issue_url(title: str, raw_error: str) -> str:

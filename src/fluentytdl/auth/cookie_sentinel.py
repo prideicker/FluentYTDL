@@ -207,9 +207,59 @@ class CookieSentinel:
 
     @property
     def is_stale(self) -> bool:
-        """Cookie 文件是否过期（超过 30 分钟）"""
+        """Cookie 是否过期（文件年龄 > 30 分钟，或关键 Cookie 已过期）"""
         age = self.age_minutes
-        return age is None or age > 30
+        if age is None or age > 30:
+            return True
+        # 也检查 Cookie 实际 expires
+        expiry = self.get_earliest_expiry()
+        if expiry is not None and expiry <= 0:
+            return True
+        return False
+
+    def get_earliest_expiry(self) -> float | None:
+        """
+        获取关键 Cookie 中最早过期的剩余秒数。
+
+        Returns:
+            剩余秒数（负数=已过期），None=无法解析或无文件
+        """
+        if not self.exists:
+            return None
+        try:
+            import time
+
+            now = int(time.time())
+            content = self.cookie_path.read_text(encoding="utf-8", errors="replace")
+            key_names = {"SID", "HSID", "SSID", "SAPISID", "APISID"}
+            earliest = None
+            for line in content.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 7:
+                    name = parts[5]
+                    if name in key_names:
+                        try:
+                            expires = int(parts[4])
+                            if expires == 0:
+                                continue  # session cookie，视为有效
+                            remaining = expires - now
+                            if earliest is None or remaining < earliest:
+                                earliest = remaining
+                        except (ValueError, IndexError):
+                            pass
+            return earliest
+        except Exception:
+            return None
+
+    def is_expiring_soon(self, hours: float = 1.0) -> bool:
+        """关键 Cookie 是否即将过期（默认 1 小时内）"""
+        remaining = self.get_earliest_expiry()
+        if remaining is None:
+            return False
+        return remaining < hours * 3600
 
     def get_cookie_file_path(self) -> str:
         """
@@ -244,6 +294,22 @@ class CookieSentinel:
 
                 if current_source == AuthSourceType.NONE:
                     logger.info("[CookieSentinel] 未启用验证源，跳过静默刷新")
+                    return
+
+                # DLE 模式是交互式流程（需用户登录），不能在启动时自动触发
+                if current_source == AuthSourceType.DLE:
+                    cache_file = auth_service.cache_dir / "cached_dle_youtube.txt"
+                    if cache_file.exists():
+                        logger.info("[CookieSentinel] DLE 模式：使用已缓存的 Cookie 文件")
+                        import shutil
+
+                        shutil.copy2(str(cache_file), self.cookie_path)
+                        self._last_update = datetime.now()
+                        self._save_meta("dle", auth_service.last_status.cookie_count)
+                    else:
+                        logger.info(
+                            "[CookieSentinel] DLE 模式：无缓存 Cookie，请用户手动点击刷新登录"
+                        )
                     return
 
                 # 获取期望的来源标识
@@ -379,43 +445,37 @@ class CookieSentinel:
         finally:
             self._is_updating = False
 
-    def detect_cookie_error(self, ytdlp_stderr: str) -> bool:
+    def detect_cookie_error(self, ytdlp_stderr: str) -> str:
         """
-        检测 yt-dlp 错误是否由 Cookie 失效引起
+        检测 yt-dlp 错误的分类
 
         Args:
             ytdlp_stderr: yt-dlp 的标准错误输出
 
         Returns:
-            True 表示疑似 Cookie 问题
+            "cookie" | "network" | "ambiguous" | "" (空字符串表示非相关错误)
         """
         if not ytdlp_stderr:
-            return False
+            return ""
 
-        err_lower = ytdlp_stderr.lower()
+        from ..utils.error_parser import ErrorCategory, classify_error
 
-        # Cookie 相关错误特征
-        cookie_keywords = [
-            "sign in to confirm your age",
-            "sign in to confirm you're not a bot",
-            "http error 403",
-            " 403 ",
-            "forbidden",
-            "private video",
-            "members-only",
-            "this video is unavailable",
-            "requires authentication",
-            "login required",
-        ]
+        category = classify_error(ytdlp_stderr)
 
-        return any(keyword in err_lower for keyword in cookie_keywords)
+        if category == ErrorCategory.COOKIE:
+            return "cookie"
+        elif category == ErrorCategory.NETWORK:
+            return "network"
+        elif category == ErrorCategory.AMBIGUOUS:
+            return "ambiguous"
+        return ""
 
     def get_status_info(self) -> dict:
         """
         获取当前状态信息（供 UI 显示）
 
         Returns:
-            状态字典，包含来源信息和回退状态
+            状态字典，包含实时来源信息、Cookie 数量和有效性
         """
         actual_source = self.get_cookie_source()
         configured_source = (
@@ -428,6 +488,22 @@ class CookieSentinel:
         source_mismatch = False
         if self.exists and actual_source and configured_source:
             source_mismatch = actual_source != configured_source
+
+        # 实时读取 Cookie 文件，获取真实数量和有效性
+        cookie_count = 0
+        cookie_valid = False
+        cookie_valid_msg = "未读取"
+
+        if self.exists:
+            try:
+                self.cookie_path.read_text(encoding="utf-8", errors="replace")
+                # 更新 auth_service 的 last_status（使状态保持同步）
+                auth_service._update_status_from_file(str(self.cookie_path))
+                cookie_count = auth_service.last_status.cookie_count
+                cookie_valid = auth_service.last_status.valid
+                cookie_valid_msg = auth_service.last_status.message
+            except Exception as e:
+                logger.debug(f"[CookieSentinel] 读取Cookie文件失败: {e}")
 
         return {
             "exists": self.exists,
@@ -443,8 +519,12 @@ class CookieSentinel:
             "source_mismatch": source_mismatch,  # 是否来源不匹配
             "using_fallback": self._using_fallback,  # 是否正在使用回退
             "fallback_warning": self._fallback_warning,  # 回退警告信息
-            "cookie_count": auth_service.last_status.cookie_count,
+            "cookie_count": cookie_count,  # 实时计数
+            "cookie_valid": cookie_valid,  # 是否包含必要 Cookie
+            "cookie_valid_msg": cookie_valid_msg,  # 有效性说明
             "last_updated": self._last_update.isoformat() if self._last_update else None,
+            "expiring_soon": self.is_expiring_soon(),  # 即将过期 (<1h)
+            "earliest_expiry": self.get_earliest_expiry(),  # 最早过期剩余秒数
         }
 
     def _get_source_display(self, source_id: str | None) -> str:
@@ -462,6 +542,7 @@ class CookieSentinel:
             "arc": "Arc",
             "firefox": "Firefox",
             "librewolf": "LibreWolf",
+            "dle": "登录获取 (DLE)",
             "file": "手动导入",
         }
         return display_names.get(source_id, source_id)

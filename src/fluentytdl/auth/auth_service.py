@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from ..core.config_manager import config_manager
 from ..utils.logger import logger
 from .cookie_cleaner import CookieCleaner
 
@@ -78,6 +79,8 @@ class AuthSourceType(str, Enum):
     LIBREWOLF = "librewolf"  # LibreWolf
     # 其它第三方定制
     CENT = "centbrowser" # 百分浏览器
+    # DLE 登录获取
+    DLE = "dle"  # 动态本地插件注入登录
     # 其他
     FILE = "file"  # 手动导入的 cookies.txt
 
@@ -218,6 +221,7 @@ class AuthService:
             AuthSourceType.FIREFOX: "Firefox 浏览器",
             AuthSourceType.LIBREWOLF: "LibreWolf 浏览器",
             AuthSourceType.CENT: "百分浏览器 (Cent)",
+            AuthSourceType.DLE: "登录获取 (推荐)",
             AuthSourceType.FILE: "手动导入文件",
         }
         return names.get(self._current_source, "未知")
@@ -328,6 +332,59 @@ class AuthService:
                     self._last_status = AuthStatus(
                         valid=False,
                         message="Cookie 文件不存在",
+                    )
+                    return None
+
+            elif self._current_source == AuthSourceType.DLE:
+                # DLE 登录获取：使用动态插件提取
+                cache_file = self.cache_dir / f"cached_dle_{platform}.txt"
+                
+                # DLE 是交互式流程，仅在用户显式点击刷新 (force_refresh=True) 时才启动浏览器
+                # 其他场景（启动同步、下载前检查）只使用已有缓存
+                if force_refresh:
+                    try:
+                        from .providers.dle_provider import DLEProvider
+                        
+                        logger.info("开始 DLE 登录流程（自动检测浏览器）...")
+                        provider = DLEProvider()
+                        cookies = provider.extract_cookies()
+                        
+                        # 清洗 Cookie（合规过滤）
+                        cookies_dicts = []
+                        for c in cookies:
+                            cookies_dicts.append({
+                                "domain": c.get("domain", ""),
+                                "name": c.get("name", ""),
+                                "path": c.get("path", "/"),
+                                "value": c.get("value", ""),
+                                "secure": c.get("secure", False),
+                                "expires": int(c.get("expirationDate", 0)) if "expirationDate" in c else 0,
+                                "http_only": c.get("httpOnly", False),
+                            })
+                        cookies_dicts = CookieCleaner.clean(cookies_dicts, platform)
+                        
+                        # 写入 Netscape 格式缓存
+                        self._write_netscape_file(cookies_dicts, cache_file)
+                        
+                        logger.info(f"DLE 登录成功，Cookie 已保存: {cache_file} ({len(cookies_dicts)} 个)")
+                        
+                    except Exception as e:
+                        logger.error(f"DLE 登录流程失败: {e}")
+                        self._last_status = AuthStatus(
+                            valid=False,
+                            message=f"登录失败: {e}",
+                        )
+                        return None
+                
+                # 非强制刷新时，仅使用缓存
+                if cache_file.exists():
+                    self._update_status_from_file(str(cache_file))
+                    return str(cache_file)
+                else:
+                    logger.info("DLE 模式：无缓存 Cookie，请在设置页点击「立即刷新」登录获取")
+                    self._last_status = AuthStatus(
+                        valid=False,
+                        message="尚未登录获取 Cookie，请在设置页点击「立即刷新」",
                     )
                     return None
 
@@ -454,10 +511,12 @@ class AuthService:
         force_refresh: bool = False,
     ) -> str | None:
         """
-        从浏览器提取 Cookie 并缓存
+        从浏览器提取 Cookie 并缓存 (rookiepy 方式)
 
-        支持 Chrome v130+ App-Bound 加密的自动提权处理
+        DLE 登录获取已由 get_cookie_file_for_ytdlp 中的 DLE 分支处理，
+        此方法仅用于传统浏览器提取 (rookiepy)。
         """
+
         if not HAS_ROOKIEPY:
             raise RuntimeError("rookiepy 未安装，无法从浏览器提取 Cookie")
 

@@ -27,6 +27,7 @@ from qfluentwidgets import (
     MessageBox,
     PrimaryPushButton,
     PushButton,
+    SegmentedWidget,
     SubtitleLabel,
     SwitchButton,
 )
@@ -35,9 +36,9 @@ from qframelesswindow import FramelessWindow
 from ...download.workers import EntryDetailWorker, InfoExtractWorker, VRInfoExtractWorker
 from ...processing import subtitle_service
 from ...utils.filesystem import sanitize_filename
-from ...utils.image_loader import ImageLoader
+from ...utils.image_loader import get_image_loader
 from ...utils.paths import resource_path
-from ...youtube.youtube_service import YoutubeServiceOptions, YtDlpAuthOptions
+from ...youtube.youtube_service import YoutubeServiceOptions
 from .cover_selector import CoverSelectorWidget
 from .format_selector import VideoFormatSelectorWidget
 from .selection_dialog import (
@@ -148,7 +149,8 @@ class DownloadConfigWindow(FramelessWindow):
         self._subtitle_embed_choice: bool | None = None
         self._subtitle_choice_made = False
 
-        self.image_loader = ImageLoader(self)
+        # P4: 使用全局单例，所有窗口共享同一个 NetworkManager
+        self.image_loader = get_image_loader()
         self.image_loader.loaded.connect(self._on_thumb_loaded)
         self.image_loader.loaded_with_url.connect(self._on_thumb_loaded_with_url)
         self.image_loader.failed.connect(self._on_thumb_failed)
@@ -164,14 +166,16 @@ class DownloadConfigWindow(FramelessWindow):
         self._thumb_cache: dict[str, Any] = {}
         self._thumb_url_to_rows: dict[str, set[int]] = {}
         self._thumb_requested: set[str] = set()
-        self._thumb_pending: list[str] = []
+        self._thumb_pending: deque[str] = deque()  # O(1) popleft
         self._thumb_inflight: int = 0
         self._thumb_max_concurrent: int = 12
 
         self._detail_queue: deque[int] = deque()
         self._detail_inflight_row: int | None = None
         self._detail_loaded: set[int] = set()
+        self._detail_retry_count: dict[int, int] = {}  # row -> 已重试次数
         self._last_interaction = time.monotonic()
+        self._lazy_paused: bool = False  # 用户手动暂停后台解析
 
         self._idle_timer = QTimer(self)
         self._idle_timer.setInterval(2000)
@@ -216,30 +220,147 @@ class DownloadConfigWindow(FramelessWindow):
         self.viewLayout.addWidget(self.contentWidget)
         self.contentWidget.hide()
 
-        # 失败重试区
+        # ========== Cookie 预检警告条 ==========
+        self._cookieWarningLabel = CaptionLabel("", self)
+        self._cookieWarningLabel.setWordWrap(True)
+        self._cookieWarningLabel.setStyleSheet(
+            "QLabel { background: rgba(255, 193, 7, 0.15); padding: 8px; "
+            "border-radius: 6px; color: #b8860b; }"
+        )
+        self._cookieWarningLabel.hide()
+        self.viewLayout.addWidget(self._cookieWarningLabel)
+        self._run_cookie_precheck()
+
+        # ========== 身份验证重试面板 ==========
         self.retryWidget = QWidget(self)
         self.retryLayout = QVBoxLayout(self.retryWidget)
-        self.retryLayout.setContentsMargins(0, 0, 0, 0)
-        self.retryLayout.setSpacing(8)
+        self.retryLayout.setContentsMargins(0, 8, 0, 0)
+        self.retryLayout.setSpacing(10)
 
-        self.retryHint = CaptionLabel(
-            "检测到需要身份验证时，可选择从浏览器注入 Cookies 后重试解析。",
-            self.retryWidget,
+        # 分段选择器
+        self._authSegment = SegmentedWidget(self.retryWidget)
+        self.retryLayout.addWidget(self._authSegment)
+
+        # 3 个面板容器
+        from PySide6.QtWidgets import QStackedWidget
+
+        self._authStack = QStackedWidget(self.retryWidget)
+        self.retryLayout.addWidget(self._authStack)
+
+        # --- 面板 1: DLE 登录 ---
+        dle_panel = QWidget()
+        dle_lay = QVBoxLayout(dle_panel)
+        dle_lay.setContentsMargins(0, 4, 0, 0)
+        dle_lay.setSpacing(6)
+        dle_hint = CaptionLabel(
+            "将打开独立浏览器窗口，请登录 YouTube 账号。\n登录完成后将自动提取 Cookie 并重新解析。",
+            dle_panel,
         )
-        self.retryLayout.addWidget(self.retryHint)
+        dle_lay.addWidget(dle_hint)
+        self._dleRetryBtn = PrimaryPushButton("登录 YouTube 并重试", dle_panel)
+        self._dleRetryBtn.clicked.connect(self._on_dle_retry_clicked)
+        dle_lay.addWidget(self._dleRetryBtn)
+        self._dleStatusLabel = CaptionLabel("", dle_panel)
+        dle_lay.addWidget(self._dleStatusLabel)
+        self._authStack.addWidget(dle_panel)
 
-        self.cookies_combo = ComboBox(self.retryWidget)
-        self.cookies_combo.addItems(
-            ["不使用 Cookies", "Edge Cookies", "Chrome Cookies", "Firefox Cookies"]
+        # --- 面板 2: 浏览器提取 ---
+        extract_panel = QWidget()
+        extract_lay = QVBoxLayout(extract_panel)
+        extract_lay.setContentsMargins(0, 4, 0, 0)
+        extract_lay.setSpacing(6)
+        extract_hint = CaptionLabel(
+            "从本地已登录的浏览器中直接提取 Cookie。\n"
+            "Chromium 内核浏览器 (Edge/Chrome) 可能需要管理员权限。",
+            extract_panel,
         )
-        self.retryLayout.addWidget(self.cookies_combo)
+        extract_lay.addWidget(extract_hint)
+        extract_row = QWidget(extract_panel)
+        extract_h = QHBoxLayout(extract_row)
+        extract_h.setContentsMargins(0, 0, 0, 0)
+        extract_h.setSpacing(8)
+        self._extractCombo = ComboBox(extract_row)
+        self._extractCombo.addItems(
+            [
+                "Microsoft Edge",
+                "Google Chrome",
+                "Firefox",
+                "Chromium",
+                "Brave",
+                "Opera",
+                "Opera GX",
+                "Vivaldi",
+                "LibreWolf",
+                "百分浏览器 (Cent)",
+            ]
+        )
+        self._extractRetryBtn = PrimaryPushButton("提取并重试", extract_row)
+        self._extractRetryBtn.clicked.connect(self._on_extract_retry_clicked)
+        extract_h.addWidget(self._extractCombo, 1)
+        extract_h.addWidget(self._extractRetryBtn)
+        extract_lay.addWidget(extract_row)
+        self._authStack.addWidget(extract_panel)
 
-        self.retryBtn = PrimaryPushButton("重试解析", self.retryWidget)
-        self.retryBtn.clicked.connect(self._on_retry_clicked)
-        self.retryLayout.addWidget(self.retryBtn)
+        # --- 面板 3: 手动导入 ---
+        import_panel = QWidget()
+        import_lay = QVBoxLayout(import_panel)
+        import_lay.setContentsMargins(0, 4, 0, 0)
+        import_lay.setSpacing(6)
+        import_hint = CaptionLabel(
+            "选择已有的 cookies.txt 文件 (Netscape 格式)。\n"
+            "可使用浏览器扩展 (如 Get cookies.txt LOCALLY) 导出。",
+            import_panel,
+        )
+        import_lay.addWidget(import_hint)
+        self._importRetryBtn = PrimaryPushButton("选择文件并重试", import_panel)
+        self._importRetryBtn.clicked.connect(self._on_import_retry_clicked)
+        import_lay.addWidget(self._importRetryBtn)
+        self._authStack.addWidget(import_panel)
+
+        # 绑定分段选择器
+        self._authSegment.addItem(
+            routeKey="dle", text="🔑 登录", onClick=lambda: self._authStack.setCurrentIndex(0)
+        )
+        self._authSegment.addItem(
+            routeKey="extract", text="🚀 提取", onClick=lambda: self._authStack.setCurrentIndex(1)
+        )
+        self._authSegment.addItem(
+            routeKey="import", text="📄 导入", onClick=lambda: self._authStack.setCurrentIndex(2)
+        )
+        self._authSegment.setCurrentItem("dle")
 
         self.viewLayout.addWidget(self.retryWidget)
         self.retryWidget.hide()
+
+        # ========== 网络诊断面板 ==========
+        self.networkDiagWidget = QWidget(self)
+        net_layout = QVBoxLayout(self.networkDiagWidget)
+        net_layout.setContentsMargins(0, 8, 0, 0)
+        net_layout.setSpacing(8)
+        self._netDiagLabel = CaptionLabel(
+            "无法正常访问 YouTube，可能的原因：\n"
+            "• 未配置或未启动代理软件\n"
+            "• 代理节点被 YouTube 封锁 / 限流\n"
+            "• DNS 被污染或 SSL 证书被干扰",
+            self.networkDiagWidget,
+        )
+        net_layout.addWidget(self._netDiagLabel)
+        net_btn_row = QWidget(self.networkDiagWidget)
+        net_btn_h = QHBoxLayout(net_btn_row)
+        net_btn_h.setContentsMargins(0, 0, 0, 0)
+        net_btn_h.setSpacing(8)
+        self._openProxyBtn = PushButton("打开代理设置", net_btn_row)
+        self._openProxyBtn.clicked.connect(self._on_open_proxy_settings)
+        self._probeBtn = PrimaryPushButton("检测网络连通性", net_btn_row)
+        self._probeBtn.clicked.connect(self._on_probe_connectivity)
+        net_btn_h.addWidget(self._openProxyBtn)
+        net_btn_h.addWidget(self._probeBtn)
+        net_btn_h.addStretch(1)
+        net_layout.addWidget(net_btn_row)
+        self._netProbeResult = CaptionLabel("", self.networkDiagWidget)
+        net_layout.addWidget(self._netProbeResult)
+        self.viewLayout.addWidget(self.networkDiagWidget)
+        self.networkDiagWidget.hide()
 
         self._error_label: CaptionLabel | None = None
         self.video_formats: list[dict[str, Any]] = []
@@ -388,6 +509,13 @@ class DownloadConfigWindow(FramelessWindow):
                 self._detail_worker.cancel()
         except Exception:
             pass
+        # P4: 单例 ImageLoader 需要断开本窗口的信号，避免窗口销毁后回调野指针
+        try:
+            self.image_loader.loaded.disconnect(self._on_thumb_loaded)
+            self.image_loader.loaded_with_url.disconnect(self._on_thumb_loaded_with_url)
+            self.image_loader.failed.disconnect(self._on_thumb_failed)
+        except Exception:
+            pass
 
     def start_extraction(self) -> None:
         self._is_closing = False
@@ -484,6 +612,14 @@ class DownloadConfigWindow(FramelessWindow):
         self.video_info = info
         self.loadingWidget.hide()
         self.retryWidget.hide()
+
+        # 解析成功 → 重置连续失败计数
+        try:
+            from ...auth.cookie_probe_throttle import cookie_probe_throttle
+
+            cookie_probe_throttle.record_download_success()
+        except Exception:
+            pass
         if self._error_label:
             self._error_label.deleteLater()
             self._error_label = None
@@ -519,6 +655,44 @@ class DownloadConfigWindow(FramelessWindow):
 
         _clear_layout(self.contentLayout)
 
+    def _run_cookie_precheck(self) -> None:
+        """窗口打开时本地预检 Cookie 状态（零网络消耗）"""
+        try:
+            from ...auth.auth_service import AuthSourceType, auth_service
+            from ...auth.cookie_sentinel import cookie_sentinel
+
+            if auth_service.current_source == AuthSourceType.NONE:
+                return  # 未启用验证，不预检
+
+            if not cookie_sentinel.exists:
+                self._cookieWarningLabel.setText(
+                    "⚠️ 尚未获取 Cookie — 解析可能因登录要求而失败。"
+                    "建议先在「设置 > 账户」中获取 Cookie。"
+                )
+                self._cookieWarningLabel.show()
+                return
+
+            info = cookie_sentinel.get_status_info()
+
+            if not info.get("cookie_valid"):
+                msg = info.get("cookie_valid_msg", "Cookie 无效")
+                self._cookieWarningLabel.setText(
+                    f"⚠️ {msg}，解析可能失败。建议前往设置页刷新 Cookie。"
+                )
+                self._cookieWarningLabel.show()
+            elif info.get("expiring_soon"):
+                earliest = info.get("earliest_expiry")
+                if earliest is not None and earliest > 0:
+                    mins = int(earliest / 60)
+                    self._cookieWarningLabel.setText(
+                        f"⏳ Cookie 将在 {mins} 分钟后过期，建议提前刷新。"
+                    )
+                else:
+                    self._cookieWarningLabel.setText("⚠️ Cookie 已过期，建议前往设置页刷新。")
+                self._cookieWarningLabel.show()
+        except Exception:
+            pass  # 预检失败不影响正常流程
+
     def on_parse_error(self, err_data: dict) -> None:
         if self._is_closing:
             return
@@ -528,21 +702,19 @@ class DownloadConfigWindow(FramelessWindow):
         if self._error_label:
             self._error_label.deleteLater()
 
-        # Try to parse the raw error with the new ErrorParser
         raw_error = str(err_data.get("raw_error") or "")
 
-        from ...utils.error_parser import parse_ytdlp_error
+        from ...utils.error_parser import ErrorCategory, classify_error, parse_ytdlp_error
 
         friendly_title, friendly_content = parse_ytdlp_error(raw_error)
+        category = classify_error(raw_error) if raw_error else ErrorCategory.OTHER
 
-        # If the original error already has title/content, we check if we should override
-        # Usually, if raw_error is present, it's a yt-dlp error worth parsing
         title = friendly_title if raw_error else str(err_data.get("title") or "解析失败")
         content = friendly_content if raw_error else str(err_data.get("content") or "")
         suggestion = str(err_data.get("suggestion") or "")
 
         text = f"{title}\n\n{content}"
-        if suggestion and not raw_error:  # If we parsed it, action is already in friendly_content
+        if suggestion and not raw_error:
             text += f"\n\n建议操作：\n{suggestion}"
 
         self._error_label = CaptionLabel(text, self)
@@ -552,30 +724,69 @@ class DownloadConfigWindow(FramelessWindow):
             pass
         self.viewLayout.addWidget(self._error_label)
 
-        # Show retry widget for cookie-related errors
-        if (
-            any(k in raw_error.lower() for k in ["cookies", "not a bot", "sign in"])
-            or friendly_title == "需要验证 (Cookie 缺失或失效)"
-        ):
+        # === 根据分类决定显示哪个面板 ===
+        if category == ErrorCategory.COOKIE:
             self.retryWidget.show()
+            self.networkDiagWidget.hide()
+            # 记录失败 + 渐进式引导
+            try:
+                from ...auth.cookie_probe_throttle import cookie_probe_throttle
 
-        # Build Report Issue button if we have raw_error
+                cookie_probe_throttle.record_download_failure("cookie")
+                if cookie_probe_throttle.should_suggest_alternative:
+                    alt_label = CaptionLabel(
+                        f"⚠️ 已连续 {cookie_probe_throttle.consecutive_failures} 次 Cookie 失败，"
+                        "建议切换到「🔑 登录」模式 或 使用 Firefox 浏览器提取",
+                        self,
+                    )
+                    alt_label.setWordWrap(True)
+                    alt_label.setStyleSheet(
+                        "QLabel { color: #e65100; font-weight: bold; padding: 4px 0; }"
+                    )
+                    self.retryLayout.insertWidget(0, alt_label)
+            except Exception:
+                pass
+        elif category == ErrorCategory.NETWORK:
+            self.retryWidget.hide()
+            self.networkDiagWidget.show()
+            self._netProbeResult.setText("")
+            try:
+                from ...auth.cookie_probe_throttle import cookie_probe_throttle
+
+                cookie_probe_throttle.record_download_failure("network")
+            except Exception:
+                pass
+        elif category == ErrorCategory.AMBIGUOUS:
+            # 403 模糊情况 → 异步探测后决定
+            self.retryWidget.hide()
+            self.networkDiagWidget.hide()
+            self._run_connectivity_probe(friendly_title, raw_error)
+            try:
+                from ...auth.cookie_probe_throttle import cookie_probe_throttle
+
+                cookie_probe_throttle.record_download_failure("ambiguous")
+            except Exception:
+                pass
+        else:
+            self.retryWidget.hide()
+            self.networkDiagWidget.hide()
+
+        # Build Report Issue button
         if raw_error:
             if not hasattr(self, "reportBtn"):
-                from qfluentwidgets import FluentIcon, PushButton
+                from qfluentwidgets import FluentIcon
 
-                self.reportBtn = PushButton("反馈此错误", self.retryWidget)
+                self.reportBtn = PushButton("反馈此错误", self)
                 self.reportBtn.setIcon(FluentIcon.GITHUB)
-                # We add to retryLayout but ONLY show it when we need to.
-                # However, retryWidget might be hidden if not cookie err, so let's
-                # move reportBtn to a separate layout below the retry widget or into viewLayout
-                # Currently viewLayout contains error labels, let's just make reportBtn visible here
                 self.reportBtn.clicked.connect(
                     lambda: self._on_report_clicked(friendly_title, raw_error)
                 )
                 self.viewLayout.addWidget(self.reportBtn, alignment=Qt.AlignmentFlag.AlignLeft)
             else:
-                self.reportBtn.clicked.disconnect()
+                try:
+                    self.reportBtn.clicked.disconnect()
+                except Exception:
+                    pass
                 self.reportBtn.clicked.connect(
                     lambda: self._on_report_clicked(friendly_title, raw_error)
                 )
@@ -590,7 +801,107 @@ class DownloadConfigWindow(FramelessWindow):
         issue_url = generate_issue_url(title, raw_error)
         QDesktopServices.openUrl(QUrl(issue_url))
 
-    def _on_retry_clicked(self) -> None:
+    def _on_open_proxy_settings(self) -> None:
+        """打开代理设置（跳转主窗口设置页）"""
+
+        # 尝试通知主窗口打开设置页
+        try:
+            parent = self.parent()
+            while parent is not None:
+                if hasattr(parent, "show_settings_network"):
+                    parent.show_settings_network()
+                    return
+                parent = parent.parent()
+        except Exception:
+            pass
+        # 兜底：显示提示
+        self._netProbeResult.setText("请手动前往主界面「设置 > 网络连接」配置代理。")
+
+    def _on_probe_connectivity(self) -> None:
+        """用户手动点击检测连通性"""
+        self._probeBtn.setEnabled(False)
+        self._probeBtn.setText("检测中...")
+        self._netProbeResult.setText("")
+
+        from PySide6.QtCore import QThread
+        from PySide6.QtCore import Signal as QSignal
+
+        class _ProbeWorker(QThread):
+            finished = QSignal(bool)
+
+            def run(self):
+                from ...utils.error_parser import probe_youtube_connectivity
+
+                result = probe_youtube_connectivity(timeout=8.0)
+                self.finished.emit(result)
+
+        self._probe_worker = _ProbeWorker(self)
+
+        def _on_done(reachable: bool):
+            self._probeBtn.setEnabled(True)
+            self._probeBtn.setText("检测网络连通性")
+            if reachable:
+                self._netProbeResult.setText(
+                    "✅ YouTube 可达 — 网络正常。\n"
+                    "错误可能是 Cookie 失效导致，请尝试重新获取 Cookie。"
+                )
+                # 网络通但报了错 → 可能其实是 Cookie 问题，显示重试面板
+                self.retryWidget.show()
+            else:
+                self._netProbeResult.setText("❌ 无法连接 YouTube — 请检查代理/VPN 是否正常运行。")
+
+        self._probe_worker.finished.connect(_on_done, Qt.ConnectionType.QueuedConnection)
+        self._probe_worker.start()
+
+    def _run_connectivity_probe(self, friendly_title: str, raw_error: str) -> None:
+        """
+        403 模糊错误 → 异步探测 YouTube 连通性后决定显示哪个面板。
+        探测期间显示加载提示。
+        """
+        self._error_label.setText(f"{friendly_title}\n\n正在诊断原因（检测网络连通性）...")
+
+        from PySide6.QtCore import QThread
+        from PySide6.QtCore import Signal as QSignal
+
+        class _ProbeWorker(QThread):
+            finished = QSignal(bool)
+
+            def run(self):
+                from ...utils.error_parser import probe_youtube_connectivity
+
+                result = probe_youtube_connectivity(timeout=8.0)
+                self.finished.emit(result)
+
+        self._ambig_probe_worker = _ProbeWorker(self)
+
+        def _on_done(reachable: bool):
+            if self._is_closing:
+                return
+            if reachable:
+                # 网络通 → Cookie 问题
+                self._error_label.setText(
+                    "需要验证 (Cookie 缺失或失效)\n\n"
+                    "网络连通正常，YouTube 拒绝了请求。\n"
+                    "这通常表示 Cookie 已失效或未配置，请在下方重新获取。"
+                )
+                self.retryWidget.show()
+                self.networkDiagWidget.hide()
+            else:
+                # 网络不通 → 网络问题
+                self._error_label.setText(
+                    "网络连接异常\n\n"
+                    "无法连接到 YouTube 服务器。\n"
+                    "请检查代理/VPN 是否正常运行，或在下方进行网络诊断。"
+                )
+                self.retryWidget.hide()
+                self.networkDiagWidget.show()
+                self._netProbeResult.setText("⚠️ 自动探测：无法连接 YouTube")
+
+        self._ambig_probe_worker.finished.connect(_on_done, Qt.ConnectionType.QueuedConnection)
+        self._ambig_probe_worker.start()
+
+    def _retry_parse_with_auth(self) -> None:
+        """重试解析（使用 auth_service 管理的 Cookie）"""
         self._is_closing = False
         try:
             if self.worker:
@@ -602,16 +913,10 @@ class DownloadConfigWindow(FramelessWindow):
             self._error_label = None
         self.retryWidget.hide()
 
-        idx = self.cookies_combo.currentIndex()
-        browser = ["", "edge", "chrome", "firefox"][idx] if idx < 4 else ""
+        # 不传 cookies_from_browser，由 auth_service 的 cookie file 提供
+        self._current_options = None
 
-        self._current_options = YoutubeServiceOptions(
-            auth=YtDlpAuthOptions(cookies_from_browser=browser if browser else None)
-        )
-
-        self._set_loading_ui(
-            f"正在重试解析 ({browser})..." if browser else "正在重试解析...", show_ring=True
-        )
+        self._set_loading_ui("正在重试解析...", show_ring=True)
 
         if self._vr_mode:
             w = VRInfoExtractWorker(self.url)
@@ -622,6 +927,131 @@ class DownloadConfigWindow(FramelessWindow):
         w.error.connect(self.on_parse_error)
         self.worker = w
         w.start()
+
+    def _on_dle_retry_clicked(self) -> None:
+        """DLE 登录模式重试"""
+        from ...auth.auth_service import AuthSourceType, auth_service
+        from ...auth.cookie_sentinel import cookie_sentinel
+
+        self._dleRetryBtn.setEnabled(False)
+        self._dleRetryBtn.setText("正在启动浏览器...")
+        self._dleStatusLabel.setText("请在浏览器中登录 YouTube 账号")
+
+        # 切换到 DLE 模式
+        auth_service.set_source(AuthSourceType.DLE, auto_refresh=False)
+
+        # 在后台线程执行 DLE 登录
+        from PySide6.QtCore import QThread
+        from PySide6.QtCore import Signal as QSignal
+
+        class _DLEWorker(QThread):
+            finished = QSignal(bool, str)
+
+            def run(self):
+                try:
+                    success, msg = cookie_sentinel.force_refresh_with_uac()
+                    self.finished.emit(success, msg)
+                except Exception as e:
+                    self.finished.emit(False, str(e))
+
+        self._dle_worker = _DLEWorker(self)
+
+        def _on_done(success: bool, msg: str):
+            self._dleRetryBtn.setEnabled(True)
+            self._dleRetryBtn.setText("登录 YouTube 并重试")
+            if success:
+                self._dleStatusLabel.setText("✅ 登录成功，正在重新解析...")
+                self._retry_parse_with_auth()
+            else:
+                clean = msg
+                if clean.startswith("刷新异常: "):
+                    clean = clean[len("刷新异常: ") :]
+                self._dleStatusLabel.setText(f"❌ {clean}")
+
+        self._dle_worker.finished.connect(_on_done, Qt.ConnectionType.QueuedConnection)
+        self._dle_worker.start()
+
+    def _on_extract_retry_clicked(self) -> None:
+        """浏览器提取模式重试"""
+        from ...auth.auth_service import AuthSourceType, auth_service
+        from ...auth.cookie_sentinel import cookie_sentinel
+
+        idx = self._extractCombo.currentIndex()
+        source_map = [
+            AuthSourceType.EDGE,
+            AuthSourceType.CHROME,
+            AuthSourceType.FIREFOX,
+            AuthSourceType.CHROMIUM,
+            AuthSourceType.BRAVE,
+            AuthSourceType.OPERA,
+            AuthSourceType.OPERA_GX,
+            AuthSourceType.VIVALDI,
+            AuthSourceType.LIBREWOLF,
+            AuthSourceType.CENT,
+        ]
+        source = source_map[idx] if 0 <= idx < len(source_map) else AuthSourceType.EDGE
+        browser_name = self._extractCombo.currentText()
+
+        self._extractRetryBtn.setEnabled(False)
+        self._extractRetryBtn.setText(f"正在从 {browser_name} 提取...")
+
+        auth_service.set_source(source, auto_refresh=True)
+
+        from PySide6.QtCore import QThread
+        from PySide6.QtCore import Signal as QSignal
+
+        class _ExtractWorker(QThread):
+            finished = QSignal(bool, str)
+
+            def run(self):
+                try:
+                    success, msg = cookie_sentinel.force_refresh_with_uac()
+                    self.finished.emit(success, msg)
+                except Exception as e:
+                    self.finished.emit(False, str(e))
+
+        self._extract_worker = _ExtractWorker(self)
+
+        def _on_done(success: bool, msg: str):
+            self._extractRetryBtn.setEnabled(True)
+            self._extractRetryBtn.setText("提取并重试")
+            if success:
+                self._retry_parse_with_auth()
+            else:
+                from qfluentwidgets import InfoBar
+
+                InfoBar.error(
+                    f"{browser_name} 提取失败",
+                    msg,
+                    duration=8000,
+                    parent=self,
+                )
+
+        self._extract_worker.finished.connect(_on_done, Qt.ConnectionType.QueuedConnection)
+        self._extract_worker.start()
+
+    def _on_import_retry_clicked(self) -> None:
+        """手动导入模式重试"""
+        from ...auth.auth_service import AuthSourceType, auth_service
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 Cookie 文件",
+            "",
+            "Cookie 文件 (*.txt);;所有文件 (*)",
+        )
+        if not file_path:
+            return
+
+        # 设置为文件模式
+        auth_service.set_source(AuthSourceType.FILE, auto_refresh=False)
+        auth_service._current_file_path = file_path
+
+        from ...core.config_manager import config_manager
+
+        config_manager.set("cookie_file_path", file_path)
+
+        self._retry_parse_with_auth()
 
     # === 单视频 UI ===
 
@@ -800,6 +1230,16 @@ class DownloadConfigWindow(FramelessWindow):
         toolbar.addWidget(self.preset_combo)
         toolbar.addWidget(self.applyPresetBtn)
 
+        # 暂停 / 继续后台解析
+        from qfluentwidgets import SwitchButton as _SwitchBtn
+
+        self.lazyPauseBtn = _SwitchBtn(self.contentWidget)
+        self.lazyPauseBtn.setText("暂停解析")
+        self.lazyPauseBtn.setChecked(False)
+        self.lazyPauseBtn.checkedChanged.connect(self._on_lazy_pause_changed)
+        toolbar.addSpacing(12)
+        toolbar.addWidget(self.lazyPauseBtn)
+
         toolbar.addStretch(1)
         self.contentLayout.addLayout(toolbar)
 
@@ -845,9 +1285,11 @@ class DownloadConfigWindow(FramelessWindow):
         self._update_download_btn_state()
 
         # kick off progressive detail fill
+        # 使用 0ms 延迟等 Qt 完成布局后取真实可见行
         self._idle_timer.start()
-        self._enqueue_detail_rows([0, 1, 2], priority=True)
-        self._maybe_start_next_detail()
+        from PySide6.QtCore import QTimer as _QT
+
+        _QT.singleShot(0, self._enqueue_visible_as_initial)
 
         # 延迟加载缩略图
         self._thumb_init_timer.start()
@@ -1290,7 +1732,7 @@ class DownloadConfigWindow(FramelessWindow):
 
     def _on_table_scrolled(self, _value: int) -> None:
         self._last_interaction = time.monotonic()
-        self._enqueue_detail_for_visible_rows()
+        self._reprioritize_detail_queue()  # 重锤定：可见区插队首
         self._load_thumbs_for_visible_rows()
         self._maybe_start_next_detail()
 
@@ -1305,6 +1747,31 @@ class DownloadConfigWindow(FramelessWindow):
         if last < 0:
             last = min(table.rowCount() - 1, first + 12)
         return (first, last)
+
+    def _enqueue_visible_as_initial(self) -> None:
+        """0ms 延迟后获取真实可见行并优先入队"""
+        first, last = self._visible_row_range()
+        rows = list(range(first, min(last + 4, len(self._playlist_rows))))
+        self._enqueue_detail_rows(rows, priority=True)
+        self._maybe_start_next_detail()
+
+    def _reprioritize_detail_queue(self) -> None:
+        """滚动后重锤定：可见区未加载行插队首，其余保留在尾"""
+        first, last = self._visible_row_range()
+        # 可见区 + 向下缓冲 5 行
+        visible = list(range(max(0, first - 2), min(len(self._playlist_rows), last + 6)))
+        # 保留当前队列中不属于可见区的行
+        rest = [r for r in self._detail_queue if r not in visible]
+
+        self._detail_queue.clear()
+        # 可见区行按顶到底预加到队首（反序 appendleft 丽正序出队）
+        for r in reversed(visible):
+            if r not in self._detail_loaded and r != self._detail_inflight_row:
+                self._detail_queue.appendleft(r)
+        # 其余行追加到尾部
+        for r in rest:
+            if r not in self._detail_loaded and r != self._detail_inflight_row:
+                self._detail_queue.append(r)
 
     def _enqueue_detail_for_visible_rows(self) -> None:
         first, last = self._visible_row_range()
@@ -1330,13 +1797,13 @@ class DownloadConfigWindow(FramelessWindow):
                 continue
             if url in self._thumb_requested:
                 continue
-            self._thumb_pending.append(url)
+            self._thumb_pending.append(url)  # deque.append
             self._thumb_requested.add(url)
         self._process_thumb_queue()
 
     def _process_thumb_queue(self) -> None:
         while self._thumb_pending and self._thumb_inflight < self._thumb_max_concurrent:
-            url = self._thumb_pending.pop(0)
+            url = self._thumb_pending.popleft()  # O(1) - deque
             self._thumb_inflight += 1
             self.image_loader.load(url, target_size=(150, 84), radius=8)
 
@@ -1479,6 +1946,8 @@ class DownloadConfigWindow(FramelessWindow):
                 self._detail_queue.append(r)
 
     def _maybe_start_next_detail(self) -> None:
+        if self._lazy_paused:
+            return
         if self._is_closing:
             return
         if self._detail_inflight_row is not None:
@@ -1540,24 +2009,46 @@ class DownloadConfigWindow(FramelessWindow):
         if self._is_closing:
             return
         self._detail_inflight_row = None
-        aw = self._action_widget_by_row.get(row)
-        if aw is not None:
-            aw.set_loading(False, "获取失败(点重试)")
-            aw.infoLabel.setText("")
-            aw.qualityButton.setToolTip(msg)
+        retries = self._detail_retry_count.get(row, 0)
+        if retries < 1:
+            # 自动重试一次，插入队首
+            self._detail_retry_count[row] = retries + 1
+            self._detail_queue.appendleft(row)
+        else:
+            aw = self._action_widget_by_row.get(row)
+            if aw is not None:
+                aw.set_loading(False, "解析失败(点重试)")
+                aw.infoLabel.setText("")
+                aw.qualityButton.setToolTip(msg)
         self._maybe_start_next_detail()
 
     def _on_idle_tick(self) -> None:
         if not self._is_playlist:
             return
+        if self._lazy_paused:
+            return
         if time.monotonic() - self._last_interaction < 2.0:
             return
         if self._detail_inflight_row is None and not self._detail_queue:
+            # 一次入队最多 3 个未加载行，加速后台补全
+            count = 0
             for i in range(len(self._playlist_rows)):
                 if i not in self._detail_loaded:
                     self._detail_queue.append(i)
-                    break
+                    count += 1
+                    if count >= 3:
+                        break
         self._maybe_start_next_detail()
+
+    def _on_lazy_pause_changed(self, checked: bool) -> None:
+        """用户手动暂停/恢复后台详情解析"""
+        self._lazy_paused = checked
+        if hasattr(self, "lazyPauseBtn"):
+            self.lazyPauseBtn.setText("已暂停" if checked else "暂停解析")
+        if not checked:
+            # 恢复：立即重锚点并继续
+            self._reprioritize_detail_queue()
+            self._maybe_start_next_detail()
 
     def _open_row_format_picker(self, row: int) -> None:
         if not (0 <= row < len(self._playlist_rows)):
@@ -1724,8 +2215,6 @@ class DownloadConfigWindow(FramelessWindow):
                         ydl_opts["embedsubtitles"] = embed_override
                     elif embed_type == "external":
                         ydl_opts["embedsubtitles"] = False
-                    elif embed_type == "hard":
-                        ydl_opts["embedsubtitles"] = embed_override
 
                 _ensure_subtitle_compatible_container(ydl_opts)
 
@@ -1881,8 +2370,6 @@ class DownloadConfigWindow(FramelessWindow):
                         row_opts["embedsubtitles"] = False
                         if pl_sub_override.format in ["srt", "ass", "vtt"]:
                             row_opts["convertsubtitles"] = pl_sub_override.format
-                    elif pl_sub_override.embed_type == "hard":
-                        row_opts["embedsubtitles"] = pl_sub_override.embed_mode != "never"
 
             self._apply_download_dir_to_opts(row_opts)
 

@@ -626,13 +626,12 @@ class AudioLanguageMultiSelectCard(SettingCard):
 class EmbedTypeComboCard(SettingCard):
     """嵌入类型下拉框卡片"""
 
-    valueChanged = Signal(str)  # soft/external/hard
+    valueChanged = Signal(str)  # soft/external
 
     # 嵌入类型映射
     EMBED_TYPES = [
         ("soft", "软嵌入（推荐） - 封装到容器，可开关，多语言"),
         ("external", "外置文件 - 独立.srt，易编辑，兼容性最佳"),
-        ("hard", "硬嵌入（烧录） - 永久显示，最多2语言"),
     ]
 
     def __init__(
@@ -976,7 +975,11 @@ class SettingsPage(QWidget):
             FluentIcon.PEOPLE,
             "Cookie 来源",
             "选择 Cookie 获取方式（Cookie 卫士会自动维护生命周期）",
-            ["🚀 自动从本地浏览器提取", "📄 手动导入 cookies.txt 文件"],
+            [
+                "🚀 自动从本地浏览器提取",
+                "🔑 登录获取 (推荐)",
+                "📄 手动导入 cookies.txt 文件",
+            ],
             self.accountGroup,
         )
         self.cookieModeCard.comboBox.currentIndexChanged.connect(self._on_cookie_mode_changed)
@@ -1001,6 +1004,16 @@ class SettingsPage(QWidget):
             self.accountGroup,
         )
         self.browserCard.comboBox.currentIndexChanged.connect(self._on_cookie_browser_changed)
+
+        # DLE 登录按钮
+        self.dleLoginCard = PushSettingCard(
+            "登录 YouTube",
+            FluentIcon.GLOBE,
+            "🔑 账号登录",
+            "点击后将打开独立浏览器，请登录 YouTube 账号以自动提取 Cookie",
+            self.accountGroup,
+        )
+        self.dleLoginCard.clicked.connect(self._on_dle_login_clicked)
 
         # 手动刷新按钮
         self.refreshCookieCard = PushSettingCard(
@@ -1034,14 +1047,27 @@ class SettingsPage(QWidget):
 
         self.accountGroup.addSettingCard(self.cookieModeCard)
         self.accountGroup.addSettingCard(self.browserCard)
+        self.accountGroup.addSettingCard(self.dleLoginCard)
         self.accountGroup.addSettingCard(self.refreshCookieCard)
         self.accountGroup.addSettingCard(self.cookieStatusCard)
         self.accountGroup.addSettingCard(self.cookieFileCard)
+
+        # 一键诊断
+        self.diagCard = PushSettingCard(
+            "一键检测",
+            FluentIcon.SEARCH,
+            "环境诊断",
+            "检测 Cookie、网络连通性、代理和 IP 风控状态",
+            self.accountGroup,
+        )
+        self.diagCard.clicked.connect(self._on_diag_clicked)
+        self.accountGroup.addSettingCard(self.diagCard)
 
         layout.addWidget(self.accountGroup)
 
         # Make Cookie dependent cards look like "children" of cookie mode card
         self._indent_setting_card(self.browserCard)
+        self._indent_setting_card(self.dleLoginCard)
         self._indent_setting_card(self.refreshCookieCard)
         self._indent_setting_card(self.cookieFileCard)
         self._indent_setting_card(self.cookieStatusCard)
@@ -1504,11 +1530,11 @@ class SettingsPage(QWidget):
             self._on_subtitle_embed_mode_changed
         )
 
-        # 字幕格式
+        # 外置字幕格式
         self.subtitleFormatCard = InlineComboBoxCard(
             FluentIcon.DOCUMENT,
-            "字幕格式",
-            "下载的字幕文件格式",
+            "外置字幕格式",
+            "保存的字幕文件格式（外置文件和嵌入前的转换格式）",
             ["SRT", "ASS", "VTT"],
             parent=self.subtitleGroup,
         )
@@ -1699,9 +1725,11 @@ class SettingsPage(QWidget):
 
         # 设置 Cookie 模式
         if current_source == AuthSourceType.FILE:
-            self.cookieModeCard.comboBox.setCurrentIndex(1)  # 手动文件
+            self.cookieModeCard.comboBox.setCurrentIndex(2)  # 手动文件
             if auth_service._current_file_path:
                 self.cookieFileCard.setContent(auth_service._current_file_path)
+        elif current_source == AuthSourceType.DLE:
+            self.cookieModeCard.comboBox.setCurrentIndex(1)  # 登录获取
         else:
             self.cookieModeCard.comboBox.setCurrentIndex(0)  # 自动提取
 
@@ -2106,7 +2134,7 @@ class SettingsPage(QWidget):
             InfoBar.info("已清空", "代理地址已清空。", duration=5000, parent=self)
 
     def _on_cookie_mode_changed(self, index: int) -> None:
-        """Cookie 模式切换：0=浏览器提取, 1=手动文件"""
+        """Cookie 模式切换：0=浏览器提取, 1=DLE登录获取, 2=手动文件"""
         from ..auth.auth_service import AuthSourceType, auth_service
 
         if index == 0:
@@ -2133,6 +2161,7 @@ class SettingsPage(QWidget):
             auth_service.set_source(source, auto_refresh=True)
 
             self.browserCard.setVisible(True)
+            self.dleLoginCard.setVisible(False)
             self.refreshCookieCard.setVisible(True)
             self.cookieFileCard.setVisible(False)
 
@@ -2142,11 +2171,29 @@ class SettingsPage(QWidget):
                 duration=3000,
                 parent=self,
             )
+
+        elif index == 1:
+            # DLE 登录获取模式
+            auth_service.set_source(AuthSourceType.DLE, auto_refresh=False)
+
+            self.browserCard.setVisible(False)
+            self.dleLoginCard.setVisible(True)
+            self.refreshCookieCard.setVisible(False)
+            self.cookieFileCard.setVisible(False)
+
+            InfoBar.success(
+                "已切换到登录获取模式",
+                "请点击「登录 YouTube」按钮进行账号认证",
+                duration=3000,
+                parent=self,
+            )
+
         else:
-            # 手动文件模式
+            # 手动文件模式 (index == 2)
             auth_service.set_source(AuthSourceType.FILE, auto_refresh=False)
 
             self.browserCard.setVisible(False)
+            self.dleLoginCard.setVisible(False)
             self.refreshCookieCard.setVisible(False)
             self.cookieFileCard.setVisible(True)
 
@@ -2179,10 +2226,16 @@ class SettingsPage(QWidget):
         if 0 <= index < len(browser_map):
             source, name = browser_map[index]
 
+            # DLE 登录按钮在浏览器提取模式下始终隐藏
+            self.dleLoginCard.setVisible(False)
+
             # Chromium 内核浏览器 v130+ 需要管理员权限
             from ..auth.auth_service import ADMIN_REQUIRED_BROWSERS
 
-            if source in ADMIN_REQUIRED_BROWSERS and not is_admin():
+            # DLE 方案不再需要管理员权限 (Edge/Chrome)
+            is_dle_supported = source in (AuthSourceType.EDGE, AuthSourceType.CHROME)
+
+            if not is_dle_supported and source in ADMIN_REQUIRED_BROWSERS and not is_admin():
                 box = MessageBox(
                     f"{name} 需要管理员权限",
                     f"{name} 使用了 App-Bound 加密保护，\n"
@@ -2266,11 +2319,54 @@ class SettingsPage(QWidget):
             self._cookie_worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
             self._cookie_worker.start()
 
+    def _on_dle_login_clicked(self):
+        """DLE 登录按钮点击 - 启动浏览器登录流程"""
+        self.dleLoginCard.button.setEnabled(False)
+        self.dleLoginCard.setContent("正在启动浏览器，请登录 YouTube 账号后等待自动提取...")
+
+        # 执行刷新
+        self._do_cookie_refresh()
+
+        # 挂载完成回调（worker 已在 _do_cookie_refresh 中创建）
+        if self._cookie_worker:
+
+            def _on_dle_finished(success: bool, message: str, need_admin: bool = False):
+                # 恢复按钮状态
+                self.dleLoginCard.button.setEnabled(True)
+
+                if success:
+                    self.dleLoginCard.setContent("✅ 登录成功，Cookie 已提取")
+                    InfoBar.success(
+                        "登录成功",
+                        "YouTube Cookie 已成功提取并保存",
+                        duration=5000,
+                        parent=self,
+                    )
+                else:
+                    self.dleLoginCard.setContent("❌ 登录未完成，请重新点击「登录 YouTube」")
+                    # 解析错误消息，去掉「刷新异常:」前缀
+                    clean_msg = message
+                    if clean_msg.startswith("刷新异常: "):
+                        clean_msg = clean_msg[len("刷新异常: ") :]
+
+                    # 显示错误 InfoBar
+                    InfoBar.warning(
+                        "登录未完成",
+                        clean_msg,
+                        duration=8000,
+                        parent=self,
+                    )
+
+            self._cookie_worker.finished.connect(
+                _on_dle_finished,
+                Qt.ConnectionType.QueuedConnection,
+            )
+
     def _on_refresh_cookie_clicked(self):
         """手动刷新 Cookie 按钮点击"""
         from qfluentwidgets import MessageBox
 
-        from ..auth.auth_service import auth_service
+        from ..auth.auth_service import AuthSourceType, auth_service
         from ..utils.admin_utils import is_admin
 
         current_source = auth_service.current_source
@@ -2278,7 +2374,10 @@ class SettingsPage(QWidget):
         # 检查是否是 Chromium 内核浏览器且非管理员 - 直接提示重启
         from ..auth.auth_service import ADMIN_REQUIRED_BROWSERS
 
-        if current_source in ADMIN_REQUIRED_BROWSERS and not is_admin():
+        # DLE 方案不再需要管理员权限 (Edge/Chrome)
+        is_dle_supported = current_source in (AuthSourceType.EDGE, AuthSourceType.CHROME)
+
+        if not is_dle_supported and current_source in ADMIN_REQUIRED_BROWSERS and not is_admin():
             browser_name = auth_service.current_source_display
 
             box = MessageBox(
@@ -2415,47 +2514,321 @@ class SettingsPage(QWidget):
     def _update_cookie_status(self):
         """更新 Cookie 状态显示"""
         try:
+            from ..auth.auth_service import AuthSourceType, auth_service
             from ..auth.cookie_sentinel import cookie_sentinel
 
+            current_source = auth_service.current_source
             info = cookie_sentinel.get_status_info()
-            cookie_path = cookie_sentinel.cookie_path
 
-            if info["exists"]:
-                age = info["age_minutes"]
-                age_str = f"{int(age)}分钟前" if age is not None else "未知"
+            # === 特殊模式处理 ===
+            if current_source == AuthSourceType.NONE:
+                self.cookieStatusCard.contentLabel.setText("⚪ 未启用 Cookie 验证")
+                return
 
-                # 显示实际来源，而不是配置来源
-                actual_display = info.get("actual_source_display") or info["source"]
-
-                # 回退警告或来源不匹配警告
-                if info.get("using_fallback") or info.get("source_mismatch"):
-                    emoji = "⚠️"
-                    # 显示实际来源并标注配置来源
-                    if info.get("source_mismatch") and info.get("actual_source_display"):
-                        source_text = f"{actual_display}（配置: {info['source']}）"
-                    else:
-                        source_text = actual_display
-                elif info["is_stale"]:
-                    emoji = "⚠️"
-                    source_text = actual_display
+            if not info["exists"]:
+                if current_source == AuthSourceType.DLE:
+                    status_text = "🔑 DLE 模式 — 尚未登录，请点击「登录 YouTube」按钮"
+                elif current_source == AuthSourceType.FILE:
+                    status_text = "❌ Cookie 文件不存在，请重新选择文件"
                 else:
-                    emoji = "✅"
+                    status_text = f"❌ 尚无 Cookie — 请点击「立即刷新」从 {auth_service.current_source_display} 提取"
+                self.cookieStatusCard.contentLabel.setText(status_text)
+                return
+
+            # === 有 Cookie 文件时的详细状态 ===
+            age = info["age_minutes"]
+            age_str = f"{int(age)} 分钟前" if age is not None else "未知时间"
+            cookie_count = info["cookie_count"]
+            cookie_valid = info.get("cookie_valid", False)
+            cookie_valid_msg = info.get("cookie_valid_msg", "")
+            actual_display = info.get("actual_source_display") or info["source"]
+
+            # 决定主 emoji 和来源文字
+            if not cookie_valid:
+                emoji = "❌"
+                source_text = actual_display
+            elif info.get("using_fallback") or info.get("source_mismatch"):
+                emoji = "⚠️"
+                if info.get("source_mismatch") and info.get("actual_source_display"):
+                    source_text = f"{actual_display}（当前配置: {info['source']}）"
+                else:
                     source_text = actual_display
-
-                status_text = (
-                    f"{emoji} {source_text} | 更新于 {age_str} | {info['cookie_count']} 个 Cookie"
-                )
-
-                # 如果有回退警告，添加提示
-                if info.get("fallback_warning"):
-                    status_text += f"\n{info['fallback_warning']}"
+            elif info.get("expiring_soon"):
+                emoji = "⏳"
+                source_text = actual_display
+            elif info["is_stale"]:
+                emoji = "⚠️"
+                source_text = actual_display
             else:
-                status_text = f"❌ Cookie 文件不存在 ({cookie_path.name})"
+                emoji = "✅"
+                source_text = actual_display
+
+            status_text = f"{emoji} {source_text} | 更新于 {age_str} | {cookie_count} 个 Cookie"
+
+            # 即将过期预警
+            earliest = info.get("earliest_expiry")
+            if info.get("expiring_soon") and earliest is not None:
+                if earliest <= 0:
+                    status_text += "\n⚠️ 关键 Cookie 已过期，请立即刷新"
+                else:
+                    mins = int(earliest / 60)
+                    status_text += f"\n⏳ 关键 Cookie 将在 {mins} 分钟后过期，建议尽快刷新"
+
+            # 有效性说明（仅在失效时显示）
+            if not cookie_valid and cookie_valid_msg:
+                status_text += f"\n{cookie_valid_msg}"
+
+            # 回退警告
+            if info.get("fallback_warning"):
+                status_text += f"\n⚠️ {info['fallback_warning']}"
 
             self.cookieStatusCard.contentLabel.setText(status_text)
 
         except Exception as e:
             self.cookieStatusCard.contentLabel.setText(f"状态获取失败: {e}")
+
+    def _on_diag_clicked(self) -> None:
+        """一键环境诊断 — 弹出二级诊断对话框"""
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtCore import QThread
+        from PySide6.QtCore import Signal as QSignal
+        from PySide6.QtWidgets import QGridLayout, QLabel, QSizePolicy
+        from qfluentwidgets import (
+            BodyLabel,
+            CaptionLabel,
+            IndeterminateProgressRing,
+            MessageBoxBase,
+            SubtitleLabel,
+        )
+
+        STEP_LABELS = {
+            1: "Cookie 文件",
+            2: "Cookie 有效性",
+            3: "YouTube 连通性",
+            4: "代理配置",
+            5: "Cookie + IP 实测",
+        }
+
+        # ---- Worker (same logic, moved here for closure) ----
+        class _DiagWorker(QThread):
+            step_done = QSignal(int, bool, str)
+            all_done = QSignal(str)
+
+            def run(self):
+                import time as _time
+
+                results = {}
+
+                # Step 1: Cookie 文件
+                try:
+                    from ..auth.cookie_sentinel import cookie_sentinel
+
+                    info = cookie_sentinel.get_status_info()
+                    if info["exists"]:
+                        count = info.get("cookie_count", 0)
+                        source = info.get("actual_source_display") or info.get("source") or "未知"
+                        self.step_done.emit(1, True, f"存在 ({count} 个, 来源: {source})")
+                        results["file"] = True
+                    else:
+                        self.step_done.emit(1, False, "Cookie 文件不存在")
+                        results["file"] = False
+                except Exception as e:
+                    self.step_done.emit(1, False, f"检测失败: {e}")
+                    results["file"] = False
+
+                # Step 2: Cookie 有效性
+                try:
+                    if results.get("file"):
+                        valid = info.get("cookie_valid", False)
+                        msg = info.get("cookie_valid_msg", "")
+                        if valid:
+                            self.step_done.emit(2, True, msg or "Cookie 有效")
+                        else:
+                            self.step_done.emit(2, False, msg or "Cookie 无效或不完整")
+                        results["valid"] = valid
+                    else:
+                        self.step_done.emit(2, False, "跳过 (无 Cookie 文件)")
+                        results["valid"] = False
+                except Exception as e:
+                    self.step_done.emit(2, False, f"检测失败: {e}")
+                    results["valid"] = False
+
+                # Step 3: YouTube 连通性
+                try:
+                    from ..utils.error_parser import probe_youtube_connectivity
+
+                    t0 = _time.monotonic()
+                    reachable = probe_youtube_connectivity(timeout=8.0)
+                    latency = int((_time.monotonic() - t0) * 1000)
+                    if reachable:
+                        self.step_done.emit(3, True, f"可达 (延迟 {latency}ms)")
+                    else:
+                        self.step_done.emit(3, False, f"不可达 (耗时 {latency}ms)")
+                    results["network"] = reachable
+                except Exception as e:
+                    self.step_done.emit(3, False, f"检测失败: {e}")
+                    results["network"] = False
+
+                # Step 4: 代理配置
+                try:
+                    from ..core.config_manager import config_manager
+
+                    proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
+                    proxy_url = str(config_manager.get("proxy_url", "") or "").strip()
+                    if proxy_mode == "manual" and proxy_url:
+                        self.step_done.emit(4, True, f"手动代理: {proxy_url}")
+                    elif proxy_mode == "system":
+                        self.step_done.emit(4, True, "使用系统代理")
+                    else:
+                        self.step_done.emit(4, False, "未配置代理 (可能无法访问 YouTube)")
+                    results["proxy"] = proxy_mode != "off"
+                except Exception as e:
+                    self.step_done.emit(4, False, f"检测失败: {e}")
+                    results["proxy"] = False
+
+                # Step 5: Cookie + IP 综合实测
+                try:
+                    if results.get("network"):
+                        from ..auth.cookie_sentinel import cookie_sentinel as _cs
+                        from ..utils.error_parser import probe_cookie_and_ip
+
+                        cpath = _cs.get_cookie_file_path() if results.get("file") else None
+                        probe = probe_cookie_and_ip(cookie_file=cpath, timeout=15.0)
+                        results["cookie_real"] = probe["cookie_ok"]
+                        results["ip_ok"] = probe["ip_ok"]
+
+                        if probe["cookie_ok"] and probe["ip_ok"]:
+                            self.step_done.emit(5, True, probe["detail"])
+                        elif probe["ip_ok"] and not probe["cookie_ok"]:
+                            self.step_done.emit(5, False, probe["detail"])
+                        else:
+                            self.step_done.emit(5, False, probe["detail"])
+                    else:
+                        self.step_done.emit(5, False, "跳过 (网络不通)")
+                        results["ip_ok"] = False
+                        results["cookie_real"] = False
+                except Exception as e:
+                    self.step_done.emit(5, False, f"检测失败: {e}")
+                    results["ip_ok"] = False
+                    results["cookie_real"] = False
+
+                # 综合建议
+                suggestions = []
+                if not results.get("proxy"):
+                    suggestions.append("建议在「设置 > 网络连接」中配置代理")
+                if not results.get("network"):
+                    suggestions.append("网络不通，请检查代理是否运行")
+                elif not results.get("ip_ok"):
+                    suggestions.append("当前 IP/节点被 YouTube 风控，建议更换代理节点")
+                if not results.get("file"):
+                    suggestions.append("请先通过登录或浏览器提取获取 Cookie")
+                elif results.get("cookie_real") is False and results.get("ip_ok"):
+                    suggestions.append("Cookie 已失效 (服务端验证不通过)，请重新获取")
+                elif not results.get("valid"):
+                    suggestions.append("Cookie 缺少必要字段，请重新获取")
+
+                if not suggestions:
+                    self.all_done.emit("✅ 所有检测通过，环境正常")
+                else:
+                    self.all_done.emit("💡 " + "；".join(suggestions))
+
+        # ---- Dialog ----
+        class _DiagDialog(MessageBoxBase):
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.titleLabel = SubtitleLabel("🔍 环境诊断", self)
+                self.viewLayout.addWidget(self.titleLabel)
+
+                # 5-row grid: icon | label | result
+                grid_widget = QWidget(self)
+                self._grid = QGridLayout(grid_widget)
+                self._grid.setContentsMargins(0, 12, 0, 12)
+                self._grid.setHorizontalSpacing(12)
+                self._grid.setVerticalSpacing(8)
+
+                self._icon_labels: dict[int, QLabel] = {}
+                self._result_labels: dict[int, CaptionLabel] = {}
+                self._spinners: dict[int, IndeterminateProgressRing] = {}
+
+                for step in range(1, 6):
+                    row = step - 1
+                    # spinner (will be hidden when done)
+                    spinner = IndeterminateProgressRing(grid_widget)
+                    spinner.setFixedSize(16, 16)
+                    self._spinners[step] = spinner
+                    self._grid.addWidget(spinner, row, 0)
+
+                    # icon label (hidden initially, shown when done)
+                    icon_lbl = BodyLabel("", grid_widget)
+                    icon_lbl.setFixedWidth(20)
+                    icon_lbl.hide()
+                    self._icon_labels[step] = icon_lbl
+                    self._grid.addWidget(icon_lbl, row, 0)
+
+                    # step name
+                    name_lbl = BodyLabel(STEP_LABELS[step], grid_widget)
+                    name_lbl.setFixedWidth(110)
+                    self._grid.addWidget(name_lbl, row, 1)
+
+                    # result
+                    result_lbl = CaptionLabel("检测中...", grid_widget)
+                    result_lbl.setWordWrap(True)
+                    result_lbl.setSizePolicy(
+                        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+                    )
+                    self._result_labels[step] = result_lbl
+                    self._grid.addWidget(result_lbl, row, 2)
+
+                self.viewLayout.addWidget(grid_widget)
+
+                # suggestion row
+                self._suggestionLabel = CaptionLabel("", self)
+                self._suggestionLabel.setWordWrap(True)
+                self._suggestionLabel.hide()
+                self.viewLayout.addWidget(self._suggestionLabel)
+
+                # buttons
+                self.yesButton.setText("关闭")
+                self.cancelButton.hide()
+
+                self.widget.setMinimumWidth(480)
+
+            def update_step(self, step: int, ok: bool, detail: str):
+                # hide spinner, show icon
+                self._spinners[step].hide()
+                icon_lbl = self._icon_labels[step]
+                icon_lbl.setText("✅" if ok else "❌")
+                icon_lbl.show()
+                self._result_labels[step].setText(detail)
+
+            def set_suggestion(self, text: str):
+                self._suggestionLabel.setText(text)
+                self._suggestionLabel.show()
+
+        # create dialog and worker
+        dlg = _DiagDialog(self.window())
+        worker = _DiagWorker(dlg)
+
+        def _on_step(step, ok, detail):
+            dlg.update_step(step, ok, detail)
+
+        def _on_all_done(suggestion):
+            dlg.set_suggestion(suggestion)
+            # also update the card description briefly
+            self.diagCard.setContent(suggestion)
+
+        worker.step_done.connect(_on_step, _Qt.ConnectionType.QueuedConnection)
+        worker.all_done.connect(_on_all_done, _Qt.ConnectionType.QueuedConnection)
+        worker.start()
+
+        dlg.exec()
+
+        # cleanup
+        try:
+            worker.quit()
+            worker.wait(2000)
+        except Exception:
+            pass
 
     def _on_js_runtime_changed(self, index: int) -> None:
         mapping = {0: "auto", 1: "deno", 2: "node", 3: "bun", 4: "quickjs"}
@@ -2893,12 +3266,12 @@ class SettingsPage(QWidget):
 
     def _on_subtitle_embed_type_changed(self, embed_type: str) -> None:
         """嵌入类型改变回调"""
-        if embed_type not in ("soft", "external", "hard"):
+        if embed_type not in ("soft", "external"):
             embed_type = "soft"
         config = config_manager.get_subtitle_config()
-        config.embed_type = cast(Literal["soft", "external", "hard"], embed_type)
+        config.embed_type = cast(Literal["soft", "external"], embed_type)
         config_manager.set_subtitle_config(config)
-        type_names = {"soft": "软嵌入", "external": "外置文件", "hard": "硬嵌入"}
+        type_names = {"soft": "软嵌入", "external": "外置文件"}
         InfoBar.success(
             "嵌入类型",
             f"字幕嵌入类型: {type_names.get(embed_type, embed_type)}",
@@ -2926,14 +3299,14 @@ class SettingsPage(QWidget):
         format_map = {0: "srt", 1: "ass", 2: "vtt"}
         fmt = format_map.get(index, "srt")
         config_manager.set("subtitle_format", fmt)
-        InfoBar.success("格式设置", f"字幕格式: {fmt.upper()}", duration=3000, parent=self)
+        InfoBar.success("格式设置", f"外置字幕格式: {fmt.upper()}", duration=3000, parent=self)
 
     def _update_keep_separate_visibility(self) -> None:
         """根据嵌入类型更新「保留外置字幕文件」开关的可见性"""
         # enabled = self.subtitleEnabledCard.switchButton.isChecked() # No longer check enabled
         embed_type = self.subtitleEmbedTypeCard.get_value()
         # 仅软嵌入/硬嵌入时显示此选项（外置模式下字幕文件本身就是产物）
-        self.subtitleKeepSeparateCard.setVisible(embed_type in ("soft", "hard"))
+        self.subtitleKeepSeparateCard.setVisible(embed_type == "soft")
 
     def _update_vr_hardware_status(self) -> None:
         """更新 VR 硬件状态 Banner"""
@@ -3006,4 +3379,4 @@ class SettingsPage(QWidget):
 
         # 仅根据嵌入类型更新「保留外置字幕」可见性，不再依赖总开关
         embed_type = self.subtitleEmbedTypeCard.get_value()
-        self.subtitleKeepSeparateCard.setVisible(embed_type in ("soft", "hard"))
+        self.subtitleKeepSeparateCard.setVisible(embed_type == "soft")

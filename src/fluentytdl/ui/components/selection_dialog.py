@@ -2249,12 +2249,6 @@ class SelectionDialog(MessageBoxBase):
                     elif embed_type == "external":
                         # 外置文件：始终不嵌入，忽略用户的弹窗选择
                         ydl_opts["embedsubtitles"] = False
-                    elif embed_type == "hard":
-                        # 硬嵌入（烧录）尚未实现，自动降级为软嵌入
-                        ydl_opts["embedsubtitles"] = embed_override
-                        print(
-                            "[DEBUG] get_selected_tasks: hard embed not implemented, using soft embed instead"
-                        )
 
                     print(
                         f"[DEBUG] get_selected_tasks: embed_type={embed_type}, embed_override={embed_override}, final embedsubtitles={ydl_opts.get('embedsubtitles')}"
@@ -2951,8 +2945,7 @@ class SelectionDialog(MessageBoxBase):
                     from ...core.config_manager import config_manager as cfg
 
                     embed_type = cfg.get_subtitle_config().embed_type
-                    if embed_type in ("soft", "hard"):
-                        # soft/hard 都走软嵌入路径（hard 暂未实现，降级处理）
+                    if embed_type == "soft":
                         opts["embedsubtitles"] = embed_subtitles_override
                     else:
                         opts["embedsubtitles"] = False
@@ -2987,7 +2980,7 @@ class SelectionDialog(MessageBoxBase):
                 from ...core.config_manager import config_manager as cfg
 
                 embed_type = cfg.get_subtitle_config().embed_type
-                if embed_type in ("soft", "hard"):
+                if embed_type == "soft":
                     opts["embedsubtitles"] = embed_subtitles_override
                 else:
                     opts["embedsubtitles"] = False

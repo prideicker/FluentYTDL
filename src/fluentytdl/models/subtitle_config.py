@@ -31,12 +31,11 @@ class SubtitleConfig:
 
     # ========== 嵌入配置 ==========
 
-    embed_type: Literal["soft", "external", "hard"] = "soft"
+    embed_type: Literal["soft", "external"] = "soft"
     """
     字幕嵌入类型：
     - soft: 软嵌入到视频容器（可开关，支持多轨，推荐）
     - external: 外置独立文件（.srt/.ass，兼容性最佳）
-    - hard: 硬嵌入到视频画面（烧录，不可关闭，最多2语言）
     """
 
     embed_mode: Literal["always", "never", "ask"] = "always"
@@ -68,7 +67,7 @@ class SubtitleConfig:
     fallback_to_english: bool = True
     """当首选语言不可用时，是否自动回退到英语"""
 
-    max_languages: int = 2
+    max_languages: int = 10
     """最多下载字幕语言数量（防止过多字幕文件）"""
 
     def to_dict(self) -> dict:
@@ -101,5 +100,5 @@ class SubtitleConfig:
             quality_check=data.get("quality_check", True),
             remove_ads=data.get("remove_ads", False),
             fallback_to_english=data.get("fallback_to_english", True),
-            max_languages=data.get("max_languages", 2),
+            max_languages=data.get("max_languages", 10),
         )

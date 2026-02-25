@@ -76,17 +76,6 @@ def build_embed_opts(config: SubtitleConfig) -> dict[str, Any]:
         opts["embedsubtitles"] = False
         opts["writesubtitles"] = True
 
-    elif config.embed_type == "hard":
-        # 硬嵌入（烧录）：目前实际走软嵌入路径
-        # 真正的硬嵌入需要 FFmpeg 重编码，尚未实现
-        # 为了让用户得到嵌入效果，暂时使用软嵌入替代
-        if config.embed_mode != "never":
-            opts["embedsubtitles"] = True
-            _logger.warning("[SubEmbed] 硬嵌入暂未实现，已自动使用软嵌入替代")
-        else:
-            opts["embedsubtitles"] = False
-        opts["writesubtitles"] = True
-
     _logger.info("[SubEmbed] build_embed_opts 返回: {}", opts)
     return opts
 
@@ -179,8 +168,8 @@ class SingleLanguageStrategy(SubtitleStrategy):
             "writeautomaticsub": self.enable_auto,
             "subtitleslangs": [self.language],
         }
-        # 仅外置模式需要格式转换；软/硬嵌入让 FFmpeg 处理原生格式（VTT→mov_text 更可靠）
-        if config.embed_type == "external" and config.format in ["srt", "ass", "vtt"]:
+        # 始终应用用户选择的字幕格式（影响外置文件格式和嵌入前的转换）
+        if config.format in ["srt", "ass", "vtt"]:
             opts["convertsubtitles"] = config.format
         opts.update(embed_opts)
         return opts
@@ -196,7 +185,7 @@ class MultiLanguageStrategy(SubtitleStrategy):
     下载多个语言的字幕，按优先级列表顺序尝试。
     """
 
-    def __init__(self, languages: list[str], max_languages: int = 2):
+    def __init__(self, languages: list[str], max_languages: int = 10):
         self.languages = languages
         self.max_languages = max_languages
 
@@ -222,8 +211,8 @@ class MultiLanguageStrategy(SubtitleStrategy):
             "writeautomaticsub": config.enable_auto_captions,
             "subtitleslangs": selected,
         }
-        # 仅外置模式需要格式转换；软/硬嵌入让 FFmpeg 处理原生格式
-        if config.embed_type == "external" and config.format in ["srt", "ass", "vtt"]:
+        # 始终应用用户选择的字幕格式（影响外置文件格式和嵌入前的转换）
+        if config.format in ["srt", "ass", "vtt"]:
             opts["convertsubtitles"] = config.format
         opts.update(embed_opts)
         return opts
@@ -283,8 +272,8 @@ class SmartStrategy(SubtitleStrategy):
             "writeautomaticsub": config.enable_auto_captions,
             "subtitleslangs": selected,
         }
-        # 仅外置模式需要格式转换；软/硬嵌入让 FFmpeg 处理原生格式
-        if config.embed_type == "external" and config.format in ["srt", "ass", "vtt"]:
+        # 始终应用用户选择的字幕格式（影响外置文件格式和嵌入前的转换）
+        if config.format in ["srt", "ass", "vtt"]:
             opts["convertsubtitles"] = config.format
         opts.update(embed_opts)
         return opts
@@ -382,7 +371,8 @@ class SubtitleService:
 
         # 如果有语言覆盖，使用多语言策略
         if override_languages:
-            strategy = MultiLanguageStrategy(override_languages)
+            config = user_config or self.get_config()
+            strategy = MultiLanguageStrategy(override_languages, config.max_languages)
         else:
             strategy = self.resolve_strategy(video_info, user_config)
 
