@@ -68,7 +68,7 @@ jobs:
       # 1. 环境准备
       # ========================================
       - name: "📥 检出代码"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # 获取完整历史用于版本信息
 
