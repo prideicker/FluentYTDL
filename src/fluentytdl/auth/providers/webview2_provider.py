@@ -106,6 +106,8 @@ def _webview_subprocess(
         error_msg = f"pywebview 加载失败: {exc}\n{tb}\n\nEnv Debug:\n{exec_info}\n{path_info}\n{env_keys}"
         try:
             cookie_queue.put({"error": error_msg})
+            cookie_queue.close()
+            cookie_queue.join_thread()
         except Exception:
             pass
         return
@@ -207,7 +209,7 @@ def _webview_subprocess(
 
             formatted = _format_cookies(all_raw)
 
-            # ★ 先 put 再 destroy
+            # ★ 确保队列彻底刷新到底层管道，避免因后续崩溃或死锁导致父进程假死
             if formatted:
                 cookie_queue.put({"cookies": formatted})
                 print(f"[WebView2-子进程] ✅ 已通过 Queue 回传 {len(formatted)} 个格式化 Cookie")
@@ -215,26 +217,31 @@ def _webview_subprocess(
                 cookie_queue.put({"error": "Cookie 格式化失败：提取到空列表"})
 
             try:
-                win.destroy()
+                cookie_queue.close()
+                cookie_queue.join_thread()
             except Exception:
                 pass
+            
+            # 不在后台线程调用高危的 win.destroy()，防止死锁阻止管线通信。
+            # 直接由父进程收到数据后的 finally 块里的 p.terminate() 暴力接管销毁。
             return
 
         # 超时
         print(f"[WebView2-子进程] ⏳ 提取超时 ({timeout}s)!")
         try:
             cookie_queue.put_nowait({"error": f"登录超时 ({timeout}s)，未检测到有效的登录 Cookie"})
+            cookie_queue.close()
+            cookie_queue.join_thread()
         except Exception:
             pass
-        try:
-            win.destroy()
-        except Exception:
-            pass
+        return
 
     def _on_closed():
         print("[WebView2-子进程] 🚪 用户关闭了登录窗口")
         try:
             cookie_queue.put_nowait({"error": "用户关闭了登录窗口"})
+            cookie_queue.close()
+            cookie_queue.join_thread()
         except Exception:
             pass
 
