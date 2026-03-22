@@ -97,8 +97,13 @@ def _webview_subprocess(
         import webview
     except Exception as exc:
         import traceback
+        import sys
+        import os
         tb = traceback.format_exc()
-        error_msg = f"pywebview 加载失败: {exc}\n{tb}"
+        path_info = f"sys.path:\n" + "\n".join(sys.path)
+        env_keys = "os.environ keys:\n" + ", ".join(os.environ.keys())
+        exec_info = f"sys.executable: {sys.executable}"
+        error_msg = f"pywebview 加载失败: {exc}\n{tb}\n\nEnv Debug:\n{exec_info}\n{path_info}\n{env_keys}"
         try:
             cookie_queue.put({"error": error_msg})
         except Exception:
