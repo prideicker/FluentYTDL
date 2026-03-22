@@ -32,7 +32,6 @@ on:
           - all
           - setup
           - full
-          - portable
       publish:
         description: '是否发布 GitHub Release'
         required: true
@@ -97,7 +96,6 @@ jobs:
       # 2. 下载外部工具
       # ========================================
       - name: "🔧 下载外部工具 (yt-dlp, ffmpeg, deno, atomicparsley)"
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.targets != 'portable'
         shell: pwsh
         run: python scripts/fetch_tools.py --force
 
@@ -240,10 +238,7 @@ jobs:
         shell: pwsh
         run: python scripts/build.py --target full --version "v${{ steps.version.outputs.VERSION }}"
 
-      - name: "🔨 构建 Portable"
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.targets == 'portable'
-        shell: pwsh
-        run: python scripts/build.py --target portable --version "v${{ steps.version.outputs.VERSION }}"
+
 
       - name: "🔐 生成 SHA256 校验文件"
         shell: pwsh
@@ -264,11 +259,8 @@ jobs:
           }
 
           if ($targets -eq "all" -or $targets -eq "") {
-            Assert-Exists "FluentYTDL-v$version-*-portable.exe"
             Assert-Exists "FluentYTDL-v$version-*-full.7z"
             Assert-Exists "FluentYTDL-v$version-*-setup.exe"
-          } elseif ($targets -eq "portable") {
-            Assert-Exists "FluentYTDL-v$version-*-portable.exe"
           } elseif ($targets -eq "full") {
             Assert-Exists "FluentYTDL-v$version-*-full.7z"
           } elseif ($targets -eq "setup") {
@@ -326,7 +318,6 @@ jobs:
             |------|------|----------|
             | `*-setup.exe` | Windows 安装包 | 推荐普通用户使用 |
             | `*-full.7z` | 便携完整版 | 无需安装，解压即用 |
-            | `*-portable.exe` | 轻量便携版 | 单文件，需自备 yt-dlp/ffmpeg |
             
             ## ✅ 校验
             下载后请使用 `SHA256SUMS.txt` 校验文件完整性。
