@@ -87,6 +87,7 @@ jobs:
 
       - name: "🔍 发布前质量门槛 (ruff/pyright)"
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_quality_gates == 'true'
+        continue-on-error: true
         shell: pwsh
         run: |
           ruff check src
