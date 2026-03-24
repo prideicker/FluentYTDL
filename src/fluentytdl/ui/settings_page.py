@@ -316,12 +316,6 @@ class InlineComboBoxCard(SettingCard):
         for text in texts:
             self.comboBox.addItem(text)
 
-        # 隐藏弹出列表中每项前面的空图标占位框
-        from PySide6.QtCore import QSize
-        view = self.comboBox.view()
-        if view:
-            view.setIconSize(QSize(0, 0))
-
 
 class InlineLineEditCard(SettingCard):
     """A fluent setting card with a right-aligned LineEdit."""
