@@ -28,6 +28,7 @@ from qfluentwidgets import (
     StrongBodyLabel,
 )
 
+from ...utils.container_compat import choose_lossless_merge_container
 from .badges import QualityCellWidget
 
 
@@ -183,16 +184,6 @@ def _format_size(value: Any) -> str:
     return f"{n}B"
 
 
-def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | None) -> str | None:
-    v = str(video_ext or "").strip().lower()
-    a = str(audio_ext or "").strip().lower()
-    if not v or not a:
-        return None
-    if v == "webm" and a == "webm":
-        return "webm"
-    if v in {"mp4", "m4v"} and a in {"m4a", "aac", "mp4"}:
-        return "mp4"
-    return "mkv"
 
 
 # ── 简易模式预设列表 ────────────────────────────────────────
@@ -1144,7 +1135,7 @@ class VRFormatTableWidget(QWidget):
                     if r["format_id"] == aid:
                         a_ext = r.get("ext")
                         break
-                merge = _choose_lossless_merge_container(v_ext, a_ext)
+                merge = choose_lossless_merge_container(v_ext, a_ext)
                 extra: dict[str, Any] = {}
                 if merge:
                     extra["merge_output_format"] = merge

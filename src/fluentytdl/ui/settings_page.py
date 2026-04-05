@@ -1489,12 +1489,12 @@ class SettingsPage(QWidget):
         self.behaviorGroup = SettingCardGroup("行为策略", parent_widget)
 
         # 音频首选语言 (支持多选排序)
-        config = config_manager.get("preferred_audio_languages", ["orig", "zh-Hans", "en"])
+        config = config_manager.get("preferred_audio_languages", ["zh-Hans", "en", "orig"])
         if not isinstance(config, list):
-            config = ["orig", "zh-Hans", "en"]
+            config = ["zh-Hans", "en", "orig"]
 
         langs = [
-            ("orig", "原音/默认"),
+            ("orig", "原音 (为选择到的音质最高的音轨)"),
             ("zh-Hans", "中文 (简体)"),
             ("zh-Hant", "中文 (繁体)"),
             ("en", "英语"),
@@ -1679,18 +1679,30 @@ class SettingsPage(QWidget):
             self._on_subtitle_embed_mode_changed
         )
 
-        # 原始：外置字幕格式和保留开关已删除
+        # 字幕输出格式
+        self.subtitleFormatCard = InlineComboBoxCard(
+            FluentIcon.FONT,
+            "字幕输出格式",
+            "所有字幕（嵌入/外置/纯字幕下载）的默认转换目标格式",
+            ["SRT (推荐)", "ASS (支持样式)", "VTT (Web原生)"],
+            parent=self.subtitleGroup,
+        )
+        self.subtitleFormatCard.comboBox.currentIndexChanged.connect(
+            self._on_subtitle_format_changed
+        )
 
         # 添加卡片到组
         self.subtitleGroup.addSettingCard(self.subtitleEnabledCard)
         self.subtitleGroup.addSettingCard(self.subtitleLanguagesCard)
         self.subtitleGroup.addSettingCard(self.subtitleEmbedTypeCard)
         self.subtitleGroup.addSettingCard(self.subtitleEmbedModeCard)
+        self.subtitleGroup.addSettingCard(self.subtitleFormatCard)
 
         # 缩进依赖项
         self._indent_setting_card(self.subtitleLanguagesCard)
         self._indent_setting_card(self.subtitleEmbedTypeCard)
         self._indent_setting_card(self.subtitleEmbedModeCard)
+        self._indent_setting_card(self.subtitleFormatCard)
 
         layout.addWidget(self.subtitleGroup)
 
@@ -2007,7 +2019,12 @@ class SettingsPage(QWidget):
         self.subtitleEmbedModeCard.comboBox.setCurrentIndex(embed_mode_map.get(embed_mode, 0))
         self.subtitleEmbedModeCard.comboBox.blockSignals(False)
 
-        # 原始格式加载与开关状态加载已删除
+        # Subtitle: output format
+        output_format = str(config_manager.get("subtitle_output_format", "vtt"))
+        format_idx_map = {"srt": 0, "ass": 1, "vtt": 2}
+        self.subtitleFormatCard.comboBox.blockSignals(True)
+        self.subtitleFormatCard.comboBox.setCurrentIndex(format_idx_map.get(output_format, 0))
+        self.subtitleFormatCard.comboBox.blockSignals(False)
 
         # VR Settings
         self.vrEacAutoConvertCard.switchButton.blockSignals(True)
@@ -3726,8 +3743,8 @@ class SettingsPage(QWidget):
     def _on_subtitle_format_changed(self, index: int) -> None:
         format_map = {0: "srt", 1: "ass", 2: "vtt"}
         fmt = format_map.get(index, "srt")
-        config_manager.set("subtitle_format", fmt)
-        InfoBar.success("格式设置", f"外置字幕格式: {fmt.upper()}", duration=3000, parent=self)
+        config_manager.set("subtitle_output_format", fmt)
+        InfoBar.success("格式设置", f"字幕输出格式: {fmt.upper()}", duration=3000, parent=self)
 
     def _update_keep_separate_visibility(self) -> None:
         """根据嵌入类型更新「保留外置字幕文件」开关的可见性"""

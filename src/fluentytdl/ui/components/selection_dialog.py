@@ -43,6 +43,10 @@ from ...download.workers import InfoExtractWorker, VRInfoExtractWorker
 from ...models.mappers import VideoInfoMapper
 from ...models.video_info import VideoInfo
 from ...processing import subtitle_service
+from ...utils.container_compat import (
+    choose_lossless_merge_container,
+    ensure_subtitle_compatible_container,
+)
 from ...utils.filesystem import sanitize_filename
 from ...utils.image_loader import ImageLoader
 from ...utils.logger import logger
@@ -146,43 +150,6 @@ def _normalize_info_payload(info: Any) -> dict[str, Any]:
     return normalized
 
 
-def _ensure_subtitle_compatible_container(opts: dict[str, Any]) -> None:
-    """
-    确保容器格式兼容字幕嵌入。
-
-    只有当 embedsubtitles=True 时才需要检查：
-    - 多语言字幕 (subtitleslangs > 1) + mp4 → 升级 mkv
-      （mp4 mov_text 只能为实嵌入单轨，多轨在大多数播放器中被静默丢弃）
-    - WebM 不支持 SRT/ASS 字幕嵌入 → 改用 MKV
-    - 未指定容器（原盘模式）→ 默认 MKV
-    - MP4 + 单字幕 → 保持（FFmpeg mov_text 单轨可用）
-    - MKV/MOV 等 → 保持
-
-    此函数在 subtitle_service.apply() 之后调用，此时 subtitleslangs 已写入 opts，
-    是容器决策的最终修正点，可安全覆盖 get_selection_result 的预设値。
-    """
-    if not opts.get("embedsubtitles"):
-        return
-
-    fmt = (opts.get("merge_output_format") or "").lower()
-
-    # 多语言字幕嵌入：mp4 mov_text 多轨支持差，必须升级 mkv
-    sub_langs = opts.get("subtitleslangs") or []
-    if isinstance(sub_langs, list) and len(sub_langs) > 1 and (fmt == "mp4" or not fmt):
-        opts["merge_output_format"] = "mkv"
-        return
-
-    if fmt in _SUBTITLE_COMPATIBLE_CONTAINERS:
-        # 单字幕 mp4/mkv/mov 等，已支持，保持
-        return
-    elif fmt == "webm":
-        # WebM 不支持 SRT/ASS 字幕嵌入
-        opts["merge_output_format"] = "mkv"
-    elif not fmt:
-        # 未指定容器（原盘/默认），使用 MKV 确保兼容
-        opts["merge_output_format"] = "mkv"
-    # 其他格式保持不变，由用户自行负责
-
 
 def _get_table_selection_qss() -> str:
     from qfluentwidgets import isDarkTheme
@@ -251,7 +218,7 @@ class SimplePresetWidget(QWidget):
                 "best_mp4",
                 "🎬 最佳画质 (MP4)",
                 "推荐。自动选择最佳画质并封装为 MP4，兼容性最好。",
-                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/best",
                 {"merge_output_format": "mp4"},
             ),
             (
@@ -266,42 +233,42 @@ class SimplePresetWidget(QWidget):
                 "2160p",
                 "📺 2160p 4K (MP4)",
                 "限制最高分辨率为 4K，超高清画质。",
-                "bv*[height<=2160][ext=mp4]+ba[ext=m4a]/b[height<=2160][ext=mp4] / bv*[height<=2160]+ba/b[height<=2160]",
+                "bv*[height<=?2160][ext=mp4]+ba[ext=m4a]/b[height<=?2160][ext=mp4] / bv*[height<=?2160]+ba/best",
                 {"merge_output_format": "mp4"},
             ),
             (
                 "1440p",
                 "📺 1440p 2K (MP4)",
                 "限制最高分辨率为 2K，高清画质。",
-                "bv*[height<=1440][ext=mp4]+ba[ext=m4a]/b[height<=1440][ext=mp4] / bv*[height<=1440]+ba/b[height<=1440]",
+                "bv*[height<=?1440][ext=mp4]+ba[ext=m4a]/b[height<=?1440][ext=mp4] / bv*[height<=?1440]+ba/best",
                 {"merge_output_format": "mp4"},
             ),
             (
                 "1080p",
                 "📺 1080p 高清 (MP4)",
                 "限制最高分辨率为 1080p，平衡画质与体积。",
-                "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4] / bv*[height<=1080]+ba/b[height<=1080]",
+                "bv*[height<=?1080][ext=mp4]+ba[ext=m4a]/b[height<=?1080][ext=mp4] / bv*[height<=?1080]+ba/best",
                 {"merge_output_format": "mp4"},
             ),
             (
                 "720p",
                 "📺 720p 标清 (MP4)",
                 "限制最高分辨率为 720p，适合移动设备。",
-                "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4] / bv*[height<=720]+ba/b[height<=720]",
+                "bv*[height<=?720][ext=mp4]+ba[ext=m4a]/b[height<=?720][ext=mp4] / bv*[height<=?720]+ba/best",
                 {"merge_output_format": "mp4"},
             ),
             (
                 "480p",
                 "📺 480p (MP4)",
                 "限制最高分辨率为 480p，节省空间。",
-                "bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4] / bv*[height<=480]+ba/b[height<=480]",
+                "bv*[height<=?480][ext=mp4]+ba[ext=m4a]/b[height<=?480][ext=mp4] / bv*[height<=?480]+ba/best",
                 {"merge_output_format": "mp4"},
             ),
             (
                 "360p",
                 "📺 360p (MP4)",
                 "限制最高分辨率为 360p，最小体积。",
-                "bv*[height<=360][ext=mp4]+ba[ext=m4a]/b[height<=360][ext=mp4] / bv*[height<=360]+ba/b[height<=360]",
+                "bv*[height<=?360][ext=mp4]+ba[ext=m4a]/b[height<=?360][ext=mp4] / bv*[height<=?360]+ba/best",
                 {"merge_output_format": "mp4"},
             ),
             # === 纯音频 ===
@@ -724,26 +691,6 @@ def _clean_audio_formats(info: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | None) -> str | None:
-    """Choose a container for lossless (stream-copy) merging.
-
-    - Keep original container when it's a common compatible pair (mp4+m4a -> mp4, webm+webm -> webm)
-    - Otherwise fallback to mkv (remux only, no re-encode)
-    """
-
-    v = str(video_ext or "").strip().lower()
-    a = str(audio_ext or "").strip().lower()
-    if not v or not a:
-        return None
-
-    if v == "webm" and a == "webm":
-        return "webm"
-
-    if v in {"mp4", "m4v"} and a in {"m4a", "aac", "mp4"}:
-        return "mp4"
-
-    # Best-effort universal container for incompatible pairs
-    return "mkv"
 
 
 class PlaylistFormatDialog(MessageBoxBase):
@@ -771,13 +718,57 @@ class PlaylistFormatDialog(MessageBoxBase):
             self.selector = VideoFormatSelectorWidget(info, self)
 
         self.viewLayout.addWidget(self.selector)
+        
+        # 新增：单视频独立字幕配置区域
+        self._subtitle_override_widget = None
+        if self._mode not in ("subtitle", "cover"):
+            self._setup_subtitle_override_section(info)
 
         # Override buttons
         self.yesButton.setText("应用")
         self.cancelButton.setText("取消")
 
-        # Connect selector signal to valid state (optional, defaults are usually valid)
-        # self.selector.selectionChanged.connect(self._validate_selection)
+    def _setup_subtitle_override_section(self, info: dict[str, Any]):
+        from PySide6.QtWidgets import QHBoxLayout
+        from qfluentwidgets import CheckBox, PushButton
+
+        
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 5, 0, 0)
+        
+        self.sub_override_check = CheckBox("为此视频独立配置字幕", self)
+        
+        self.sub_override_btn = PushButton("选择字幕...", self)
+        self.sub_override_btn.setEnabled(False)
+        self.sub_override_result = None
+        
+        row.addWidget(self.sub_override_check)
+        row.addSpacing(10)
+        row.addWidget(self.sub_override_btn)
+        row.addStretch(1)
+        self.viewLayout.addLayout(row)
+        
+        self.sub_override_check.stateChanged.connect(
+            lambda state: self.sub_override_btn.setEnabled(bool(state))
+        )
+        self.sub_override_btn.clicked.connect(lambda: self._open_subtitle_picker(info))
+
+    def _open_subtitle_picker(self, info):
+        from ..dialogs.subtitle_picker_dialog import SubtitlePickerDialog
+        container = None
+        if hasattr(self.selector, "get_selection_result"):
+            result = self.selector.get_selection_result()
+            if isinstance(result, dict):
+                container = result.get("merge_output_format")
+                
+        dialog = SubtitlePickerDialog(info, container, initial_result=self.sub_override_result, parent=self)
+        if dialog.exec():
+            self.sub_override_result = dialog.get_result()
+            n = len(self.sub_override_result.selected_tracks)
+            if n > 0:
+                self.sub_override_btn.setText(f"已选 {n} 种字幕 ✓")
+            else:
+                self.sub_override_btn.setText("选择字幕...")
 
     def get_selection(self) -> dict:
         if self._mode == "subtitle":
@@ -801,6 +792,27 @@ class PlaylistFormatDialog(MessageBoxBase):
             return f"已选择 {ext.upper()} 封面"
         else:
             return self.selector.get_summary_text()  # type: ignore[attr-defined]
+
+    def get_subtitle_override(self) -> dict[str, Any] | None:
+        if not hasattr(self, 'sub_override_check') or not self.sub_override_check.isChecked():
+            return None
+            
+        if not self.sub_override_result:
+            return {
+                "override_languages": [],
+                "has_manual": True,
+                "has_auto": False,
+                "embed_subtitles": False,
+                "output_format": "srt"
+            }
+            
+        return {
+            "override_languages": self.sub_override_result.override_languages,
+            "has_manual": self.sub_override_result.has_manual,
+            "has_auto": self.sub_override_result.has_auto,
+            "embed_subtitles": self.sub_override_result.embed_subtitles,
+            "output_format": self.sub_override_result.output_format
+        }
 
 
 class SelectionDialog(MessageBoxBase):
@@ -2809,7 +2821,7 @@ class SelectionDialog(MessageBoxBase):
                     )
 
                 # 确保容器格式兼容字幕嵌入
-                _ensure_subtitle_compatible_container(ydl_opts)
+                ensure_subtitle_compatible_container(ydl_opts)
 
                 print(f"[DEBUG] get_selected_tasks: subtitle_opts = {subtitle_opts}")
                 print(
@@ -3283,7 +3295,7 @@ class SelectionDialog(MessageBoxBase):
                 # Container policy for assembled streams:
                 # - If video/audio containers are compatible, keep the original video container.
                 # - Otherwise fallback to mkv for compatibility.
-                merge_fmt = _choose_lossless_merge_container(video_ext, audio_ext)
+                merge_fmt = choose_lossless_merge_container(video_ext, audio_ext)
                 if merge_fmt:
                     opts["merge_output_format"] = merge_fmt
 
@@ -3510,7 +3522,7 @@ class SelectionDialog(MessageBoxBase):
                     )
                     v_ext = _find_single_ext(self._single_selected_video_id)
                     a_ext = _find_single_ext(self._single_selected_audio_id)
-                    merge_fmt = _choose_lossless_merge_container(v_ext, a_ext)
+                    merge_fmt = choose_lossless_merge_container(v_ext, a_ext)
                     if merge_fmt:
                         opts["merge_output_format"] = merge_fmt
                 elif self._single_selected_video_id:
@@ -3544,7 +3556,7 @@ class SelectionDialog(MessageBoxBase):
                     else:
                         opts["embedsubtitles"] = False
 
-                _ensure_subtitle_compatible_container(opts)
+                ensure_subtitle_compatible_container(opts)
 
             return opts
 
@@ -3583,6 +3595,6 @@ class SelectionDialog(MessageBoxBase):
                 else:
                     opts["embedsubtitles"] = False
 
-            _ensure_subtitle_compatible_container(opts)
+            ensure_subtitle_compatible_container(opts)
 
         return opts

@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .container_compat import choose_lossless_merge_container
+
 # ── BCP-47 别名映射 ───────────────────────────────────────────
 # key: 用户偏好写法（小写）  value: YouTube/yt-dlp 实际可能使用的等价 tag 集合
 _BCP47_ALIASES: dict[str, set[str]] = {
@@ -91,6 +93,8 @@ class ScoringContext:
     subtitle_lang_count: int = 0
     """嵌入字幕语言数（> 1 时 mp4 mov_text 多轨支持差，建议升级为 mkv）"""
 
+    audio_track_count: int = 1
+    """音轨数量（> 1 时因 mp4 对多音轨支持不佳，强制或建议升级为 mkv）"""
 
 # ── 音频打分 ──────────────────────────────────────────────────
 
@@ -183,17 +187,6 @@ def score_video_format(f: dict[str, Any], is_simple_mode: bool = True) -> int:
 # ── 容器决策 ──────────────────────────────────────────────────
 
 
-def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | None) -> str | None:
-    """无损合并容器推断（与 format_selector.py 中同名函数保持一致）"""
-    v = str(video_ext or "").strip().lower()
-    a = str(audio_ext or "").strip().lower()
-    if not v or not a:
-        return None
-    if v == "webm" and a == "webm":
-        return "webm"
-    if v in {"mp4", "m4v"} and a in {"m4a", "aac", "mp4"}:
-        return "mp4"
-    return "mkv"
 
 
 def decide_merge_container(
@@ -215,11 +208,15 @@ def decide_merge_container(
     _ensure_subtitle_compatible_container 作为后置修正兜底，
     可以再次覆盖本函数的决策。
     """
+    # 多音轨嵌入 → 强制 mkv
+    if getattr(ctx, "audio_track_count", 1) > 1:
+        return "mkv"
+
     # 多字幕嵌入 → 强制 mkv
     if ctx.embed_subtitles and ctx.subtitle_lang_count > 1:
         return "mkv"
 
-    naive = _choose_lossless_merge_container(vid_ext, aud_ext)
+    naive = choose_lossless_merge_container(vid_ext, aud_ext)
 
     # 单字幕 + WebM → mkv
     if ctx.embed_subtitles and naive == "webm":

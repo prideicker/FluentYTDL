@@ -37,6 +37,12 @@ class VideoInfoMapper:
 
         subtitle_tracks = cls.extract_subtitle_tracks(raw)
         subtitle_languages = cls.get_subtitle_languages(subtitle_tracks)
+        video_formats = cls.clean_video_formats(raw)
+        
+        best_height = 0
+        for f in video_formats:
+            if f.height > best_height:
+                best_height = f.height
 
         dto = VideoInfo(
             url=source_url,
@@ -53,8 +59,9 @@ class VideoInfoMapper:
             thumbnail_url=cls.infer_thumbnail(raw),
             thumbnails=cls._extract_thumbnails(raw),
             formats_raw=formats_raw,
-            video_formats=cls.clean_video_formats(raw),
+            video_formats=video_formats,
             audio_formats=cls.clean_audio_formats(raw),
+            max_video_height=best_height,
             subtitle_tracks=subtitle_tracks,
             subtitle_languages=subtitle_languages,
             vr_mode=bool(raw.get("__fluentytdl_vr_mode") or False),

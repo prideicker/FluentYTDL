@@ -223,6 +223,14 @@ class YtMediaDTO:
         return [f for f in self.formats if f.has_video]
 
     @property
+    def max_video_height(self) -> int:
+        best = 0
+        for f in self.video_formats:
+            if f.height > best:
+                best = f.height
+        return best
+
+    @property
     def audio_formats(self) -> list[YtFormatDTO]:
         return [f for f in self.formats if f.has_audio]
 

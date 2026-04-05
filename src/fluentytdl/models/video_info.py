@@ -76,6 +76,7 @@ class VideoInfo:
     formats_raw: list[dict[str, Any]] = field(default_factory=list)
     video_formats: list[VideoFormatInfo] = field(default_factory=list)
     audio_formats: list[AudioFormatInfo] = field(default_factory=list)
+    max_video_height: int = 0
 
     # Subtitle
     subtitle_tracks: list[SubtitleTrackInfo] = field(default_factory=list)

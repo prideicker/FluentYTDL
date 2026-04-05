@@ -974,20 +974,20 @@ class AuthService:
     def _load_config(self) -> None:
         """加载配置"""
         if not self._config_path.exists():
-            # 默认使用 Edge 浏览器
-            self._current_source = AuthSourceType.EDGE
-            self._auto_refresh = True
-            logger.info("首次启动，默认使用 Edge 浏览器验证")
+            # 默认使用 DLE 登录获取
+            self._current_source = AuthSourceType.DLE
+            self._auto_refresh = False
+            logger.info("首次启动，默认使用 DLE 登录获取验证")
             self._save_config()
             return
 
         try:
             with open(self._config_path, encoding="utf-8") as f:
                 data = json.load(f)
-            source_value = data.get("source", "edge")  # 默认 edge
-            # 如果是 none，自动切换为 edge
+            source_value = data.get("source", "dle")  # 默认 dle
+            # 如果是 none，自动切换为 dle
             if source_value == "none":
-                source_value = "edge"
+                source_value = "dle"
             self._current_source = AuthSourceType(source_value)
             self._current_file_path = data.get("file_path")
             self._auto_refresh = data.get("auto_refresh", True)
@@ -998,8 +998,8 @@ class AuthService:
             self._restore_last_status()
         except Exception as e:
             logger.error(f"加载验证配置失败: {e}")
-            # 加载失败时使用默认的 Edge
-            self._current_source = AuthSourceType.EDGE
+            # 加载失败时使用默认的 DLE
+            self._current_source = AuthSourceType.DLE
 
     def _get_dle_cache_file(self, platform: str = "youtube") -> Path:
         """获取当前 DLE 账号对应的缓存文件路径"""

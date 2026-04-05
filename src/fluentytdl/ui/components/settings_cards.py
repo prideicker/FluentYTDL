@@ -670,7 +670,7 @@ class EmbedTypeComboCard(SettingCard):
     # 嵌入类型映射
     EMBED_TYPES = [
         ("soft", "软嵌入（推荐） - 封装到容器，可开关，多语言"),
-        ("external", "外置文件 - 独立.srt，易编辑，兼容性最佳"),
+        ("external", "外置文件 - 独立字幕文件（格式见外部菜单），兼容性佳"),
     ]
 
     def __init__(

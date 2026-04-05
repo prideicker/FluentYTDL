@@ -351,10 +351,12 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
 
     fmt = ydl_opts.get("format")
     if isinstance(fmt, str) and fmt:
-        # Inject [language=xx] filters into format string for multi-language audio.
-        # -S lang:xx alone cannot override language_preference=10 on original tracks.
-        format_sort_val = ydl_opts.get("format_sort")
-        fmt = _inject_language_into_format(fmt, format_sort_val)
+        # 当明确使用多音轨直接指定 ID（如 v+a1+a2）时，绝对不能注入 [language=xx]/ 分支语法
+        if not ydl_opts.get("audio_multistreams"):
+            # Inject [language=xx] filters into format string for multi-language audio.
+            # -S lang:xx alone cannot override language_preference=10 on original tracks.
+            format_sort_val = ydl_opts.get("format_sort")
+            fmt = _inject_language_into_format(fmt, format_sort_val)
         args += ["-f", fmt]
 
     # 格式排序（音轨语言偏好等）
@@ -371,6 +373,9 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     merge_fmt = ydl_opts.get("merge_output_format")
     if isinstance(merge_fmt, str) and merge_fmt:
         args += ["--merge-output-format", merge_fmt]
+
+    if ydl_opts.get("audio_multistreams"):
+        args += ["--audio-multistreams"]
 
     # ========== top-level audio extract params (simple/playlist mode) ==========
     # extract_audio / audio_format / audio_quality as top-level keys
@@ -478,9 +483,6 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
     # 嵌入字幕
     if ydl_opts.get("embedsubtitles"):
         args += ["--embed-subs"]
-        # 强制转换为 srt 以解决各大播放器对 mkv 中的 webvtt 轨兼容性差的问题（不转换会导致用户以为并没嵌进去）
-        if not ydl_opts.get("convertsubtitles"):
-            args += ["--convert-subs", "srt"]
 
     # 字幕格式转换 (显式指定的情况下)
     convert_subs = ydl_opts.get("convertsubtitles")

@@ -39,6 +39,7 @@ from qframelesswindow import FramelessWindow
 from ...download.extract_manager import AsyncExtractManager
 from ...download.workers import EntryDetailWorker, InfoExtractWorker, VRInfoExtractWorker
 from ...models.mappers import VideoInfoMapper
+from ...models.subtitle_config import PlaylistSubtitleOverride
 from ...models.video_info import VideoInfo
 from ...models.video_task import VideoTask
 from ...processing import subtitle_service
@@ -47,6 +48,8 @@ from ...utils.image_loader import get_image_loader
 from ...utils.paths import resource_path
 from ...youtube.youtube_service import YoutubeServiceOptions
 from ..delegates.playlist_delegate import PlaylistItemDelegate
+from ..dialogs.playlist_subtitle_dialog import PlaylistSubtitleConfigDialog
+from ..dialogs.subtitle_picker_dialog import SubtitlePickerDialog, SubtitlePickerResult
 from ..models.playlist_model import PlaylistListModel
 from ..playlist_scheduler import PlaylistScheduler
 from .cover_selector import CoverSelectorWidget
@@ -56,7 +59,6 @@ from .selection_dialog import (
     PlaylistPreviewWidget,
     _clean_audio_formats,
     _clean_video_formats,
-    _ensure_subtitle_compatible_container,
     _format_duration,
     _format_size,
     _format_upload_date,
@@ -145,6 +147,30 @@ class WindowState(Enum):
     ERROR_GENERIC = "error_generic"
 
 
+def _extract_subtitles_from_obj(info: Any) -> dict[str, Any]:
+    """从 DTO 对象属性中提取手动字幕数据（回退路径防御）"""
+    subs = getattr(info, "subtitles", None)
+    if not isinstance(subs, dict) or not subs:
+        return {}
+    result: dict[str, Any] = {}
+    for lang, tracks in subs.items():
+        if isinstance(tracks, list):
+            result[str(lang)] = [
+                {"url": getattr(t, "url", ""), "ext": getattr(t, "ext", "vtt"),
+                 "name": getattr(t, "name", "")}
+                if not isinstance(t, dict) else t
+                for t in tracks
+            ]
+    return result
+
+def _extract_auto_captions_from_obj(info: Any) -> dict[str, Any]:
+    """从 DTO 对象属性中提取自动字幕数据（回退路径防御）"""
+    auto = getattr(info, "automatic_captions", None)
+    if isinstance(auto, dict) and auto:
+        return dict(auto)
+    return {}
+
+
 def _normalize_info_payload(info: Any) -> dict[str, Any]:
     """Normalize extraction payload to a dict for legacy UI code paths."""
     if isinstance(info, dict):
@@ -222,7 +248,8 @@ def _normalize_info_payload(info: Any) -> dict[str, Any]:
         "webpage_url": str(getattr(info, "webpage_url", "") or ""),
         "formats": formats,
         "entries": entries,
-        "subtitles": {},
+        "subtitles": _extract_subtitles_from_obj(info),
+        "automatic_captions": _extract_auto_captions_from_obj(info),
     }
     if is_playlist:
         normalized["_type"] = "playlist"
@@ -276,7 +303,7 @@ class DownloadConfigWindow(FramelessWindow):
 
         # === UI Init ===
         self.setWindowTitle("新建任务")
-        self.resize(760, 520)
+        self.resize(760, 650)
 
         # Center on parent if available
         if parent:
@@ -324,6 +351,8 @@ class DownloadConfigWindow(FramelessWindow):
 
         self._subtitle_embed_choice: bool | None = None
         self._subtitle_choice_made = False
+        self._subtitle_pick_result: SubtitlePickerResult | None = None
+        self._playlist_sub_override: PlaylistSubtitleOverride | None = None
 
         # P4: 使用全局单例，所有窗口共享同一个 NetworkManager
         self.image_loader = get_image_loader()
@@ -621,6 +650,9 @@ class DownloadConfigWindow(FramelessWindow):
             | None
         ) = None
 
+        self._playlist_sub_override: PlaylistSubtitleOverride | None = None
+        self._playlist_format_override = None
+
         # 绑定全局组件更新信号
         from ...core.dependency_manager import dependency_manager
 
@@ -702,6 +734,39 @@ class DownloadConfigWindow(FramelessWindow):
         elif ("/" in outtmpl or "\\" in outtmpl) and "%(title)s.%(ext)s" in outtmpl:
             opts["outtmpl"] = "%(title)s.%(ext)s"
 
+    def _on_subtitle_pick_clicked(self):
+        """打开字幕精选对话框"""
+        if not self.video_info:
+            return
+        
+        # 获取当前容器格式（从格式选择器读取用户手动设置的容器覆盖）
+        container = None
+        if isinstance(self.selector_widget, (VideoFormatSelectorWidget, VRFormatSelectorWidget)):
+            container = getattr(self.selector_widget, 'get_container_override', lambda: None)()
+        
+        dialog = SubtitlePickerDialog(self.video_info, container, initial_result=getattr(self, '_subtitle_pick_result', None), parent=self)
+        
+        if dialog.exec():
+            result = dialog.get_result()
+            self._subtitle_pick_result = result
+            # 更新按钮文本以反映选择状态
+            n = len(result.selected_tracks)
+            if n > 0:
+                self.subtitle_pick_btn.setText(f"已选 {n} 种字幕 ✓")
+            else:
+                self.subtitle_pick_btn.setText("选择字幕…")
+
+    def _on_playlist_subtitle_config_clicked(self):
+        """打开播放列表字幕设置对话框"""
+        dialog = PlaylistSubtitleConfigDialog(self._playlist_sub_override, self)
+        if dialog.exec():
+            self._playlist_sub_override = dialog.get_override()
+            langs = self._playlist_sub_override.target_languages
+            if not langs:
+                self.playlist_subtitle_pick_btn.setText("未选择语言")
+            else:
+                self.playlist_subtitle_pick_btn.setText(f"已选 {len(langs)} 种语言 ✓")
+
     def _build_single_option_switches(self) -> QWidget:
         from ...core.config_manager import config_manager
 
@@ -715,6 +780,17 @@ class DownloadConfigWindow(FramelessWindow):
 
         sub_enabled = config_manager.get_subtitle_config().enabled
         self.subtitle_check = self._add_labeled_toggle(layout, container, "下载字幕", sub_enabled)
+
+        # 新增：字幕精选按钮（仅在字幕开关打开时可用）
+        self.subtitle_pick_btn = PushButton("选择字幕…", container)
+        self.subtitle_pick_btn.setEnabled(sub_enabled)
+        self.subtitle_pick_btn.clicked.connect(self._on_subtitle_pick_clicked)
+        layout.addWidget(self.subtitle_pick_btn)
+
+        # 联动：开关变化时控制按钮可用性
+        self.subtitle_check.checkedChanged.connect(
+            lambda checked: self.subtitle_pick_btn.setEnabled(checked)
+        )
 
         thumb_enabled = bool(config_manager.get("embed_thumbnail", True))
         self.cover_check = self._add_labeled_toggle(layout, container, "下载封面", thumb_enabled)
@@ -741,6 +817,15 @@ class DownloadConfigWindow(FramelessWindow):
         sub_enabled = config_manager.get_subtitle_config().enabled
         self.playlist_subtitle_check = self._add_labeled_toggle(
             layout, container, "下载字幕", sub_enabled
+        )
+
+        self.playlist_subtitle_pick_btn = PushButton("字幕设置…", container)
+        self.playlist_subtitle_pick_btn.setEnabled(sub_enabled)
+        self.playlist_subtitle_pick_btn.clicked.connect(self._on_playlist_subtitle_config_clicked)
+        layout.addWidget(self.playlist_subtitle_pick_btn)
+
+        self.playlist_subtitle_check.checkedChanged.connect(
+            lambda checked: self.playlist_subtitle_pick_btn.setEnabled(checked)
         )
 
         thumb_enabled = bool(config_manager.get("embed_thumbnail", True))
@@ -783,7 +868,7 @@ class DownloadConfigWindow(FramelessWindow):
 
     def _apply_dialog_size_for_mode(self) -> None:
         if self._is_playlist:
-            size = (980, 620)
+            size = (980, 760)
         elif self._vr_mode:
             size = (880, 620)
         else:
@@ -1062,7 +1147,7 @@ class DownloadConfigWindow(FramelessWindow):
 
         from ...utils.error_parser import ErrorCategory, classify_error, parse_ytdlp_error
 
-        friendly_title, friendly_content = parse_ytdlp_error(raw_error)
+        friendly_title, friendly_content, parsed_suggests_update = parse_ytdlp_error(raw_error)
         category = classify_error(raw_error) if raw_error else ErrorCategory.OTHER
 
         title = friendly_title if raw_error else str(err_data.get("title") or "解析失败")
@@ -1080,7 +1165,7 @@ class DownloadConfigWindow(FramelessWindow):
             pass
         self.viewLayout.addWidget(self._error_label)
 
-        suggests_component_update = bool(err_data.get("suggests_component_update", False))
+        suggests_component_update = parsed_suggests_update or bool(err_data.get("suggests_component_update", False))
 
         # === 根据分类决定显示哪个面板 ===
         if category == ErrorCategory.COOKIE:
@@ -1552,6 +1637,12 @@ class DownloadConfigWindow(FramelessWindow):
 
         info_v.addWidget(title_lbl)
         info_v.addWidget(meta_lbl)
+
+        if self.video_info_dto and 0 < self.video_info_dto.max_video_height <= 720:
+            warn_lbl = CaptionLabel(f"⚠️ 警告: 该视频受限，最高仅支持 {self.video_info_dto.max_video_height}p 提取", top_card)
+            warn_lbl.setStyleSheet("QLabel { color: #b8860b; font-weight: bold; background: rgba(255, 193, 7, 0.15); padding: 4px 8px; border-radius: 4px; }")
+            info_v.addWidget(warn_lbl)
+
         info_v.addStretch(1)
 
         top_h.addWidget(self.thumb_label)
@@ -1658,19 +1749,40 @@ class DownloadConfigWindow(FramelessWindow):
             )
         self.preset_combo.currentIndexChanged.connect(self._on_playlist_preset_changed)
 
+        self.globalFormatBtn = PushButton("格式设置…", self.contentWidget)
+        self.globalFormatBtn.clicked.connect(self._on_global_format_clicked)
+
         # Add widgets to toolbar in a single row
         toolbar.addWidget(self.selectAllBtn)
         toolbar.addWidget(self.unselectAllBtn)
         toolbar.addWidget(self.invertSelectBtn)
 
         toolbar.addSpacing(16)
-        toolbar.addWidget(self.type_combo)
-        toolbar.addWidget(self.preset_combo)
-        toolbar.addWidget(self.applyPresetBtn)
+        
+        if self._vr_mode:
+            toolbar.addWidget(self.type_combo)
+            toolbar.addWidget(self.preset_combo)
+            toolbar.addWidget(self.applyPresetBtn)
+            self.globalFormatBtn.hide()
+        else:
+            toolbar.addWidget(self.globalFormatBtn)
+            self.type_combo.hide()
+            self.preset_combo.hide()
+            self.applyPresetBtn.hide()
+            
+            # Initial default global format for non-VR playlists
+            if self._is_playlist and self._mode not in ("subtitle", "cover"):
+                from ...models.playlist_format import PlaylistGlobalFormatOverride
+                self._playlist_format_override = PlaylistGlobalFormatOverride(
+                    download_type="video_audio",
+                    preset_id="1080p",
+                    preset_intent={"type": "video_audio", "max_height": 1080, "prefer_ext": "mp4"}
+                )
 
         if self._mode in ("subtitle", "cover"):
             self.type_combo.hide()
             self.preset_combo.hide()
+            self.globalFormatBtn.hide()
             self.applyPresetBtn.hide()
 
         toolbar.addStretch(1)
@@ -1932,11 +2044,21 @@ class DownloadConfigWindow(FramelessWindow):
         if aw is None:
             return
 
+        # Intercept setText to append subtitle indicator
+        original_set_text = aw.qualityButton.setText
+        def _set_text_with_indicator(text: str) -> None:
+            if self._mode not in ("subtitle", "cover") and data.get("subtitle_override"):
+                text = str(text) + " [Cc]"
+            original_set_text(text)
+            
+        aw.qualityButton.setText = _set_text_with_indicator
+
         # Batch all property writes so only one dataChanged is emitted at the end
         aw.begin_batch()
         try:
             self._auto_apply_row_preset_inner(row, data, aw)
         finally:
+            aw.qualityButton.setText = original_set_text
             aw.end_batch()
 
     def _auto_apply_row_preset_inner(
@@ -1995,6 +2117,33 @@ class DownloadConfigWindow(FramelessWindow):
             aw.set_loading(False)
             aw.qualityButton.setText(str(data.get("custom_summary") or "已自定义"))
             aw.infoLabel.setText("使用自定义配置")
+            return
+
+        override = getattr(self, "_playlist_format_override", None)
+        if override is not None:
+            aw.set_loading(False)
+            pid = getattr(override, "preset_id", None)
+            preset_map = {
+                "best_mp4": "最佳画质",
+                "best_raw": "最佳画质(原盘)",
+                "2160p": "2160p",
+                "1440p": "1440p",
+                "1080p": "1080p",
+                "720p": "720p",
+                "480p": "480p",
+                "360p": "360p",
+                "best_video": "最佳质量(无声)",
+                "1080p_video": "1080p(无声)",
+                "audio_best": "最佳音质",
+                "audio_high": "高品质音频",
+                "audio_std": "标准音频"
+            }
+            aw.qualityButton.setText(preset_map.get(pid, "全局格式"))
+            
+            c_info = override.container_override.upper() if getattr(override, "container_override", None) else "自动容器"
+            if getattr(override, "download_type", None) == "audio_only":
+                c_info = override.audio_format_override.upper() if override.audio_format_override else "自动格式"
+            aw.infoLabel.setText(f"全局: {c_info}")
             return
 
         audio_fmts: list[dict[str, Any]] = data.get("audio_formats") or []
@@ -2207,16 +2356,36 @@ class DownloadConfigWindow(FramelessWindow):
         aw.infoLabel.setText(v_line + "\n" + a_line)
 
     def _on_playlist_preset_changed(self, _index: int) -> None:
+        self._playlist_format_override = None
         for r in range(len(self._playlist_rows)):
             self._auto_apply_row_preset(r)
         self._update_download_btn_state()
 
     def _on_playlist_type_changed(self, index: int) -> None:
+        self._playlist_format_override = None
         if self.preset_combo is not None:
             self.preset_combo.setEnabled(index in (0, 1))
         for r in range(len(self._playlist_rows)):
             self._auto_apply_row_preset(r)
         self._update_download_btn_state()
+        
+    def _on_global_format_clicked(self):
+        from ..dialogs.playlist_format_dialog import PlaylistFormatConfigDialog
+        dialog = PlaylistFormatConfigDialog(current_override=self._playlist_format_override, parent=self)
+        if dialog.exec():
+            self._playlist_format_override = dialog.get_override()
+            
+            t = self._playlist_format_override.download_type
+            idx = {"video_audio": 0, "video_only": 1, "audio_only": 2}.get(t, 0)
+            self.type_combo.blockSignals(True)
+            self.type_combo.setCurrentIndex(idx)
+            if self.preset_combo is not None:
+                self.preset_combo.setEnabled(idx in (0, 1))
+            self.type_combo.blockSignals(False)
+            
+            for r in range(len(self._playlist_rows)):
+                self._auto_apply_row_preset(r)
+            self._update_download_btn_state()
 
     def _set_row_parsing(self, row: int, is_parsing: bool) -> None:
         if self._playlist_model is None:
@@ -2704,6 +2873,8 @@ class DownloadConfigWindow(FramelessWindow):
             if sel and sel.get("format"):
                 data["custom_selection_data"] = sel
                 data["custom_summary"] = dialog.get_summary()
+                if hasattr(dialog, 'get_subtitle_override'):
+                    data["subtitle_override"] = dialog.get_subtitle_override()
                 data["manual_override"] = True
                 data["override_format_id"] = None
                 data["override_text"] = None
@@ -2711,6 +2882,99 @@ class DownloadConfigWindow(FramelessWindow):
                 data["audio_override_text"] = None
                 data["audio_manual_override"] = False
                 self._auto_apply_row_preset(row)
+
+    
+    def _handle_container_conflict(self, ydl_opts: dict) -> bool:
+        from qfluentwidgets import BodyLabel, MessageBoxBase, PushButton, SubtitleLabel
+
+        from ...utils.container_compat import (
+            check_audio_multistream_container_compat,
+            check_subtitle_container_compat,
+        )
+        
+        container = ydl_opts.get("merge_output_format")
+        if not container:
+            return True
+            
+        # 1. Check audio track conflict
+        audio_count = ydl_opts.get("__audio_track_count", 1)
+        audio_conflict = check_audio_multistream_container_compat(container, audio_count)
+        
+        if audio_conflict:
+            class AudioConflictDialog(MessageBoxBase):
+                def __init__(self, parent=None):
+                    super().__init__(parent)
+                    self.titleLabel = SubtitleLabel("多音轨容器兼容性警告", self)
+                    self.viewLayout.addWidget(self.titleLabel)
+                    self.msgLabel = BodyLabel(audio_conflict + "\n\n请选择解决方案：", self)
+                    self.msgLabel.setWordWrap(True)
+                    self.viewLayout.addWidget(self.msgLabel)
+                    self.widget.setMinimumWidth(400)
+                    self.yesButton.setText("切换为 MKV")
+                    self.cancelButton.setText("保持原格式 (不推荐)")
+                    self.result_action = "keep"
+
+                def accept(self):
+                    self.result_action = "mkv"
+                    super().accept()
+                    
+                def reject(self):
+                    self.result_action = "keep"
+                    super().reject()
+
+            dialog = AudioConflictDialog(self)
+            dialog.exec()
+            if dialog.result_action == "mkv":
+                ydl_opts["merge_output_format"] = "mkv"
+                container = "mkv" # update for following checks
+            # if keep, we do nothing and proceed
+
+        # 2. Check subtitle conflict
+        is_embed = ydl_opts.get("embedsubtitles", False)
+        lang_count = len(ydl_opts.get("subtitleslangs", [])) if is_embed else 0
+        
+        conflict_msg = check_subtitle_container_compat(container, is_embed, lang_count)
+        if not conflict_msg:
+            return True
+            
+        from qfluentwidgets import MessageBoxBase
+
+        class ConflictDialog(MessageBoxBase):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.titleLabel = SubtitleLabel("容器格式冲突", self)
+                self.viewLayout.addWidget(self.titleLabel)
+                self.msgLabel = BodyLabel(conflict_msg + "\n\n请选择解决方案：", self)
+                self.msgLabel.setWordWrap(True)
+                self.viewLayout.addWidget(self.msgLabel)
+                self.widget.setMinimumWidth(400)
+                self.yesButton.setText("切换为 MKV")
+                self.cancelButton.setText("字幕改为外挂")
+                self.abortBtn = PushButton("取消")
+                self.buttonLayout.insertWidget(0, self.abortBtn)
+                self.abortBtn.clicked.connect(self.reject)
+                self.cancelButton.clicked.disconnect()
+                self.cancelButton.clicked.connect(self._accept_external)
+                self.result_action = "abort"
+                
+            def accept(self):
+                self.result_action = "mkv"
+                super().accept()
+                
+            def _accept_external(self):
+                self.result_action = "external"
+                super().accept()
+
+        dialog = ConflictDialog(self)
+        if dialog.exec():
+            if dialog.result_action == "mkv":
+                ydl_opts["merge_output_format"] = "mkv"
+                return True
+            elif dialog.result_action == "external":
+                ydl_opts["embedsubtitles"] = False
+                return True
+                
+        return False
 
     def get_selected_tasks(self) -> list[tuple[str, str, dict[str, Any], str | None]]:
         tasks = []
@@ -2733,8 +2997,12 @@ class DownloadConfigWindow(FramelessWindow):
 
             # Mode specific handling
             if self._mode == "subtitle":
+                title_prefix = "[字幕]"
                 if isinstance(self.selector_widget, SubtitleSelectorWidget):
                     ydl_opts.update(self.selector_widget.get_opts())
+                    langs, _, _ = self.selector_widget.get_selected_language_codes()
+                    if langs:
+                        title_prefix = f"[字幕 ({', '.join(langs)})]"
 
                 ydl_opts["skip_download"] = True
                 ydl_opts["writethumbnail"] = False
@@ -2745,21 +3013,15 @@ class DownloadConfigWindow(FramelessWindow):
                 ydl_opts["sponsorblock_mark"] = None
                 ydl_opts["postprocessors"] = []
 
-                tasks.append((f"[字幕] {title}", url, ydl_opts, thumb))
+                tasks.append((f"{title_prefix} {title}", url, ydl_opts, thumb))
                 return tasks
 
             elif self._mode == "cover":
                 if isinstance(self.selector_widget, CoverSelectorWidget):
                     url = self.selector_widget.get_selected_url() or url
                     _ = self.selector_widget.get_selected_ext()
-                    ydl_opts["skip_download"] = False
-                    ydl_opts["writethumbnail"] = False
-                    ydl_opts["embedthumbnail"] = False
-                    ydl_opts["addmetadata"] = False
-                    ydl_opts["embedsubtitles"] = False
-                    ydl_opts["sponsorblock_remove"] = None
-                    ydl_opts["sponsorblock_mark"] = None
-                    ydl_opts["postprocessors"] = []
+                    ydl_opts.clear()  # 清理掉所有上一层合并的冗余配置
+                    ydl_opts["__fluentytdl_is_cover_direct"] = True
                     safe_title = sanitize_filename(title)
                     ydl_opts["outtmpl"] = f"{safe_title}.%(ext)s"
                 else:
@@ -2839,41 +3101,63 @@ class DownloadConfigWindow(FramelessWindow):
 
             # 字幕集成
             if self.video_info:
-                if self._subtitle_choice_made:
-                    embed_override = self._subtitle_embed_choice
+                pick = getattr(self, '_subtitle_pick_result', None)
+                if pick and pick.selected_tracks:
+                    ydl_opts["writesubtitles"] = pick.has_manual
+                    ydl_opts["writeautomaticsub"] = pick.has_auto
+                    ydl_opts["subtitleslangs"] = pick.override_languages
+                    ydl_opts["embedsubtitles"] = pick.embed_subtitles
+                    if pick.output_format:
+                        ydl_opts["convertsubtitles"] = pick.output_format
                 else:
-                    try:
-                        embed_override = self._check_subtitle_and_ask(config=sub_config_override)
-                    except ValueError as e:
-                        print(f"[DEBUG] get_selected_tasks: User cancelled - {e}")
-                        return []
-                    except Exception as e:
-                        print(
-                            f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}"
-                        )
-                        embed_override = None
-
-                subtitle_opts = subtitle_service.apply(
-                    video_id=(dto.video_id if dto is not None else self.video_info.get("id", "")),
-                    video_info=self.video_info,
-                    user_config=sub_config_override,
-                )
-                ydl_opts.update(subtitle_opts)
-
-                if embed_override is not None:
-                    if sub_config_override:
-                        embed_type = sub_config_override.embed_type
+                    if self._subtitle_choice_made:
+                        embed_override = self._subtitle_embed_choice
                     else:
-                        from ...core.config_manager import config_manager as cfg
+                        try:
+                            embed_override = self._check_subtitle_and_ask(config=sub_config_override)
+                        except ValueError as e:
+                            print(f"[DEBUG] get_selected_tasks: User cancelled - {e}")
+                            return []
+                        except Exception as e:
+                            print(
+                                f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}"
+                            )
+                            embed_override = None
 
-                        embed_type = cfg.get_subtitle_config().embed_type
+                    subtitle_opts = subtitle_service.apply(
+                        video_id=(dto.video_id if dto is not None else self.video_info.get("id", "")),
+                        video_info=self.video_info,
+                        user_config=sub_config_override,
+                    )
+                    ydl_opts.update(subtitle_opts)
 
-                    if embed_type == "soft":
-                        ydl_opts["embedsubtitles"] = embed_override
-                    elif embed_type == "external":
-                        ydl_opts["embedsubtitles"] = False
+                    if embed_override is not None:
+                        if sub_config_override:
+                            embed_type = sub_config_override.embed_type
+                        else:
+                            from ...core.config_manager import config_manager as cfg
 
-                _ensure_subtitle_compatible_container(ydl_opts)
+                            embed_type = cfg.get_subtitle_config().embed_type
+
+                        if embed_type == "soft":
+                            ydl_opts["embedsubtitles"] = embed_override
+                        elif embed_type == "external":
+                            ydl_opts["embedsubtitles"] = False
+
+                # Check explicit conflict
+                from ...utils.container_compat import (
+                    ensure_audio_multistream_compatible_container,
+                    ensure_subtitle_compatible_container,
+                )
+                override_fmt = getattr(self.selector_widget, 'get_container_override', lambda: None)()
+                audio_count = ydl_opts.get("__audio_track_count", 1)
+                
+                if override_fmt:
+                    if not self._handle_container_conflict(ydl_opts):
+                        return []
+                else:
+                    ensure_subtitle_compatible_container(ydl_opts)
+                    ensure_audio_multistream_compatible_container(ydl_opts, audio_count)
 
             self._apply_download_dir_to_opts(ydl_opts)
 
@@ -2955,26 +3239,23 @@ class DownloadConfigWindow(FramelessWindow):
                             row_opts["writeautomaticsub"] = pl_sub_override.enable_auto_captions
                             row_opts["subtitleslangs"] = pl_sub_override.default_languages
                             if pl_sub_override.embed_type == "external":
-                                if pl_sub_override.format in ["srt", "ass", "vtt"]:
-                                    row_opts["convertsubtitles"] = pl_sub_override.format
+                                if pl_sub_override.output_format:
+                                    row_opts["convertsubtitles"] = pl_sub_override.output_format
 
                 self._apply_download_dir_to_opts(row_opts)
                 tasks.append((f"[字幕] {title}", url, row_opts, thumb))
                 continue
 
             elif self._mode == "cover":
-                row_opts["skip_download"] = True
-                row_opts["writethumbnail"] = True
-                row_opts["embedthumbnail"] = False
-                row_opts["addmetadata"] = False
-                row_opts["embedsubtitles"] = False
-                row_opts["sponsorblock_remove"] = None
-                row_opts["sponsorblock_mark"] = None
-                row_opts["postprocessors"] = []
-
                 custom_sel = row_data.get("custom_selection_data") or {}
                 if custom_sel.get("cover_url"):
                     url = custom_sel["cover_url"]
+                    # 这是一个直接的图片 URL，清除所有视频相关的冗余配置
+                    keys_to_remove = list(row_opts.keys())
+                    for k in keys_to_remove:
+                        if k not in ["paths", "outtmpl"]:
+                            row_opts.pop(k, None)
+                    row_opts["__fluentytdl_is_cover_direct"] = True
                     if custom_sel.get("cover_ext"):
                         row_opts["outtmpl"] = (
                             f"{sanitize_filename(title)}.{custom_sel['cover_ext']}"
@@ -2982,6 +3263,14 @@ class DownloadConfigWindow(FramelessWindow):
                     else:
                         row_opts["outtmpl"] = f"{sanitize_filename(title)}.%(ext)s"
                 else:
+                    row_opts["skip_download"] = True
+                    row_opts["writethumbnail"] = True
+                    row_opts["embedthumbnail"] = False
+                    row_opts["addmetadata"] = False
+                    row_opts["embedsubtitles"] = False
+                    row_opts["sponsorblock_remove"] = None
+                    row_opts["sponsorblock_mark"] = None
+                    row_opts["postprocessors"] = []
                     safe_title = sanitize_filename(title)
                     row_opts["outtmpl"] = f"{safe_title}.%(ext)s"
 
@@ -3022,6 +3311,32 @@ class DownloadConfigWindow(FramelessWindow):
                     row_opts["format"] = vr_preset_fmt or "bestvideo+bestaudio/best"
                     row_opts.update(vr_preset_args)
                     row_opts["__fluentytdl_format_note"] = preset_title
+
+            elif getattr(self, "_playlist_format_override", None) is not None:
+                # Playlist Global Format Config
+                from .format_selector import resolve_global_format
+                fmt_str, e_opts = resolve_global_format(row_data.get("detail"), self._playlist_format_override)
+                row_opts["format"] = fmt_str
+                row_opts.update(e_opts)
+                
+                pid = getattr(self._playlist_format_override, "preset_id", None)
+                preset_map = {
+                    "best_mp4": "最佳画质",
+                    "best_raw": "最佳画质(原盘)",
+                    "2160p": "2160p",
+                    "1440p": "1440p",
+                    "1080p": "1080p",
+                    "720p": "720p",
+                    "480p": "480p",
+                    "360p": "360p",
+                    "best_video": "最佳质量(无声)",
+                    "1080p_video": "1080p(无声)",
+                    "audio_best": "最佳音质",
+                    "audio_high": "高品质音频",
+                    "audio_std": "标准音频"
+                }
+                preset_name = preset_map.get(pid, pid) if pid else "全局格式"
+                row_opts["__fluentytdl_format_note"] = f"[全局] {preset_name}"
 
             else:
                 # Standard Playlist Logic
@@ -3090,29 +3405,49 @@ class DownloadConfigWindow(FramelessWindow):
             row_opts["addmetadata"] = pl_meta_enabled
 
             # 2. Subtitles
-            # If we have details, use the service to resolve smart logic (e.g. check available languages)
-            # If not, blindly apply config to ensure at least default behavior
-            if row_data.get("detail"):
-                sub_opts = subtitle_service.apply(
-                    video_id=str(row_data.get("id")),
-                    video_info=row_data["detail"],
-                    user_config=pl_sub_override,
-                )
-                row_opts.update(sub_opts)
+            # 优先级: 单视频覆盖 > 整体覆盖 > 全局配置
+            sub_override = row_data.get("subtitle_override")
+            if sub_override:
+                # 单视频配置 (Phase 2)
+                row_opts["writesubtitles"] = sub_override.get("has_manual", True)
+                row_opts["writeautomaticsub"] = sub_override.get("has_auto", False)
+                row_opts["subtitleslangs"] = sub_override.get("override_languages", [])
+                row_opts["embedsubtitles"] = sub_override.get("embed_subtitles", True)
+                if sub_override.get("output_format"):
+                    row_opts["convertsubtitles"] = sub_override["output_format"]
+            elif self._playlist_sub_override is not None:
+                # 整体覆盖 (Phase 1)
+                override = self._playlist_sub_override
+                row_opts["writesubtitles"] = True
+                row_opts["writeautomaticsub"] = override.enable_auto_captions
+                row_opts["subtitleslangs"] = override.target_languages
+                row_opts["embedsubtitles"] = override.embed_subtitles
+                if override.output_format:
+                    row_opts["convertsubtitles"] = override.output_format
             else:
-                # Fallback: manual injection
-                if pl_sub_override.enabled:
-                    row_opts["writesubtitles"] = True
-                    row_opts["writeautomaticsub"] = pl_sub_override.enable_auto_captions
-                    row_opts["subtitleslangs"] = pl_sub_override.default_languages
-
-                    # Embed
-                    if pl_sub_override.embed_type == "soft":
-                        row_opts["embedsubtitles"] = pl_sub_override.embed_mode != "never"
-                    elif pl_sub_override.embed_type == "external":
-                        row_opts["embedsubtitles"] = False
-                        if pl_sub_override.format in ["srt", "ass", "vtt"]:
-                            row_opts["convertsubtitles"] = pl_sub_override.format
+                # If we have details, use the service to resolve smart logic (e.g. check available languages)
+                # If not, blindly apply config to ensure at least default behavior
+                if row_data.get("detail"):
+                    sub_opts = subtitle_service.apply(
+                        video_id=str(row_data.get("id")),
+                        video_info=row_data["detail"],
+                        user_config=pl_sub_override,
+                    )
+                    row_opts.update(sub_opts)
+                else:
+                    # Fallback: manual injection
+                    if pl_sub_override.enabled:
+                        row_opts["writesubtitles"] = True
+                        row_opts["writeautomaticsub"] = pl_sub_override.enable_auto_captions
+                        row_opts["subtitleslangs"] = pl_sub_override.default_languages
+    
+                        # Embed
+                        if pl_sub_override.embed_type == "soft":
+                            row_opts["embedsubtitles"] = pl_sub_override.embed_mode != "never"
+                        elif pl_sub_override.embed_type == "external":
+                            row_opts["embedsubtitles"] = False
+                            if pl_sub_override.output_format:
+                                row_opts["convertsubtitles"] = pl_sub_override.output_format
 
             self._apply_download_dir_to_opts(row_opts)
 

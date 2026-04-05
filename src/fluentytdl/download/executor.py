@@ -19,6 +19,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from ..utils.container_compat import choose_lossless_merge_container
 from ..youtube.yt_dlp_cli import (
     prepare_yt_dlp_env,
     resolve_yt_dlp_exe,
@@ -53,6 +54,46 @@ def _is_auxiliary_file(path: str) -> bool:
     return ext in _AUXILIARY_EXTENSIONS
 
 
+# yt-dlp 输出中表示下载根本不可能成功的致命错误关键词（全小写）
+# 匹配到这些关键词时，即使磁盘上存在文件也不应视为成功
+_FATAL_ERROR_PATTERNS = (
+    "sign in to confirm",
+    "not a bot",
+    "login required",
+    "http error 403",
+    "forbidden",
+    "private video",
+    "video unavailable",
+    "members only",
+    "sign in to confirm your age",
+    "geo-restricted",
+    "not available in your country",
+    "unable to download webpage",
+    "unable to download api page",
+    "potoken",
+)
+
+# 有效媒体文件的最小大小门槛（10 KB）
+# 低于此大小的文件几乎不可能是有效的音视频
+_MIN_VALID_MEDIA_BYTES = 10 * 1024
+
+
+def _tail_contains_fatal_error(tail: deque) -> bool:
+    """扫描 yt-dlp 尾部输出，检测是否包含致命错误（认证/权限/网络等）。
+
+    这些错误意味着下载根本不可能成功完成，即使磁盘上存在残留文件也不应视为成功。
+    """
+    for line in tail:
+        lower = line.lower()
+        # 仅检查包含 ERROR 标记的行
+        if "error" not in lower:
+            continue
+        for pattern in _FATAL_ERROR_PATTERNS:
+            if pattern in lower:
+                return True
+    return False
+
+
 # ── 回调协议 ──────────────────────────────────────────────
 
 
@@ -74,20 +115,6 @@ class PathCallback(Protocol):
 
 # ── 容器决策 ──────────────────────────────────────────────
 
-
-def _choose_lossless_merge_container(video_ext: str | None, audio_ext: str | None) -> str | None:
-    """复用与 format_selector.py / selection_dialog.py 相同的容器决策逻辑。"""
-    v = str(video_ext or "").strip().lower()
-    a = str(audio_ext or "").strip().lower()
-    if not v or not a:
-        return None
-    if v == "webm" and a == "webm":
-        return "webm"
-    if v in {"mp4", "m4v"} and a in {"m4a", "aac", "mp4"}:
-        return "mp4"
-    return "mkv"
-
-
 _SUBTITLE_COMPATIBLE_CONTAINERS = {"mp4", "mkv", "mov", "m4v"}
 
 
@@ -101,7 +128,7 @@ def determine_merge_container(
     优先级:
     1. ydl_opts["merge_output_format"] — 用户/预设已指定
     2. 字幕兼容性修正 — webm 不支持 SRT/ASS → mkv
-    3. _choose_lossless_merge_container(v_ext, a_ext)
+    3. choose_lossless_merge_container(v_ext, a_ext)
     4. 兜底 mkv
     """
     merge_fmt = (ydl_opts.get("merge_output_format") or "").strip().lower()
@@ -114,7 +141,7 @@ def determine_merge_container(
         return merge_fmt
 
     # 没有指定容器 → 根据流的 ext 推断
-    computed = _choose_lossless_merge_container(video_ext, audio_ext)
+    computed = choose_lossless_merge_container(video_ext, audio_ext)
     if computed:
         if ydl_opts.get("embedsubtitles") and computed not in _SUBTITLE_COMPATIBLE_CONTAINERS:
             logger.info("[Executor] 字幕嵌入 + {} → 强制 mkv", computed)
@@ -241,7 +268,7 @@ class DownloadExecutor:
             (
                 "download:"
                 + progress_prefix
-                + "download|%(progress.downloaded_bytes)s|%(progress.total_bytes)s"
+                + "download|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s"
                 + "|%(progress.speed)s|%(progress.eta)s"
                 + "|%(info.vcodec)s|%(info.acodec)s|%(info.ext)s|%(progress.filename)s"
             ),
@@ -275,6 +302,7 @@ class DownloadExecutor:
         output_path: str | None = None
         dest_paths: set[str] = set()
         tail: deque[str] = deque(maxlen=120)
+        expected_total_bytes: int = 0  # 累计预期文件大小，用于完整性校验
 
         proc = self._proc
         assert proc is not None
@@ -292,6 +320,11 @@ class DownloadExecutor:
             parsed = self._ytdlp_parser.parse_line(line)
 
             if parsed.type == "progress" and parsed.progress:
+                # 追踪预期总大小（累加各流的 total_bytes）
+                tb = parsed.progress.total_bytes
+                if isinstance(tb, (int, float)) and tb > 0:
+                    expected_total_bytes = max(expected_total_bytes, int(tb))
+
                 on_progress(
                     {
                         "status": parsed.progress.status,
@@ -323,6 +356,20 @@ class DownloadExecutor:
                         output_path = p
                         on_path(p)
 
+            elif parsed.type == "warning":
+                if parsed.message:
+                    on_status("⚠️ " + parsed.message)
+
+            elif parsed.type == "ffmpeg_progress":
+                if parsed.progress:
+                    on_progress(
+                        {
+                            "status": "ffmpeg_progress",
+                            "time_sec": parsed.progress.info_dict.get("time_sec"),
+                            "speed": parsed.progress.info_dict.get("speed"),
+                        }
+                    )
+
             elif parsed.type == "merge":
                 if parsed.path:
                     p = _abs(parsed.path)
@@ -344,14 +391,28 @@ class DownloadExecutor:
         self._proc = None
 
         if rc != 0:
-            # 容错检查：如果预期输出文件存在且有效，视为成功 (忽略临时文件清理失败等非致命错误)
-            # Windows 下 yt-dlp 常因无法删除 .part-Frag 文件返回 exit code 1
+            last_lines = "\n".join(tail)
+
+            # ━━━ 关卡 1: 致命错误检测 ━━━
+            # 如果 yt-dlp 输出包含认证/权限/网络等致命错误，
+            # 说明下载根本不可能成功完成，直接抛出，不做任何容错
+            if _tail_contains_fatal_error(tail):
+                logger.error(
+                    "yt-dlp 退出码 {} 且检测到致命错误，跳过文件容错判定", rc
+                )
+                raise RuntimeError(f"yt-dlp 退出码 {rc}:\n{last_lines}")
+
+            # ━━━ 关卡 2: 文件存在性 + 大小有效性检查 ━━━
+            # 容错场景：Windows 下 yt-dlp 常因无法删除 .part-Frag 文件返回 exit code 1
+            # 但此时文件实际上已经完整下载并合并成功
             is_valid = False
             valid_path_found = None
-            
+            actual_size = 0
+
             if output_path and os.path.exists(output_path):
                 try:
-                    if os.path.getsize(output_path) > 0:
+                    actual_size = os.path.getsize(output_path)
+                    if actual_size >= _MIN_VALID_MEDIA_BYTES:
                         is_valid = True
                         valid_path_found = output_path
                 except OSError:
@@ -362,19 +423,35 @@ class DownloadExecutor:
                 for d_path in dest_paths:
                     if os.path.exists(d_path) and not _is_auxiliary_file(d_path):
                         try:
-                            if os.path.getsize(d_path) > 0:
+                            sz = os.path.getsize(d_path)
+                            if sz >= _MIN_VALID_MEDIA_BYTES:
                                 is_valid = True
                                 valid_path_found = d_path
+                                actual_size = sz
                                 break
                         except OSError:
                             pass
 
+            # ━━━ 关卡 3: 预期大小比对 ━━━
+            # 如果进度回调中记录了预期总大小，且实际文件远小于预期，
+            # 说明文件是不完整的残留，不应视为成功
+            if is_valid and expected_total_bytes > 0 and actual_size > 0:
+                ratio = actual_size / expected_total_bytes
+                if ratio < 0.5:
+                    logger.warning(
+                        "文件大小 ({}) 仅为预期大小 ({}) 的 {:.0%}，判定为不完整下载",
+                        actual_size, expected_total_bytes, ratio,
+                    )
+                    is_valid = False
+
             if is_valid:
                 if not output_path and valid_path_found:
                     output_path = valid_path_found
-                logger.warning(f"yt-dlp 退出码 {rc} (非零)，但输出文件有效 ({output_path})。忽略错误。")
+                logger.warning(
+                    "yt-dlp 退出码 {} (非零)，但输出文件有效 ({}, {:.1f} KB)。忽略错误。",
+                    rc, output_path, actual_size / 1024,
+                )
             else:
-                last_lines = "\n".join(tail)
                 raise RuntimeError(f"yt-dlp 退出码 {rc}:\n{last_lines}")
 
         return output_path

@@ -134,15 +134,14 @@ class SubtitleSelectorWidget(QFrame):
             layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             cb = CheckBox()
 
-            # 默认选中第一个中文手动字幕
+            # 默认选中第一个中文手动字幕，稍后可被 set_initial_state 覆盖
             if row == 0 and track.lang_code.startswith("zh") and not track.is_auto:
                 cb.setChecked(True)
-            elif track.lang_code.startswith("zh") and not track.is_auto:
-                pass
 
             cb.stateChanged.connect(self.selectionChanged)
             layout.addWidget(cb)
             self.table.setCellWidget(row, 0, cell_widget)
+
 
             # 2. Language
             lang_text = f"{track.display_name} ({track.lang_code})"
@@ -186,6 +185,28 @@ class SubtitleSelectorWidget(QFrame):
                     selected.append(track)
         return selected
 
+    def get_selected_language_codes(self) -> tuple[list[str], bool, bool]:
+        """返回 (语言代码列表, 是否包含人工, 是否包含自动)
+        
+        供 SubtitlePickerDialog 使用，不包含 yt-dlp 控制参数。
+        """
+        tracks = self.get_selected_tracks()
+        languages = list(dict.fromkeys(t.lang_code for t in tracks))  # 有序去重
+        has_manual = any(not t.is_auto for t in tracks)
+        has_auto = any(t.is_auto for t in tracks)
+        return languages, has_manual, has_auto
+
+    def set_initial_state(self, selected_langs: list[str]):
+        """根据之前的选择恢复 checkbox 状态和外部设置"""
+        if not selected_langs:
+            return
+            
+        for row, track in enumerate(self._tracks):
+            cell_widget = self.table.cellWidget(row, 0)
+            if cell_widget:
+                cb = cell_widget.layout().itemAt(0).widget()
+                cb.setChecked(track.lang_code in selected_langs)
+
     def get_opts(self) -> dict[str, Any]:
         """
         获取 yt-dlp 选项
@@ -219,5 +240,10 @@ class SubtitleSelectorWidget(QFrame):
         # Embed (usually for video mode)
         if self.embedCheck.isChecked() and self.embedCheck.isVisible():
             opts["embedsubtitles"] = True
+
+        from ...core.config_manager import config_manager
+        out_fmt = config_manager.get("subtitle_output_format", "srt")
+        if out_fmt:
+            opts["convertsubtitles"] = out_fmt
 
         return opts

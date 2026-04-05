@@ -38,6 +38,20 @@ class SubtitleConfig:
     - external: 外置独立文件（.srt/.ass，兼容性最佳）
     """
 
+    output_format: Literal["srt", "ass", "vtt", "lrc"] = "srt"
+    """
+    字幕输出格式（全局默认）：
+    - srt: SubRip（兼容性最佳，推荐）
+    - ass: Advanced SubStation Alpha（支持样式）
+    - vtt: WebVTT（Web原生格式）
+    - lrc: 歌词格式（仅适用于音乐类内容）
+
+    此字段作为所有路径的默认格式权威：
+    - 软嵌入时：yt-dlp 获取到字幕后按此格式转换再嵌入容器
+    - 外置文件时：下载的字幕文件按此格式转换后保存
+    - 纯字幕下载时：作为默认格式（可被 SubtitleSelectorWidget 覆盖）
+    """
+
     embed_mode: Literal["always", "never", "ask"] = "always"
     """
     字幕嵌入模式（仅 embed_type="soft" 时有效）：
@@ -70,6 +84,7 @@ class SubtitleConfig:
             "enable_auto_captions": self.enable_auto_captions,
             "embed_type": self.embed_type,
             "embed_mode": self.embed_mode,
+            "output_format": self.output_format,
             "quality_check": self.quality_check,
             "remove_ads": self.remove_ads,
             "fallback_to_english": self.fallback_to_english,
@@ -85,8 +100,26 @@ class SubtitleConfig:
             enable_auto_captions=data.get("enable_auto_captions", True),
             embed_type=data.get("embed_type", "soft"),
             embed_mode=data.get("embed_mode", "always"),
+            output_format=data.get("output_format", "srt"),
             quality_check=data.get("quality_check", True),
             remove_ads=data.get("remove_ads", False),
             fallback_to_english=data.get("fallback_to_english", True),
             max_languages=data.get("max_languages", 10),
         )
+
+
+@dataclass
+class PlaylistSubtitleOverride:
+    """播放列表级字幕覆盖配置"""
+
+    target_languages: list[str]
+    """用户选择的语言列表"""
+
+    enable_auto_captions: bool
+    """是否启用自动字幕"""
+
+    embed_subtitles: bool
+    """是否嵌入到视频"""
+
+    output_format: str
+    """字幕格式"""

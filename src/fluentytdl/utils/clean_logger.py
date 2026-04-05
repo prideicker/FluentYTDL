@@ -10,6 +10,54 @@ from collections.abc import Callable
 from typing import Any
 
 
+class _StreamPhase:
+    """单次下载任务中的多流阶段追踪器"""
+    
+    # 阶段定义: (阶段名, 输出进度范围起始, 输出进度范围宽度)
+    VIDEO  = ("video",  0.0,  50.0)   # 0%  -> 50%
+    AUDIO  = ("audio",  50.0, 45.0)   # 50% -> 95% 
+    POST   = ("post",   95.0, 4.0)    # 95% -> 99%
+    SINGLE = ("single", 0.0,  95.0)   # 单流模式: 0% -> 95%
+    
+    def __init__(self):
+        self._phase = None
+        self._is_multi_stream = False
+        self._stream_count = 0
+    
+    def detect_phase(self, info_dict: dict) -> tuple:
+        """根据 vcodec/acodec 判断当前下载的流类型，返回 (阶段, 是否发生了切换)"""
+        vcodec = (info_dict.get("vcodec") or "").lower()
+        acodec = (info_dict.get("acodec") or "").lower()
+        
+        has_video = vcodec and vcodec != "none" and vcodec != "na"
+        has_audio = acodec and acodec != "none" and acodec != "na"
+        
+        if self._phase is None:
+            if has_video and not has_audio:
+                self._phase = self.VIDEO
+                self._is_multi_stream = True
+            elif has_audio and not has_video:
+                self._phase = self.SINGLE if self._stream_count == 0 else self.AUDIO
+            else:
+                self._phase = self.SINGLE
+            self._stream_count += 1
+            return (self._phase, True)
+        
+        if self._phase == self.VIDEO and has_audio and not has_video:
+            self._phase = self.AUDIO
+            self._stream_count += 1
+            return (self._phase, True)
+        
+        return (self._phase, False)
+    
+    def map_progress(self, phase: tuple, raw_pct: float) -> float:
+        """将单流内的原始百分比映射到全局进度"""
+        if phase is None:
+            phase = self.SINGLE
+        _, start, width = phase
+        return start + (raw_pct / 100.0) * width
+
+
 class CleanLogger:
     """
     状态收敛日志器。
@@ -24,7 +72,7 @@ class CleanLogger:
     - "paused": 暂停
     """
 
-    def __init__(self, callback: Callable[[str, float, str], None]):
+    def __init__(self, callback: Callable[[str, float, str], None], duration: float = 0.0):
         """
         :param callback: 向外发射的清理后信号方法 (状态码, float进度, 友好状态文案)
         """
@@ -32,15 +80,17 @@ class CleanLogger:
         self._current_state = "queued"
         self._current_percent = 0.0
         self._current_msg = "等待下载..."
-
+        self._stream_phase = _StreamPhase()
+        self._phase_just_switched = False
+        self._duration = duration
     def _emit(self, state: str, percent: float, msg: str) -> None:
-        # 始终保持进度不后退（除非回到 queued/error）
-        if (
-            state in ("downloading", "processing", "finished")
-            and percent < self._current_percent
-            and percent != 0.0
-        ):
-            percent = self._current_percent
+        # 进度不后退规则（仅在同一阶段内生效）
+        # 阶段切换时允许视觉上的 "重置"（实际是映射后的递增）
+        if state in ("downloading", "processing", "finished"):
+            if percent < self._current_percent and percent != 0.0:
+                if not getattr(self, "_phase_just_switched", False):
+                    percent = self._current_percent
+        self._phase_just_switched = False
 
         self._current_state = state
         self._current_percent = percent
@@ -104,6 +154,38 @@ class CleanLogger:
 
         status = progress_data.get("status", "downloading")
 
+        if status == "ffmpeg_progress":
+            time_sec = progress_data.get("time_sec", 0.0)
+            speed = progress_data.get("speed", "1x")
+            
+            if self._duration > 0:
+                raw_pct = (time_sec / self._duration) * 100.0
+                raw_pct = min(100.0, max(0.0, raw_pct))
+            else:
+                raw_pct = 50.0  # unknown duration
+                
+            pct = self._stream_phase.map_progress(_StreamPhase.POST, raw_pct)
+            pct = round(pct, 1)
+            msg = f"🔄 FFmpeg 转码中 {raw_pct:.1f}% | 速度: {speed}..."
+            self._emit("processing", pct, msg)
+            return
+
+        if status == "ffmpeg_progress":
+            time_sec = progress_data.get("time_sec", 0.0)
+            speed = progress_data.get("speed", "1x")
+            
+            if getattr(self, "_duration", 0.0) > 0:
+                raw_pct = (time_sec / self._duration) * 100.0
+                raw_pct = min(100.0, max(0.0, raw_pct))
+            else:
+                raw_pct = 50.0  # unknown duration
+                
+            pct = self._stream_phase.map_progress(self._stream_phase.POST, raw_pct)
+            pct = round(pct, 1)
+            msg = f"🔄 FFmpeg 转码中 {raw_pct:.1f}% | 速度: {speed}..."
+            self._emit("processing", pct, msg)
+            return
+
         if status == "postprocess":  # 来自 FLUENTYTDL|postprocess| 钩子
             pp_name = progress_data.get("postprocessor", "Unknown")
             pp_status = progress_data.get("pp_status", "")  # started/finished
@@ -140,7 +222,10 @@ class CleanLogger:
         if tot_bytes > 0:
             pct = (dl_bytes / tot_bytes) * 100.0
         elif dl_bytes > 0:
-            pct = 50.0  # 未知总大小时的中转态
+            # 未知总大小时：对数增长曲线，缓慢逼近 90% 但永远不会到达
+            # 公式: pct = 90 * (1 - 1/(1 + dl_bytes/10MB))
+            # 效果: 10MB->45%, 50MB->81%, 100MB->86%, 500MB->89%
+            pct = 90.0 * (1.0 - 1.0 / (1.0 + dl_bytes / (10 * 1024 * 1024)))
 
         pct = round(pct, 1)
 
@@ -171,9 +256,17 @@ class CleanLogger:
                 elif acodec and acodec.lower() != "none":
                     stream_type = "🎵 音频流"
 
+            # ── 多流阶段感知 ──
+            if info:
+                phase, switched = self._stream_phase.detect_phase(info)
+                if switched:
+                    self._phase_just_switched = True
+                pct = self._stream_phase.map_progress(phase, pct)
+                pct = round(pct, 1)
+
             speed_str = self._format_bytes(speed) + "/s"
             downloaded_str = self._format_bytes(dl_bytes)
-            total_str = self._format_bytes(tot_bytes)
+            total_str = self._format_bytes(tot_bytes) if tot_bytes > 0 else "?"
             eta_str = self._format_time(eta)
 
             detail_text = (
@@ -201,3 +294,4 @@ class CleanLogger:
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         return f"{int(h):02d}:{int(m):02d}:{int(s):02d}" if h else f"{int(m):02d}:{int(s):02d}"
+

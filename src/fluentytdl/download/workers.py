@@ -213,6 +213,7 @@ class DownloadWorker(QThread):
         self._original_format: str | None = None
         self._ssl_error_count = 0
         self._format_warning_shown = False
+        self._fallback_attempted = False
 
         # ── 红绿灯系统 (threading.Event) ──
         # _pause_event: 默认 set()=绿灯(放行), clear()=红灯(暂停)
@@ -238,9 +239,13 @@ class DownloadWorker(QThread):
             self.v_title = cached_info.get("title", "")
             self.v_thumbnail = cached_info.get("thumbnail", "")
 
+        self.v_duration = 0.0
+        if cached_info:
+            self.v_duration = float(cached_info.get("duration", 0.0) or 0.0)
+
         from ..utils.clean_logger import CleanLogger
 
-        self._clean_logger = CleanLogger(self._on_clean_update)
+        self._clean_logger = CleanLogger(self._on_clean_update, duration=self.v_duration)
 
     def _on_clean_update(self, state: str, pct: float, msg: str) -> None:
         self._final_state = state
@@ -408,6 +413,15 @@ class DownloadWorker(QThread):
         self.is_cancelled = False
         try:
             # ======================================================================
+            # 图片直接下载通道：完全无视视频逻辑，发起极简 yt-dlp 请求
+            # ======================================================================
+            if self.opts.get("__fluentytdl_is_cover_direct", False):
+                logger.info("⚡ 检测到纯图片直接下载，走极简通道")
+                self.status_msg.emit("⚡ 正在直接下载封面图片...")
+                self._run_cover_direct_download()
+                return
+
+            # ======================================================================
             # 快速通道：纯字幕/纯封面提取 — 完全绕过 Executor / Strategy / Feature 管线
             # ======================================================================
             if self.opts.get("skip_download", False):
@@ -540,7 +554,98 @@ class DownloadWorker(QThread):
                 if self.is_cancelled:
                     raise DownloadCancelled() from None
 
-                raise exc
+                _AUTH_ERROR_KEYWORDS = (
+                    "sign in to confirm",
+                    "not a bot",
+                    "login required",
+                    "http error 403",
+                    "forbidden",
+                    "cookies",
+                )
+                err_lower = str(exc).lower()
+                is_auth_error = any(kw in err_lower for kw in _AUTH_ERROR_KEYWORDS)
+                is_vr_mode = self.opts.get("__fluentytdl_use_android_vr", False)
+
+                if is_auth_error and not is_vr_mode and not self._fallback_attempted:
+                    self._fallback_attempted = True
+                    
+                    cookie_refreshed = False
+                    try:
+                        from ..auth.auth_service import (
+                            BROWSER_SOURCES,
+                            AuthSourceType,
+                            auth_service,
+                        )
+                        from ..auth.cookie_sentinel import cookie_sentinel
+                        
+                        source = auth_service.current_source
+                        
+                        if source == AuthSourceType.DLE:
+                            logger.info("🔄 [DLE] 静默重提取 WebView2 Cookie...")
+                            self._clean_logger.force_update("downloading", 0.0, "🔄 正在刷新 Cookie (WebView2)...")
+                            new_cookie = auth_service.get_cookie_file_for_ytdlp(force_refresh=True)
+                            if new_cookie:
+                                import shutil
+                                shutil.copy2(new_cookie, cookie_sentinel.cookie_path)
+                                cookie_refreshed = True
+                                logger.info("✅ [DLE] Cookie 静默刷新成功")
+                                
+                        elif source in BROWSER_SOURCES:
+                            logger.info("🔄 [Browser] 尝试带锁刷新 Cookie...")
+                            self._clean_logger.force_update("downloading", 0.0, "🔄 正在刷新 Cookie (浏览器)...")
+                            ok, msg = cookie_sentinel.force_refresh_with_uac()
+                            cookie_refreshed = ok
+                            if not ok:
+                                logger.warning(f"Cookie 刷新失败: {msg}")
+                    except Exception as refresh_err:
+                        logger.warning(f"Cookie 刷新异常: {refresh_err}")
+                    
+                    retry_success = False
+                    if cookie_refreshed:
+                        try:
+                            logger.info("🔄 使用刷新后的 Cookie 重试下载 (player_client=default)...")
+                            self._clean_logger.force_update("downloading", 0.0, "🔄 使用新 Cookie 重试...")
+                            from ..youtube.youtube_service import youtube_service as ys_instance
+                            base_opts = ys_instance.build_ydl_options()
+                            retry_merged = dict(base_opts)
+                            retry_merged.update(self.opts)
+                            
+                            final_path = self.executor.execute(
+                                self.url, retry_merged, strategy,
+                                on_progress=on_progress, on_status=on_status,
+                                on_path=on_path, cancel_check=lambda: self.is_cancelled,
+                                on_file_created=on_file_created, cached_info_dict=self.cached_info,
+                            )
+                            if final_path:
+                                self.output_path = final_path
+                                self.output_path_ready.emit(final_path)
+                                download_dispatcher.report_result(True)
+                                retry_success = True
+                        except Exception as retry_exc:
+                            logger.warning(f"Cookie 刷新重试仍失败: {retry_exc}")
+                    
+                    if not retry_success:
+                        logger.info("🔄 最终降级: 剥离 Cookie + 链式回退客户端 (web_safari,mweb,android_creator)")
+                        self._clean_logger.force_update("downloading", 0.0, "🔄 无 Cookie 降级模式启动...")
+                        
+                        merged.pop("cookiefile", None)
+                        ea = merged.setdefault("extractor_args", {})
+                        yt = ea.setdefault("youtube", {})
+                        yt["player_client"] = ["web_safari,mweb,android_creator"]
+                        yt.pop("player_skip", None)
+                        
+                        final_path = self.executor.execute(
+                            self.url, merged, strategy,
+                            on_progress=on_progress, on_status=on_status,
+                            on_path=on_path, cancel_check=lambda: self.is_cancelled,
+                            on_file_created=on_file_created, cached_info_dict=self.cached_info,
+                        )
+                        if final_path:
+                            self.output_path = final_path
+                            self.output_path_ready.emit(final_path)
+                            download_dispatcher.report_result(True)
+                else:
+                    raise exc
 
             # === Feature Pipeline: Post-process ===
             # 执行各模块的后处理逻辑（封面嵌入、字幕合并、VR转码等）
@@ -573,6 +678,11 @@ class DownloadWorker(QThread):
             logger.exception("下载过程发生异常: {}", self.url)
             # Failure for circuit breaker
             download_dispatcher.report_result(False)
+            
+            # CRITICAL FIX: Update CleanLogger state so that effective_state doesn't fallback to 'completed'
+            pct = getattr(self, "progress_val", 0.0)
+            self._clean_logger.force_update("error", pct, f"❌ 错误: {msg}")
+            
             self.error.emit(translate_error(exc))
         finally:
             self.is_running = False
@@ -640,6 +750,10 @@ class DownloadWorker(QThread):
         subtitleslangs = opts.get("subtitleslangs")
         if isinstance(subtitleslangs, (list, tuple)) and subtitleslangs:
             cmd += ["--sub-langs", ",".join(str(lang) for lang in subtitleslangs)]
+        
+        convert_subs = opts.get("convertsubtitles")
+        if isinstance(convert_subs, str) and convert_subs:
+            cmd += ["--convert-subs", convert_subs]
 
         # 封面相关
         if opts.get("writethumbnail"):
@@ -690,6 +804,10 @@ class DownloadWorker(QThread):
             except Exception:
                 pass
 
+        from ..download.output_parser import YtDlpOutputParser
+        parser = YtDlpOutputParser()
+        self._clean_logger.force_update("parsing", 0.0, "⚡ 正在初始化提取引擎...")
+
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -728,7 +846,30 @@ class DownloadWorker(QThread):
 
                 if line:
                     logger.debug("[LightweightExtract] {}", line)
-                    # 仅在日志中记录，不将原始 yt-dlp 输出暴露给用户
+                    parsed = parser.parse_line(line)
+                    if parsed.type == "progress" and parsed.progress:
+                        prog_dict = {
+                            "status": parsed.progress.status,
+                            "downloaded_bytes": parsed.progress.downloaded_bytes,
+                            "total_bytes": parsed.progress.total_bytes,
+                            "speed": parsed.progress.speed,
+                            "eta": parsed.progress.eta,
+                            "filename": parsed.progress.filename,
+                            "info_dict": parsed.progress.info_dict,
+                        }
+                        self._clean_logger.handle_progress(prog_dict)
+                    elif parsed.type == "subtitle":
+                        msg = "📝 正在保存字幕..."
+                        if parsed.path:
+                            msg = f"📝 正在保存字幕: {os.path.basename(parsed.path)}"
+                        # 注入伪进度以产生视觉推进感
+                        self._clean_logger.force_update("downloading", 50.0, msg)
+                    elif parsed.type == "status":
+                        self._clean_logger.handle_status(parsed.message or line)
+                    elif parsed.message:
+                        self._clean_logger.handle_status(parsed.message)
+                    else:
+                        self._clean_logger.handle_status(line)
 
             rc = proc.wait()
             self._proc_ref = None
@@ -736,11 +877,104 @@ class DownloadWorker(QThread):
             if rc != 0:
                 logger.warning("[LightweightExtract] yt-dlp 退出码 {}", rc)
                 self.status_msg.emit(f"⚠️ 提取完成（退出码: {rc}）")
+                self._clean_logger.force_update("error", 100.0, f"❌ 错误: yt-dlp 退出码 {rc}")
+            else:
+                self._clean_logger.force_update("completed", 100.0, "✅ 提取完成")
 
             self.completed.emit()
 
         except Exception as exc:
             logger.exception("[LightweightExtract] 提取失败: {}", self.url)
+            self._clean_logger.force_update("error", 0.0, f"❌ 错误: {exc}")
+            self.error.emit(translate_error(exc))
+        finally:
+            self.is_running = False
+
+    def _run_cover_direct_download(self) -> None:
+        """纯图片文件直接下载：当明确得知 URL 就是一个图片时，使用干净的 yt-dlp 避免各种干扰。"""
+        import subprocess
+
+        from ..youtube.yt_dlp_cli import prepare_yt_dlp_env, resolve_yt_dlp_exe
+
+        exe = resolve_yt_dlp_exe()
+        if exe is None:
+            self.error.emit({"title": "错误", "message": "yt-dlp 可执行文件未找到"})
+            return
+
+        cmd: list[str] = [str(exe), "--ignore-config", "--no-warnings", "--newline"]
+
+        opts = self.opts
+        outtmpl = opts.get("outtmpl")
+        if isinstance(outtmpl, str) and outtmpl:
+             cmd += ["-o", outtmpl]
+        
+        # Paths
+        paths = opts.get("paths")
+        if isinstance(paths, dict):
+            home = paths.get("home")
+            if isinstance(home, str) and home.strip():
+                cmd += ["-P", home.strip()]
+                self.download_dir = os.path.abspath(home.strip())
+                
+        # Proxy
+        proxy = opts.get("proxy")
+        if isinstance(proxy, str) and proxy:
+            cmd += ["--proxy", proxy]
+
+        cmd.append(self.url)
+        logger.info("[CoverDirect] cmd={}", " ".join(cmd))
+        env = prepare_yt_dlp_env()
+        
+        extra_kw: dict[str, Any] = {}
+        if os.name == "nt":
+            try:
+                extra_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+            except Exception:
+                pass
+
+        self._clean_logger.force_update("downloading", 0.0, "⚡ 正在下载图片...")
+
+        try:
+            cwd = self.download_dir or os.getcwd()
+            os.makedirs(cwd, exist_ok=True)
+            
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=False, env=env, cwd=cwd, **extra_kw,
+            )
+            self._proc_ref = proc
+            assert proc.stdout is not None
+            
+            for raw in proc.stdout:
+                if self.is_cancelled:
+                    try:
+                        if os.name == "nt":
+                            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+                        else:
+                            proc.terminate()
+                    except Exception:
+                        pass
+                    self.cancelled.emit()
+                    return
+                # Minimal parsing for progress bar feeling
+                try:
+                    line = raw.decode("utf-8").rstrip("\r\n")
+                except UnicodeDecodeError:
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                if line and "Destination:" in line:
+                    self._clean_logger.force_update("downloading", 50.0, f"正在保存: {os.path.basename(line.split('Destination: ')[-1])}")
+                    
+            rc = proc.wait()
+            self._proc_ref = None
+            if rc != 0:
+                self._clean_logger.force_update("error", 100.0, f"❌ 错误: yt-dlp 退出码 {rc}")
+            else:
+                self._clean_logger.force_update("completed", 100.0, "✅ 下载完成")
+            self.completed.emit()
+        except Exception as exc:
+            logger.exception("[CoverDirect] 提取失败: {}", self.url)
+            self._clean_logger.force_update("error", 0.0, f"❌ 错误: {exc}")
+            from ..youtube.error_translator import translate_error
             self.error.emit(translate_error(exc))
         finally:
             self.is_running = False

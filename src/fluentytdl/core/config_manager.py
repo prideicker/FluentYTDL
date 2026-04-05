@@ -103,6 +103,7 @@ class ConfigManager(QObject):
         "subtitle_enable_auto_captions": True,  # 是否启用自动生成字幕
         "subtitle_embed_type": "soft",  # 嵌入类型: soft/external
         "subtitle_embed_mode": "always",  # 嵌入模式: always/never/ask
+        "subtitle_output_format": "vtt",  # 字幕输出格式：srt/ass/vtt/lrc
         "subtitle_quality_check": True,  # 是否启用字幕质量检查
         "subtitle_remove_ads": False,  # 是否自动移除字幕广告
         "subtitle_fallback_to_english": True,  # 是否回退到英语
@@ -110,7 +111,9 @@ class ConfigManager(QObject):
         # 音频偏好设置
         # preferred_audio_languages: 首选音轨语言（多选优先级，对于多音轨视频）
         # 'orig': 优先原音/默认, 'zh-Hans': 中文, 'en': 英文, 'ja': 日语等
-        "preferred_audio_languages": ["orig", "zh-Hans", "en"],
+        "preferred_audio_languages": ["zh-Hans", "en", "orig"],
+        # audio_multistream_default_count: 多音轨视频默认选择几条音轨（0表示无限制，1表示仅最佳）
+        "audio_multistream_default_count": 1,
         # 认证模式
         "auth_mode": "oauth2",  # 或者 "cookie"
         "oauth2_status": False,  # 是否已经成功完成过 oauth2 授权
@@ -227,6 +230,7 @@ class ConfigManager(QObject):
             enable_auto_captions=self.config.get("subtitle_enable_auto_captions", True),
             embed_type=self.config.get("subtitle_embed_type", "soft"),
             embed_mode=self.config.get("subtitle_embed_mode", "always"),
+            output_format=self.config.get("subtitle_output_format", "vtt"),
             quality_check=self.config.get("subtitle_quality_check", True),
             remove_ads=self.config.get("subtitle_remove_ads", False),
             fallback_to_english=self.config.get("subtitle_fallback_to_english", True),
@@ -240,6 +244,7 @@ class ConfigManager(QObject):
         self.config["subtitle_enable_auto_captions"] = config.enable_auto_captions
         self.config["subtitle_embed_type"] = config.embed_type
         self.config["subtitle_embed_mode"] = config.embed_mode
+        self.config["subtitle_output_format"] = config.output_format
         self.config["subtitle_quality_check"] = config.quality_check
         self.config["subtitle_remove_ads"] = config.remove_ads
         self.config["subtitle_fallback_to_english"] = config.fallback_to_english

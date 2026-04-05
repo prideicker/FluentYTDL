@@ -29,17 +29,27 @@ class DownloadManager(QObject):
         # tasks 是按照 created_at DESC 排序的，反转以按先后顺序加载
         for row in reversed(tasks):
             state = row.get("state", "queued")
-            if state in ("completed", "error"):
+            if state in ("completed", "error", "cancelled"):
                 continue
 
-            # 如果重启前是运行状态，自动降级为暂停，防止重启瞬间并发爆炸
-            if state in ("running", "downloading"):
+            opts = json.loads(row.get("ydl_opts_json", "{}"))
+
+            # skip_download 任务（纯字幕/封面提取）不应跨会话恢复：
+            # 它们依赖的弹窗上下文（SubtitlePickerResult 等）已丢失，
+            # 恢复后会以过时的参数自动重跑，产生幽灵任务。
+            if opts.get("skip_download", False):
+                task_db.update_task_status(
+                    row["id"], "error", 0.0, "⚠️ 提取任务未能完成（应用已重启）"
+                )
+                continue
+
+            # 如果重启前是运行/解析状态，自动降级为暂停，防止重启瞬间并发爆炸
+            if state in ("running", "downloading", "parsing"):
                 state = "paused"
                 task_db.update_task_status(
                     row["id"], state, row.get("progress", 0.0), "⏸️ 下载已暂停 (应用重启)"
                 )
 
-            opts = json.loads(row.get("ydl_opts_json", "{}"))
             cached = {"title": row.get("title", ""), "thumbnail": row.get("thumbnail_url", "")}
 
             worker = self.create_worker(

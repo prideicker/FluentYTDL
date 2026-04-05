@@ -76,6 +76,11 @@ def build_embed_opts(config: SubtitleConfig) -> dict[str, Any]:
         opts["embedsubtitles"] = False
         opts["writesubtitles"] = True
 
+    # 统一转换格式处理
+    out_fmt = config.output_format
+    if out_fmt:
+        opts["convertsubtitles"] = out_fmt
+
     _logger.info("[SubEmbed] build_embed_opts 返回: {}", opts)
     return opts
 

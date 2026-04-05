@@ -330,7 +330,10 @@ class YoutubeService:
                 "warning", "未检测到有效 Cookies，启用 Android/iOS 模拟（可能缺失部分高画质）"
             )
         else:
-            self._emit_log("info", "🚀 Cookies 模式激活：使用 Web 默认客户端获取更完整的格式列表")
+            extractor_args = ydl_opts.setdefault("extractor_args", {})
+            youtube_args = extractor_args.setdefault("youtube", {})
+            youtube_args["player_client"] = ["default"]
+            self._emit_log("info", "🚀 Cookies 模式激活：锁定 Web 默认客户端（已屏蔽 android_vr 探测）")
 
         # --- POT Provider 服务集成 ---
         # POT (Proof of Origin Token) Provider 提供动态 PO Token 生成服务
@@ -1180,6 +1183,31 @@ class YoutubeService:
                         cancel_event=cancel_event,
                     )
                     return cast(dict[str, Any], info)
+
+            if self._is_auth_blocked_error(msg):
+                self._emit_log(
+                    "warning",
+                    "🔄 检测到认证封锁，丢弃 Cookie 使用无登录态客户端重试..."
+                )
+                fallback_opts = dict(tuned)
+                fallback_opts.pop("cookiefile", None)
+                fb_ea = fallback_opts.setdefault("extractor_args", {})
+                fb_yt = fb_ea.setdefault("youtube", {})
+                fb_yt["player_client"] = ["android_creator,ios"]
+                fb_yt.pop("player_skip", None)
+
+                try:
+                    info = run_dump_single_json(
+                        url, fallback_opts,
+                        extra_args=["--flat-playlist", "--lazy-playlist"],
+                        cancel_event=cancel_event,
+                    )
+                    if info:
+                        self._emit_log("info", "✅ 无登录态降级解析成功（格式列表可能不完整）")
+                        return cast(dict[str, Any], info)
+                except Exception as fallback_exc:
+                    self._emit_log("warning", f"降级解析也失败: {fallback_exc}")
+
             raise
 
     def extract_vr_info_sync(
@@ -1395,6 +1423,18 @@ class YoutubeService:
         return "youtubetab:skip=authcheck" in lower or (
             "authcheck" in lower and "youtubetab" in lower
         )
+
+    @staticmethod
+    def _is_auth_blocked_error(message: str) -> bool:
+        """判断是否为认证/风控类错误"""
+        lower = message.lower()
+        return any(kw in lower for kw in (
+            "sign in to confirm",
+            "not a bot",
+            "login required",
+            "http error 403",
+            "forbidden",
+        ))
 
     @staticmethod
     def _with_youtubetab_skip_authcheck(ydl_opts: dict[str, Any]) -> dict[str, Any]:

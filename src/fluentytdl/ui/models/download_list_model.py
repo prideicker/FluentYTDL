@@ -93,7 +93,7 @@ class DownloadListModel(QAbstractListModel):
                 self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.UserRole])
             else:
                 # Defer the repaint; the timer will flush it
-                self._pending_repaint.add(row)
+                self._pending_repaint.add(task_id)
                 if not self._repaint_timer.isActive():
                     self._repaint_timer.start()
 
@@ -119,7 +119,8 @@ class DownloadListModel(QAbstractListModel):
 
     def _flush_pending_repaints(self) -> None:
         """Emit deferred dataChanged for rows that were throttled."""
-        rows = [r for r in self._pending_repaint if 0 <= r < len(self._tasks)]
+        id_to_row = {id(t): i for i, t in enumerate(self._tasks)}
+        rows = [id_to_row[tid] for tid in self._pending_repaint if tid in id_to_row]
         self._pending_repaint.clear()
         for r in rows:
             idx = self.index(r, 0)

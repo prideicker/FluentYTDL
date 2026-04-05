@@ -21,6 +21,7 @@ class DownloadProgress:
     status: str  # "downloading" | "postprocess" | "finished" | "error"
     downloaded_bytes: int = 0
     total_bytes: int | None = None
+    total_bytes_is_estimate: bool = False
     speed: int | None = None  # bytes/s
     eta: int | None = None  # seconds
     percent: float | None = None
@@ -64,6 +65,9 @@ class YtDlpOutputParser:
         re.IGNORECASE,
     )
 
+    # stderror warnings from yt-dlp
+    _RE_WARNING = re.compile(r"^WARNING:\s*(.*)", re.IGNORECASE)
+
     # [download] Destination: path/to/file.mp4
     _RE_DEST = re.compile(r"^\[download\]\s+Destination:\s+(?P<path>.+)$")
 
@@ -72,6 +76,11 @@ class YtDlpOutputParser:
 
     # [ExtractAudio] Destination: path/to/file.mp3
     _RE_EXTRACT_AUDIO = re.compile(r"^\[ExtractAudio\]\s+Destination:\s+(?P<path>.+)$")
+
+    _RE_FFMPEG_PROGRESS = re.compile(
+        r"size=\s*[\d]+\w*\s+time=(?P<time>\d{2}:\d{2}:\d{2}\.\d{2})"
+        r".*?speed=\s*(?P<speed>[\d.]+)x"
+    )
 
     # 后处理器名称映射
     _PP_NAMES: dict[str, str] = {
@@ -92,6 +101,11 @@ class YtDlpOutputParser:
         """解析 yt-dlp 输出的一行。"""
         if not line:
             return ParsedLine(type="unknown")
+
+        # 0. Warning
+        wm = self._RE_WARNING.match(line)
+        if wm:
+            return ParsedLine(type="warning", message=wm.group(1).strip())
 
         # 1. 结构化进度行 (FLUENTYTDL|...)
         if line.startswith(self.PROGRESS_PREFIX):
@@ -140,6 +154,26 @@ class YtDlpOutputParser:
         if m:
             return ParsedLine(type="destination", path=m.group("path").strip())
 
+        m = self._RE_FFMPEG_PROGRESS.search(line)
+        if m:
+            time_str = m.group("time")
+            speed = m.group("speed") + "x"
+            time_sec = _parse_eta_hms(time_str[:8]) or 0.0
+            try:
+                ms = float("0." + time_str[-2:])
+                time_sec += ms
+            except ValueError:
+                pass
+            return ParsedLine(
+                type="ffmpeg_progress",
+                progress=DownloadProgress(
+                    status="ffmpeg_progress",
+                    speed=0,
+                    eta=0,
+                    info_dict={"time_sec": time_sec, "speed": speed}
+                )
+            )
+
         # 6. [download] 百分比进度
         if line.startswith("[download]"):
             return self._parse_download_line(line)
@@ -150,28 +184,32 @@ class YtDlpOutputParser:
         """解析 FLUENTYTDL|download|... 或 FLUENTYTDL|postprocess|... 格式。"""
         parts = line.split("|")
 
-        if len(parts) >= 3 and parts[1] == "download":
-            downloaded_s = parts[2] if len(parts) > 2 else ""
-            total_s = parts[3] if len(parts) > 3 else ""
-            speed_s = parts[4] if len(parts) > 4 else ""
-            eta_s = parts[5] if len(parts) > 5 else ""
-            vcodec = parts[6] if len(parts) > 6 else ""
-            acodec = parts[7] if len(parts) > 7 else ""
-            # ext = parts[8] if len(parts) > 8 else ""  # unused
-            filename = parts[9] if len(parts) > 9 else ""
+        if len(parts) >= 11 and parts[1] == "download":
+            downloaded_s = parts[2]
+            total_s = parts[3]
+            estimate_s = parts[4]
+            speed_s = parts[5]
+            eta_s = parts[6]
+            vcodec = parts[7]
+            acodec = parts[8]
+            # ext = parts[9] # unused
+            filename = parts[10]
 
             downloaded = _safe_int(downloaded_s)
             total = _safe_int(total_s)
+            estimate = _safe_int(estimate_s)
+            effective_total = total if total > 0 else estimate
             speed = _safe_int(speed_s)
             eta = _parse_eta_value(eta_s)
-            percent = (downloaded / total * 100.0) if total and total > 0 else None
+            percent = (downloaded / effective_total * 100.0) if effective_total > 0 else None
 
             return ParsedLine(
                 type="progress",
                 progress=DownloadProgress(
                     status="downloading",
                     downloaded_bytes=downloaded,
-                    total_bytes=total or None,
+                    total_bytes=effective_total or None,
+                    total_bytes_is_estimate=(total <= 0 and estimate > 0),
                     speed=speed or None,
                     eta=eta,
                     percent=percent,
