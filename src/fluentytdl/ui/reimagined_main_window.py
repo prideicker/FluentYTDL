@@ -253,6 +253,22 @@ class MainWindow(FluentWindow):
         if self._is_admin:
             QTimer.singleShot(2000, self.on_admin_mode_cookie_refresh)
 
+        # === 恢复重启前的未完成任务到 UI 层 ===
+        self._restore_tasks_to_ui()
+
+    def _restore_tasks_to_ui(self) -> None:
+        """将 DownloadManager 中恢复的 Worker 同步到 DownloadListModel"""
+        restored = 0
+        for worker in download_manager.active_workers:
+            title = getattr(worker, "v_title", "") or ""
+            thumb = getattr(worker, "v_thumbnail", "") or ""
+            self.task_page.model.add_task(worker, title, thumb)
+            restored += 1
+        if restored > 0:
+            logger.info(f"[MainWindow] 已恢复 {restored} 个未完成任务到 UI")
+            # UI 初始化完成后触发一次 pump，启动排队中的任务
+            QTimer.singleShot(500, download_manager.pump)
+
     def init_navigation(self):
         # 1. 新建任务
         self.addSubInterface(
@@ -425,8 +441,17 @@ class MainWindow(FluentWindow):
             self.showNormal()
             self.activateWindow()
 
+    def closeEvent(self, event):
+        """窗口关闭事件：最小化到托盘或优雅退出"""
+        if hasattr(self, 'tray_icon') and self.tray_icon and self.tray_icon.isVisible():
+            self.hide()
+            event.ignore()
+        else:
+            download_manager.shutdown(grace_ms=2000)
+            super().closeEvent(event)
+
     def quit_app(self):
-        download_manager.stop_all()
+        download_manager.shutdown(grace_ms=2000)
         QApplication.quit()
 
     def init_clipboard_monitor(self):
@@ -1015,6 +1040,10 @@ class MainWindow(FluentWindow):
             "清空记录", "确定要清空所有已完成任务记录吗？\n(不会删除本地文件)", self
         ).exec():
             for row in sorted(completed_rows, reverse=True):
+                task = self.task_page.model.get_task(row)
+                if task and task.get("worker"):
+                    if self.controller:
+                        self.controller.handle_remove_task(task["worker"], force_delete_files=False)
                 self.task_page.model.remove_task(row)
 
     def on_open_download_dir(self):

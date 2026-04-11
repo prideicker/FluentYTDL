@@ -18,6 +18,7 @@ class FileDeleteWorker(QThread):
         self.paths = paths_to_delete
 
     def run(self):
+        import shutil
         success_count = 0
         errors = []
         for p in self.paths:
@@ -30,7 +31,12 @@ class FileDeleteWorker(QThread):
                         deleted = True
                         break
                     elif os.path.isdir(p):
-                        pass
+                        shutil.rmtree(p, ignore_errors=True)
+                        if not os.path.exists(p):
+                            deleted = True
+                            break
+                        else:
+                            last_error = Exception("文件夹删除残留")
                     else:
                         deleted = True
                         break
@@ -41,6 +47,7 @@ class FileDeleteWorker(QThread):
             if deleted:
                 if os.path.basename(p) not in [".", ".."]:
                     success_count += 1
+
             elif last_error:
                 errors.append(f"{os.path.basename(p)}: {last_error}")
         self.finished_signal.emit(success_count, errors)
@@ -133,49 +140,38 @@ class AppController(QObject):
             if force_delete_files:
                 final_path = getattr(worker, "output_path", getattr(worker, "_final_filepath", ""))
 
-                sweep_list: set[str] = set()
-                if final_path:
-                    sweep_list.add(str(final_path))
-                if hasattr(worker, "dest_paths"):
-                    sweep_list.update(str(p) for p in worker.dest_paths)
-
-                import glob
                 import os
+                
+                # 如果任务还在沙盒里（未合并），直接删沙盒
+                sandbox_dir = getattr(worker, "sandbox_dir", None)
+                paths_to_delete = []
+                
+                if sandbox_dir and os.path.exists(sandbox_dir):
+                    paths_to_delete.append(sandbox_dir)
+                
+                # 收集最终上岸的文件
+                if final_path and os.path.exists(str(final_path)):
+                    paths_to_delete.append(str(final_path))
+                    
+                    # 同时顺便删除同名的附属文件(字幕,封面等)，替代原先的危险 glob
+                    base_name, _ = os.path.splitext(str(final_path))
+                    aux_exts = [".jpg", ".jpeg", ".webp", ".png", ".vtt", ".srt", ".ass", ".lrc"]
+                    for ext in aux_exts:
+                        aux_file = base_name + ext
+                        if os.path.exists(aux_file):
+                            paths_to_delete.append(aux_file)
 
-                extended_list = set(sweep_list)
-                for p in sweep_list:
-                    base_p = p
-                    if p.endswith(".part"):
-                        base_p = p[:-5]
-                    elif p.endswith(".ytdl"):
-                        base_p = p[:-5]
+                # 对于未在最终路径的 dest_paths 进行兜底
+                if hasattr(worker, "dest_paths"):
+                    for p in worker.dest_paths:
+                        if p and os.path.exists(str(p)) and str(p) not in paths_to_delete:
+                            paths_to_delete.append(str(p))
 
-                    name_without_ext = os.path.splitext(base_p)[0]
+                # 去重
+                paths_to_delete = list(dict.fromkeys(paths_to_delete))
 
-                    try:
-                        extended_list.update(glob.glob(f"{name_without_ext}*.part"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.ytdl"))
-                        extended_list.update(glob.glob(f"{name_without_ext}.f*.*"))
-
-                        extended_list.update(glob.glob(f"{name_without_ext}*.mp4"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.mkv"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.m4a"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.webm"))
-
-                        extended_list.update(glob.glob(f"{name_without_ext}*.jpg"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.jpeg"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.webp"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.png"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.vtt"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.srt"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.ass"))
-                        extended_list.update(glob.glob(f"{name_without_ext}*.lrc"))
-                    except Exception:
-                        pass
-
-                valid_files = [f for f in extended_list if os.path.exists(f)]
-                if valid_files:
-                    self.delete_files_best_effort(valid_files, success_title="已删除文件残留")
+                if paths_to_delete:
+                    self.delete_files_best_effort(paths_to_delete, success_title="已删除文件残留")
 
             if db_id:
                 task_db.delete_task(db_id)
@@ -192,9 +188,22 @@ class AppController(QObject):
             return None
 
         if hasattr(worker, "is_paused") and worker.is_paused:
-            worker.resume()
-            if not worker.isRunning() and not worker.isFinished():
-                download_manager.start_worker(worker)
+            if worker.isFinished():
+                # QThread 结束后不能重用，需要重建
+                old_db_id = getattr(worker, "db_id", 0)
+                cached_meta = {
+                    "title": getattr(worker, "v_title", ""),
+                    "thumbnail": getattr(worker, "v_thumbnail", ""),
+                }
+                new_worker = download_manager.create_worker(
+                    worker.url, worker.opts, cached_info=cached_meta, restore_db_id=old_db_id
+                )
+                download_manager.start_worker(new_worker)
+                return new_worker
+            else:
+                worker.resume()
+                if not worker.isRunning():
+                    download_manager.start_worker(worker)
         elif worker.isRunning():
             if hasattr(worker, "pause"):
                 worker.pause()

@@ -12,7 +12,6 @@ from ..utils.logger import logger
 from ..utils.translator import translate_error
 from ..youtube.youtube_service import YoutubeServiceOptions, youtube_service
 from ..youtube.yt_dlp_cli import YtDlpCancelled
-from .dispatcher import download_dispatcher
 from .executor import DownloadExecutor
 from .features import (
     DownloadContext,
@@ -332,74 +331,37 @@ class DownloadWorker(QThread):
         return not self._pause_event.is_set() and not self._cancel_event.is_set()
 
     def _sweep_part_files(self) -> None:
-        """物理清除所有因为取消而残留的残骸文件 (.part, .ytdl 等未完成流)"""
-        import glob
+        """物理清除所有因为取消而残留的残骸文件"""
         import os
+        import shutil
+        import time
 
         from ..utils.logger import logger
 
-        sweep_list = set()
+        if hasattr(self, "sandbox_dir") and self.sandbox_dir and os.path.exists(self.sandbox_dir):
+            logger.info("💥 执行沙盒清理: {}", self.sandbox_dir)
+            for _ in range(5):
+                try:
+                    shutil.rmtree(self.sandbox_dir, ignore_errors=True)
+                    if not os.path.exists(self.sandbox_dir):
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.5)
 
-        # 1. 明确记录的路径
+        sweep_list = set()
         if self.output_path:
             sweep_list.add(self.output_path)
         sweep_list.update(self.dest_paths)
 
-        # 2. 尝试推断通配符 (衍生各种独立分离流名称)
-        extended_list = set(sweep_list)
-        for p in sweep_list:
-            base_p = p
-            if p.endswith(".part"):
-                base_p = p[:-5]
-            elif p.endswith(".ytdl"):
-                base_p = p[:-5]
-
-            # 剥离最后的扩展名去匹配 .f137.mp4 这种
-            name_without_ext = os.path.splitext(base_p)[0]
-
-            try:
-                extended_list.update(glob.glob(f"{name_without_ext}*.part"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.ytdl"))
-                extended_list.update(glob.glob(f"{name_without_ext}.f*.*"))
-
-                # 扫荡可能没来得及嵌入的独立音频、视频源流 (比如 .f137.mp4, .f140.m4a 经合并后的残余)
-                extended_list.update(glob.glob(f"{name_without_ext}*.mp4"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.mkv"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.m4a"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.webm"))
-
-                # 扫荡外挂字幕和封面图残骸
-                extended_list.update(glob.glob(f"{name_without_ext}*.jpg"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.jpeg"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.webp"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.png"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.vtt"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.srt"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.ass"))
-                extended_list.update(glob.glob(f"{name_without_ext}*.lrc"))
-            except Exception:
-                pass
-
-        # 3. 物理火化
-        import time
-
-        for f in extended_list:
-            if os.path.exists(f):
-                deleted = False
-                last_error = None
-                for _ in range(5):
-                    try:
-                        os.remove(f)
-                        deleted = True
-                        break
-                    except OSError as e:
-                        last_error = e
-                        time.sleep(0.5)
-
-                if deleted:
+        # 非沙盒模式（纯提取任务等）兜底清理
+        for f in sweep_list:
+            if os.path.exists(f) and os.path.isfile(f):
+                try:
+                    os.remove(f)
                     logger.info("已物理清除残骸: {}", f)
-                else:
-                    logger.warning("清除残骸失败: {} ({})", f, last_error)
+                except Exception:
+                    pass
 
     def _wait_if_paused(self) -> None:
         """红绿灯检查点：如果红灯则阻塞，直到绿灯或取消。"""
@@ -467,6 +429,17 @@ class DownloadWorker(QThread):
             except Exception:
                 self.download_dir = os.path.abspath(os.getcwd())
 
+            # === 沙盒模式分离临时文件与最终目录 ===
+            if not self.opts.get("skip_download", False) and not self.opts.get("__fluentytdl_is_cover_direct", False):
+                db_id_str = str(getattr(self, "db_id", id(self)))
+                self.sandbox_dir = os.path.abspath(os.path.join(self.download_dir, ".fluent_temp", f"task_{db_id_str}"))
+                os.makedirs(self.sandbox_dir, exist_ok=True)
+                
+                merged["paths"] = {
+                    "home": self.sandbox_dir,
+                    "temp": self.sandbox_dir
+                }
+
             # === Feature Pipeline: Configuration & Pre-flight ===
             # 构建上下文并运行 Feature 链
             context = DownloadContext(self, merged)
@@ -487,9 +460,6 @@ class DownloadWorker(QThread):
             # === Phase 2: 断点续传支持 ===
             if config_manager.get("enable_resume", True):
                 merged["continuedl"] = True  # 继续下载部分文件
-
-            # === 调度策略 ===
-            strategy = download_dispatcher.resolve(merged)
 
             # 回调定义 (复用)
             def on_progress(data: dict[str, Any]) -> None:
@@ -517,12 +487,11 @@ class DownloadWorker(QThread):
                 self.dest_paths.add(path)
 
             # === 执行下载 ===
-            label = strategy.label
-            logger.info("🚀 启动下载 | 策略: {}", label)
+            logger.info("🚀 启动下载...")
 
             # 让 UI 瞬间响应，不再傻等
             self._clean_logger.force_update("parsing", 0.0, "🔍 正在拉取元数据...")
-            self.status_msg.emit(f"🚀 使用策略: {label}")
+            self.status_msg.emit("🚀 准备启动执行器...")
 
             self.executor = DownloadExecutor()
             try:
@@ -530,7 +499,6 @@ class DownloadWorker(QThread):
                 final_path = self.executor.execute(
                     self.url,
                     merged,
-                    strategy,
                     on_progress=on_progress,
                     on_status=on_status,
                     on_path=on_path,
@@ -541,15 +509,14 @@ class DownloadWorker(QThread):
 
                 if final_path:
                     self.output_path = final_path
-                    self.output_path_ready.emit(final_path)
-                    download_dispatcher.report_result(True)
+                    if not hasattr(self, "sandbox_dir"):
+                        self.output_path_ready.emit(final_path)
 
             except DownloadCancelled:
                 raise
 
             except Exception as exc:
-                logger.warning(f"下载失败 (策略={strategy.label}): {exc}")
-                download_dispatcher.report_result(False)
+                logger.warning(f"下载失败: {exc}")
 
                 if self.is_cancelled:
                     raise DownloadCancelled() from None
@@ -611,15 +578,15 @@ class DownloadWorker(QThread):
                             retry_merged.update(self.opts)
                             
                             final_path = self.executor.execute(
-                                self.url, retry_merged, strategy,
+                                self.url, retry_merged,
                                 on_progress=on_progress, on_status=on_status,
                                 on_path=on_path, cancel_check=lambda: self.is_cancelled,
                                 on_file_created=on_file_created, cached_info_dict=self.cached_info,
                             )
                             if final_path:
                                 self.output_path = final_path
-                                self.output_path_ready.emit(final_path)
-                                download_dispatcher.report_result(True)
+                                if not hasattr(self, "sandbox_dir"):
+                                    self.output_path_ready.emit(final_path)
                                 retry_success = True
                         except Exception as retry_exc:
                             logger.warning(f"Cookie 刷新重试仍失败: {retry_exc}")
@@ -635,15 +602,15 @@ class DownloadWorker(QThread):
                         yt.pop("player_skip", None)
                         
                         final_path = self.executor.execute(
-                            self.url, merged, strategy,
+                            self.url, merged,
                             on_progress=on_progress, on_status=on_status,
                             on_path=on_path, cancel_check=lambda: self.is_cancelled,
                             on_file_created=on_file_created, cached_info_dict=self.cached_info,
                         )
                         if final_path:
                             self.output_path = final_path
-                            self.output_path_ready.emit(final_path)
-                            download_dispatcher.report_result(True)
+                            if not hasattr(self, "sandbox_dir"):
+                                self.output_path_ready.emit(final_path)
                 else:
                     raise exc
 
@@ -656,6 +623,45 @@ class DownloadWorker(QThread):
                     except Exception as e:
                         logger.exception("后处理功能 {} 发生异常: {}", feature.__class__.__name__, e)
                         context.emit_warning(f"后处理异常 ({feature.__class__.__name__}): {str(e)}")
+                
+                # ── 转移上岸 (Extraction) ──
+                if hasattr(self, "sandbox_dir") and os.path.exists(self.sandbox_dir):
+                    self._clean_logger.force_update("completed", 99.0, "📦 正在整理文件...")
+                    import shutil
+                    
+                    final_moved_path = None
+                    try:
+                        for entry in os.scandir(self.sandbox_dir):
+                            if entry.is_file() and not entry.name.endswith(".part") and not entry.name.endswith(".ytdl"):
+                                src = entry.path
+                                dst = os.path.join(self.download_dir, entry.name)
+                                
+                                # Move the file
+                                if os.path.exists(dst):
+                                    os.remove(dst)
+                                shutil.move(src, dst)
+                                
+                                # Check if this is the main output path
+                                if self.output_path and os.path.basename(self.output_path) == entry.name:
+                                    final_moved_path = dst
+                                elif not self.output_path and not entry.name.endswith((".jpg", ".jpeg", ".png", ".webp", ".srt", ".vtt", ".ass", ".lrc")):
+                                    final_moved_path = dst
+                                
+                        if final_moved_path:
+                            self.output_path = final_moved_path
+                            self.output_path_ready.emit(final_moved_path)
+                        elif self.output_path and not self.output_path.startswith(self.sandbox_dir):
+                            self.output_path_ready.emit(self.output_path)
+                            
+                        # Clean up sandbox
+                        shutil.rmtree(self.sandbox_dir, ignore_errors=True)
+                    except Exception as e:
+                        logger.warning("移动沙盒文件失败: {}", e)
+                        if self.output_path:
+                             self.output_path_ready.emit(self.output_path)
+                else:
+                    if self.output_path:
+                        self.output_path_ready.emit(self.output_path)
                 
                 self._clean_logger.force_update("completed", 100.0, "✅ 下载并处理完成！")
                 self.completed.emit()
@@ -676,12 +682,22 @@ class DownloadWorker(QThread):
                 self.status_msg.emit("⚠️ 检测到网络SSL错误，建议检查网络连接后重试")
 
             logger.exception("下载过程发生异常: {}", self.url)
-            # Failure for circuit breaker
-            download_dispatcher.report_result(False)
             
             # CRITICAL FIX: Update CleanLogger state so that effective_state doesn't fallback to 'completed'
             pct = getattr(self, "progress_val", 0.0)
             self._clean_logger.force_update("error", pct, f"❌ 错误: {msg}")
+            
+            _AUTH_ERROR_KEYWORDS = (
+                "sign in to confirm",
+                "not a bot",
+                "login required",
+                "http error 403",
+                "forbidden",
+                "cookies",
+            )
+            if any(kw in msg.lower() for kw in _AUTH_ERROR_KEYWORDS):
+                logger.warning("下载拦截完毕或 fallback 失效，触发全局 Cookie 修复弹窗")
+                self.cookie_error_detected.emit(msg)
             
             self.error.emit(translate_error(exc))
         finally:
@@ -876,12 +892,12 @@ class DownloadWorker(QThread):
 
             if rc != 0:
                 logger.warning("[LightweightExtract] yt-dlp 退出码 {}", rc)
-                self.status_msg.emit(f"⚠️ 提取完成（退出码: {rc}）")
                 self._clean_logger.force_update("error", 100.0, f"❌ 错误: yt-dlp 退出码 {rc}")
+                from ..youtube.error_translator import translate_error
+                self.error.emit(translate_error(RuntimeError(f"yt-dlp 退出码 {rc}")))
             else:
                 self._clean_logger.force_update("completed", 100.0, "✅ 提取完成")
-
-            self.completed.emit()
+                self.completed.emit()
 
         except Exception as exc:
             logger.exception("[LightweightExtract] 提取失败: {}", self.url)
@@ -968,9 +984,11 @@ class DownloadWorker(QThread):
             self._proc_ref = None
             if rc != 0:
                 self._clean_logger.force_update("error", 100.0, f"❌ 错误: yt-dlp 退出码 {rc}")
+                from ..youtube.error_translator import translate_error
+                self.error.emit(translate_error(RuntimeError(f"yt-dlp 退出码 {rc}")))
             else:
                 self._clean_logger.force_update("completed", 100.0, "✅ 下载完成")
-            self.completed.emit()
+                self.completed.emit()
         except Exception as exc:
             logger.exception("[CoverDirect] 提取失败: {}", self.url)
             self._clean_logger.force_update("error", 0.0, f"❌ 错误: {exc}")

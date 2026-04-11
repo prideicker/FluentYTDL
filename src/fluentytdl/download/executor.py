@@ -26,7 +26,6 @@ from ..youtube.yt_dlp_cli import (
     ydl_opts_to_cli_args,
 )
 from .output_parser import YtDlpOutputParser
-from .strategy import DownloadStrategy
 
 # 字幕/封面等附属文件后缀，不应被视为主输出文件
 _AUXILIARY_EXTENSIONS = frozenset(
@@ -190,7 +189,6 @@ class DownloadExecutor:
         self,
         url: str,
         ydl_opts: dict[str, Any],
-        strategy: DownloadStrategy,
         *,
         on_progress: ProgressCallback,
         on_status: StatusCallback,
@@ -204,11 +202,11 @@ class DownloadExecutor:
         Args:
             url: 视频 URL。
             ydl_opts: yt-dlp 选项字典。
-            strategy: 下载策略。
             on_progress: 进度回调。
             on_status: 状态消息回调。
             on_path: 输出路径回调。
             cancel_check: 取消检查回调。
+            on_file_created: 文件创建回调。
             cached_info_dict: (Optional) 预先提取的 info dict，避免重复提取。
 
         Returns:
@@ -217,13 +215,10 @@ class DownloadExecutor:
         Raises:
             RuntimeError: 子进程失败或取消。
         """
-        logger.info("[Executor] 策略={}", strategy.label)
-
         # 总是使用原生管线
         return self._execute_native(
             url,
             ydl_opts,
-            strategy,
             on_progress=on_progress,
             on_status=on_status,
             on_path=on_path,
@@ -238,7 +233,6 @@ class DownloadExecutor:
         self,
         url: str,
         ydl_opts: dict[str, Any],
-        strategy: DownloadStrategy,
         *,
         on_progress: ProgressCallback,
         on_status: StatusCallback,
@@ -253,8 +247,7 @@ class DownloadExecutor:
         if exe is None:
             raise RuntimeError("yt-dlp 可执行文件未找到")
 
-        # 注入策略参数（取消了极端的并发覆写判定机制，直接使用配置的默认值）
-        strategy.apply_to_ydl_opts(ydl_opts)
+        ydl_opts["skip_unavailable_fragments"] = True
 
         progress_prefix = "FLUENTYTDL|"
         cmd: list[str] = [
@@ -473,7 +466,6 @@ class DownloadExecutor:
         self,
         url: str,
         ydl_opts: dict[str, Any],
-        strategy: DownloadStrategy,
         *,
         on_progress: ProgressCallback,
         on_status: StatusCallback,
@@ -493,7 +485,6 @@ class DownloadExecutor:
         self._execute_native(
             url,
             opts,
-            strategy,
             on_progress=on_progress,
             on_status=on_status,
             on_path=lambda path: None,

@@ -53,15 +53,7 @@ class DownloadFilterProxyModel(QSortFilterProxyModel):
         if not worker:
             return False
 
-        state = "queued"
-        if worker.isRunning():
-            state = "running"
-        elif worker.isFinished():
-            state = getattr(worker, "_final_state", "completed")
-        else:
-            s = getattr(worker, "_final_state", "queued")
-            if s in ("paused", "error"):
-                state = s
+        state = worker.effective_state
 
         return state == self._filter
 

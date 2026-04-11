@@ -582,18 +582,26 @@ class DownloadConfigWindow(FramelessWindow):
 
         # 绑定分段选择器
         self._authSegment.addItem(
-            routeKey="dle", text="🔑 登录", onClick=lambda: self._authStack.setCurrentIndex(0)
+            routeKey="dle", text="🔑 登录"
         )
         self._authSegment.addItem(
-            routeKey="extract", text="🚀 提取", onClick=lambda: self._authStack.setCurrentIndex(1)
+            routeKey="extract", text="🚀 提取"
         )
         self._authSegment.addItem(
-            routeKey="import", text="📄 导入", onClick=lambda: self._authStack.setCurrentIndex(2)
+            routeKey="import", text="📄 导入"
         )
         self._authSegment.addItem(
-            routeKey="update", text="⚙️ 更新", onClick=lambda: self._authStack.setCurrentIndex(3)
+            routeKey="update", text="⚙️ 更新"
+        )
+        
+        # 移除 onClick 参数，改为监听 currentItemChanged
+        self._authSegment.currentItemChanged.connect(
+            lambda key: self._authStack.setCurrentIndex(
+                {"dle": 0, "extract": 1, "import": 2, "update": 3}.get(key, 0)
+            )
         )
         self._authSegment.setCurrentItem("dle")
+        self._authStack.setCurrentIndex(0)
 
         # 初始化 DLE 账号列表
         self._dle_account_ids: list[str] = []
@@ -1309,10 +1317,7 @@ class DownloadConfigWindow(FramelessWindow):
     ) -> None:
         """
         403 模糊错误 → 异步探测 YouTube 连通性后决定显示哪个面板。
-        探测期间显示加载提示。
         """
-        if self._error_label:
-            self._error_label.setText(f"{friendly_title}\n\n正在诊断原因（检测网络连通性）...")
 
         from PySide6.QtCore import QThread
         from PySide6.QtCore import Signal as QSignal
@@ -1333,12 +1338,6 @@ class DownloadConfigWindow(FramelessWindow):
                 return
             if reachable:
                 # 网络通 → Cookie 问题
-                if self._error_label:
-                    self._error_label.setText(
-                        "需要验证 (Cookie 缺失或失效)\n\n"
-                        "网络连通正常，YouTube 拒绝了请求。\n"
-                        "这是通常表示 Cookie 已失效，或者您可能需要更新 yt-dlp 组件。"
-                    )
                 self.retryWidget.show()
                 if suggests_component_update:
                     self._authSegment.setCurrentItem("update")

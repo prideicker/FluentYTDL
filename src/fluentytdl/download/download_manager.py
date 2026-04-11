@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections import deque
+from functools import partial
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -169,18 +170,17 @@ class DownloadManager(QObject):
         self.active_workers.append(worker)
 
         # When a worker ends, free a slot and pump queued tasks.
-        try:
-            worker.finished.connect(lambda: self._on_worker_finished(worker))
-        except Exception:
-            pass
+        worker.finished.connect(partial(self._on_worker_finished, worker))
         worker.completed.connect(_on_completed)
-        worker.cancelled.connect(lambda: self.task_updated.emit())
-        worker.error.connect(lambda *_: self.task_updated.emit())
+        worker.cancelled.connect(self.task_updated.emit)
+        worker.error.connect(self.task_updated.emit)
         return worker
 
     def _on_worker_finished(self, worker: DownloadWorker) -> None:
-        # Worker ended => free slot
         self._remove_from_pending(worker)
+        # 清理已完成的 Worker，防止 active_workers 无限增长
+        if worker in self.active_workers and not worker.isRunning():
+            self.active_workers.remove(worker)
         self.pump()
 
     def start_worker(self, worker: DownloadWorker) -> bool:
@@ -254,7 +254,7 @@ class DownloadManager(QObject):
         if worker in self.active_workers:
             if worker.isRunning():
                 worker.stop()
-                worker.wait()
+                # 移除阻塞式等待，防 UI 卡死
             self.active_workers.remove(worker)
             self.task_updated.emit()
 

@@ -37,6 +37,7 @@ datas = [
 
 # 自动收集子模块和元数据
 hiddenimports = ['mutagen', 'webview', 'clr', 'pythonnet', 'clr_loader']
+hiddenimports += ['tzdata', 'pycparser.lextab', 'pycparser.yacctab']
 hiddenimports += collect_submodules('fluentytdl')
 hiddenimports += collect_submodules('rookiepy')
 hiddenimports += collect_submodules('webview')

@@ -138,13 +138,6 @@ class DownloadListModel(QAbstractListModel):
             self._tasks.pop(row)
             self.endRemoveRows()
 
-            # 停止它的活性
-            worker = task.get("worker")
-            if worker and hasattr(worker, "stop"):
-                worker.stop()
-            elif worker and hasattr(worker, "cancel"):
-                worker.cancel()
-
     def get_task(self, row: int) -> dict[str, Any] | None:
         if 0 <= row < len(self._tasks):
             return self._tasks[row]
@@ -186,15 +179,7 @@ class DownloadListModel(QAbstractListModel):
                 continue
 
             # 推断当前状态
-            state = "queued"
-            if worker.isRunning():
-                state = "running"
-            elif worker.isFinished():
-                state = getattr(worker, "_final_state", "completed")
-            else:
-                s = getattr(worker, "_final_state", "queued")
-                if s in ("paused", "error"):
-                    state = s
+            state = worker.effective_state
 
             counts[state] = counts.get(state, 0) + 1
             counts["all"] += 1

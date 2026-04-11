@@ -170,22 +170,6 @@ class CleanLogger:
             self._emit("processing", pct, msg)
             return
 
-        if status == "ffmpeg_progress":
-            time_sec = progress_data.get("time_sec", 0.0)
-            speed = progress_data.get("speed", "1x")
-            
-            if getattr(self, "_duration", 0.0) > 0:
-                raw_pct = (time_sec / self._duration) * 100.0
-                raw_pct = min(100.0, max(0.0, raw_pct))
-            else:
-                raw_pct = 50.0  # unknown duration
-                
-            pct = self._stream_phase.map_progress(self._stream_phase.POST, raw_pct)
-            pct = round(pct, 1)
-            msg = f"🔄 FFmpeg 转码中 {raw_pct:.1f}% | 速度: {speed}..."
-            self._emit("processing", pct, msg)
-            return
-
         if status == "postprocess":  # 来自 FLUENTYTDL|postprocess| 钩子
             pp_name = progress_data.get("postprocessor", "Unknown")
             pp_status = progress_data.get("pp_status", "")  # started/finished

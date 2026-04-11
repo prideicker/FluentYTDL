@@ -52,6 +52,42 @@ def main() -> None:
     # 1. 创建应用
     app = QApplication(sys.argv)
 
+    # === 修复打包后弹出式控件双层阴影 ===
+    # Windows DWM 在 PyInstaller 打包环境下可能忽略 Qt.NoDropShadowWindowHint，
+    # 导致系统阴影与 QFluentWidgets 自绘阴影叠加，出现外围灰色矩形阴影框。
+    # 通过全局事件过滤器，在 Popup 窗口显示时用 Win32 API 移除 CS_DROPSHADOW 类样式。
+    # 使用 ctypes 而非 pywin32，确保零外部依赖，在任何打包环境下都可靠工作。
+    if sys.platform == "win32":
+        import ctypes
+        from PySide6.QtCore import QEvent, QObject
+
+        _user32 = ctypes.windll.user32
+        _GCL_STYLE = -26
+        _CS_DROPSHADOW = 0x00020000
+
+        class _PopupShadowFilter(QObject):
+            """Strip DWM CS_DROPSHADOW from Popup windows on Show."""
+
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.Show:
+                    try:
+                        flags = obj.windowFlags()
+                        if (flags & Qt.WindowType.Popup) and (
+                            flags & Qt.WindowType.FramelessWindowHint
+                        ):
+                            hwnd = int(obj.winId())
+                            style = _user32.GetClassLongW(hwnd, _GCL_STYLE)
+                            if style & _CS_DROPSHADOW:
+                                _user32.SetClassLongW(
+                                    hwnd, _GCL_STYLE, style & ~_CS_DROPSHADOW
+                                )
+                    except Exception:
+                        pass
+                return False
+
+        app._popup_shadow_filter = _PopupShadowFilter(app)  # prevent GC
+        app.installEventFilter(app._popup_shadow_filter)
+
     # === 避免强制写死浅色模式，跟随用户配置动态调整 ===
     import qfluentwidgets
 
