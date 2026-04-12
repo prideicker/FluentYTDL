@@ -294,6 +294,12 @@ class Builder:
         if LICENSES_DIR.exists():
             shutil.copytree(LICENSES_DIR, target_dir / "licenses", dirs_exist_ok=True)
 
+        for doc in ["LICENSE", "README.md", "TRADEMARK.md", "ACADEMIC_HONESTY.md"]:
+            src_doc = ROOT / doc
+            if src_doc.exists():
+                shutil.copy2(src_doc, target_dir / doc)
+        print("✓ 捆绑核心说明与法律协议文档")
+
     def create_7z(self, source_dir: Path, output_name: str) -> Path:
         RELEASE_DIR.mkdir(exist_ok=True)
         output_path = RELEASE_DIR / f"{output_name}.7z"

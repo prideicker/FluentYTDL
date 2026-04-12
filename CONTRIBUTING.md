@@ -11,4 +11,4 @@ Security & secrets:
 - Never commit `config.json`, credentials, API tokens, or cookies. Use `config.example.json`.
 
 License:
-- By contributing, you agree to license your contribution under the project's MIT license.
+- By contributing, you agree to license your contribution under the project's **GPLv3** license. You also acknowledge and respect the project's trademark and academic honesty constraints.
