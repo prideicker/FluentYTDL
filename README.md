@@ -18,10 +18,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/prideicker/FluentYTDL/releases/latest">
-    <img src="https://img.shields.io/github/v/release/prideicker/FluentYTDL?style=flat-square&color=blue&label=Release" alt="Release">
+  <a href="https://github.com/SakuraForgot/FluentYTDL/releases/latest">
+    <img src="https://img.shields.io/github/v/release/SakuraForgot/FluentYTDL?style=flat-square&color=blue&label=Release" alt="Release">
   </a>
-  <a href="https://github.com/prideicker/FluentYTDL/blob/main/LICENSE">
+  <a href="https://github.com/SakuraForgot/FluentYTDL/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-GPLv3-blue.svg?style=flat-square" alt="License">
   </a>
   <img src="https://img.shields.io/badge/Python-3.10+-green?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -86,18 +86,18 @@
 
 ### 方式一：下载安装包（推荐）
 
-1. 前往 [Releases](https://github.com/prideicker/FluentYTDL/releases) 页面
+1. 前往 [Releases](https://github.com/SakuraForgot/FluentYTDL/releases) 页面
 2. 下载最新版本的 `*-setup.exe` 安装程序或 `*-full.7z` 便携包
 3. 运行安装程序按提示完成安装，或解压便携包到任意位置
 4. 启动 FluentYTDL，开始使用！
 
-> **⚠️ 注意：** 请务必从本仓库的 [Releases](https://github.com/prideicker/FluentYTDL/releases) 页面获取，这是唯一合法的分发渠道。任何第三方下载站均非授权来源。
+> **⚠️ 注意：** 请务必从本仓库的 [Releases](https://github.com/SakuraForgot/FluentYTDL/releases) 页面获取，这是唯一合法的分发渠道。任何第三方下载站均非授权来源。
 
 ### 方式二：从源码运行
 
 ```bash
 # 克隆仓库
-git clone https://github.com/prideicker/FluentYTDL.git
+git clone https://github.com/SakuraForgot/FluentYTDL.git
 cd FluentYTDL
 
 # 安装依赖
@@ -335,5 +335,5 @@ FluentYTDL 的诞生离不开以下优秀的开源项目和服务：
 ---
 
 <p align="center">
-  Made with ❤️ by <a href="https://github.com/prideicker">prideicker</a>
+  Made with ❤️ by <a href="https://github.com/SakuraForgot">SakuraForgot</a>
 </p>

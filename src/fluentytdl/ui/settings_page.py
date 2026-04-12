@@ -1709,7 +1709,7 @@ class SettingsPage(QWidget):
     def _init_about_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.aboutGroup = SettingCardGroup("关于", parent_widget)
         self.aboutCard = HyperlinkCard(
-            "https://github.com/prideicker/FluentYTDL",
+            "https://github.com/SakuraForgot/FluentYTDL",
             "访问项目仓库",
             FluentIcon.GITHUB,
             "FluentYTDL",

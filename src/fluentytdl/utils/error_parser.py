@@ -547,4 +547,4 @@ def generate_issue_url(title: str, raw_error: str) -> str:
     issue_body = urllib.parse.quote(body)
 
     # 附带 labels=bug
-    return f"https://github.com/prideicker/FluentYTDL/issues/new?title={issue_title}&body={issue_body}&labels=bug"
+    return f"https://github.com/SakuraForgot/FluentYTDL/issues/new?title={issue_title}&body={issue_body}&labels=bug"

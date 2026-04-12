@@ -66,7 +66,7 @@ class _CheckWorker(QThread):
     finished = Signal(dict)  # {tag_name, body, assets: [...]}
     error = Signal(str)
 
-    GITHUB_API = "https://api.github.com/repos/prideicker/FluentYTDL/releases/latest"
+    GITHUB_API = "https://api.github.com/repos/SakuraForgot/FluentYTDL/releases/latest"
 
     def run(self) -> None:
         try:
