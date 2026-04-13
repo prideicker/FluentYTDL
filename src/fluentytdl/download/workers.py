@@ -536,6 +536,10 @@ class DownloadWorker(QThread):
                 if is_auth_error and not is_vr_mode and not self._fallback_attempted:
                     self._fallback_attempted = True
                     
+                    # 退避 5 秒后再重试，避免在短时间内连续请求被 YouTube 加重限流
+                    import time
+                    time.sleep(5)
+                    
                     cookie_refreshed = False
                     try:
                         from ..auth.auth_service import (

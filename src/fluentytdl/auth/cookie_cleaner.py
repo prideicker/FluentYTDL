@@ -34,12 +34,23 @@ class CookieCleaner:
         "__Secure-3PSID",
         "__Secure-1PAPISID",
         "__Secure-3PAPISID",
+        # SID 绑定校验令牌 (必需: 缺失会导致 YouTube 判定为未认证)
+        "__Secure-1PSIDCC",
+        "__Secure-3PSIDCC",
+        "SIDCC",
+        # 时间戳验证令牌 (yt-dlp 用于会话新鲜度校验)
+        "__Secure-1PSIDTS",
+        "__Secure-3PSIDTS",
         # 会话状态
         "LOGIN_INFO",
+        "YSC",
         # 用户偏好
         "PREF",
         # 设备/访客标识
         "VISITOR_INFO1_LIVE",
+        "VISITOR_PRIVACY_METADATA",
+        # Google 设备标识
+        "NID",
     }
 
     # 标准 Netscape Cookie 字段
