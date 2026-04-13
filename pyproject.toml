@@ -68,7 +68,7 @@ fluentytdl = "fluentytdl.main:main"
 [project.optional-dependencies]
 dev = [
   "pytest>=7.0",
-  "ruff>=0.12",
+  "ruff>=0.15.10",
   "pyright>=1.1",
   "pyinstaller>=5.9",
 ]
