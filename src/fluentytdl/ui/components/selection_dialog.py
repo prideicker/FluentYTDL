@@ -1220,19 +1220,95 @@ class SelectionDialog(MessageBoxBase):
         suggestion = str(err_data.get("suggestion") or "")
         raw_error = str(err_data.get("raw_error") or "")
 
+        from ...utils.error_parser import ErrorCategory, classify_error
+        category = classify_error(raw_error) if raw_error else ErrorCategory.OTHER
+
         text = f"{title}\n\n{content}"
         if suggestion:
             text += f"\n\n建议操作：\n{suggestion}"
-        self._error_label = CaptionLabel(text, self)
-        try:
-            self._error_label.setWordWrap(True)
-        except Exception:
-            pass
-        self.viewLayout.addWidget(self._error_label)
+        
+        # === 根据分类决定显示哪个面板 ===
+        if category == ErrorCategory.COOKIE:
+            self.titleLabel.setText("身份验证失败")
+            # 不用长文显示 _error_label，避免视觉打断
+            self.retryWidget.hide()
+            
+            from .cookie_repair_dialog import CookieRepairDialog
+            from ...auth.auth_service import AuthSourceType, auth_service
+            
+            current_source = auth_service.current_source
+            source_map = {
+                AuthSourceType.DLE: "dle",
+                AuthSourceType.FILE: "file",
+            }
+            auth_source_str = source_map.get(current_source, "browser")
+            
+            dialog = CookieRepairDialog(raw_error, parent=self.window(), auth_source=auth_source_str)
+            
+            if current_source == AuthSourceType.DLE:
+                dialog.setWindowTitle("需要重新登录 YouTube")
+                dialog.repair_btn.setText("重新登录")
+            elif current_source == AuthSourceType.FILE:
+                dialog.setWindowTitle("Cookie 文件需要更新")
+                dialog.repair_btn.setText("重新导入")
+            
+            def on_auto_repair():
+                if current_source == AuthSourceType.DLE:
+                    from ...core.controller import Controller
+                    ctrl = Controller.get_instance()
+                    dialog.accept()
+                    if ctrl:
+                        ctrl.show_settings_page()
+                    self.reject()
+                elif current_source == AuthSourceType.FILE:
+                    from ...core.controller import Controller
+                    ctrl = Controller.get_instance()
+                    dialog.accept()
+                    if ctrl:
+                        ctrl.show_settings_page()
+                    self.reject()
+                else:
+                    from ...auth.cookie_sentinel import cookie_sentinel
+                    success, msg = cookie_sentinel.force_refresh_with_uac()
+                    dialog.show_repair_result(success, msg)
+                    if success:
+                        from PySide6.QtCore import QTimer
+                        QTimer.singleShot(1500, self.start_extraction)
+                        
+            dialog.repair_requested.connect(on_auto_repair)
+            
+            def on_manual_import():
+                dialog.accept()
+                from PySide6.QtWidgets import QDialog
+                try:
+                    from fluentytdl.ui.components.cookie_import_dialog import CookieImportDialog
+                except ImportError:
+                    return
+                import_dlg = CookieImportDialog(self.window())
+                if import_dlg.exec() == QDialog.DialogCode.Accepted:
+                    from ...auth.cookie_sentinel import cookie_sentinel
+                    cookie_sentinel.force_refresh()
+                    self.start_extraction()
 
-        lower = raw_error.lower()
-        if "cookies" in lower or "not a bot" in lower or "sign in" in lower:
-            self.retryWidget.show()
+            dialog.manual_import_requested.connect(on_manual_import)
+            dialog.show()
+            
+            try:
+                from ...auth.cookie_probe_throttle import cookie_probe_throttle
+                cookie_probe_throttle.record_download_failure("cookie")
+            except Exception:
+                pass
+        else:
+            self._error_label = CaptionLabel(text, self)
+            try:
+                self._error_label.setWordWrap(True)
+            except Exception:
+                pass
+            self.viewLayout.addWidget(self._error_label)
+            
+            lower = raw_error.lower()
+            if "cookies" in lower or "not a bot" in lower or "sign in" in lower:
+                self.retryWidget.show()
 
     def _on_retry_clicked(self) -> None:
         # Cancel any in-flight parsing before restarting.

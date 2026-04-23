@@ -109,6 +109,133 @@ def _prepend_path(env: dict[str, str], *dirs: str) -> None:
     env["PATH"] = os.pathsep.join(cleaned + [existing]) if existing else os.pathsep.join(cleaned)
 
 
+# ---------------------------------------------------------------------------
+# POT Plugin Sync — 标准目录插件安装
+# ---------------------------------------------------------------------------
+# 独立编译的 yt-dlp.exe（PyInstaller/Nuitka）不支持 PYTHONPATH 外部插件加载。
+# 必须将插件放置在 <exe-dir>/yt-dlp-plugins/<pkg>/yt_dlp_plugins/extractor/ 下，
+# 这是 yt-dlp 官方推荐的 "Executable location" 安装方式。
+# See: https://github.com/yt-dlp/yt-dlp#installing-plugins
+# ---------------------------------------------------------------------------
+
+_PLUGIN_PACKAGE_NAME = "bgutil-ytdlp-pot-provider"
+_PLUGIN_FILE_GLOB = "getpot_bgutil*.py"
+
+
+def _get_pot_plugin_source_dir() -> Path | None:
+    """获取 POT 插件源文件目录。
+
+    Dev 模式: src/fluentytdl/yt_dlp_plugins_ext/yt_dlp_plugins/extractor/
+    Frozen 模式: _internal/fluentytdl/yt_dlp_plugins_ext/yt_dlp_plugins/extractor/
+    """
+    _subpath = Path("yt_dlp_plugins_ext") / "yt_dlp_plugins" / "extractor"
+
+    # 方式 1：基于 __file__ 的相对路径（dev 和大多数 frozen 场景）
+    source = Path(__file__).resolve().parent.parent / _subpath
+    if source.exists():
+        return source
+
+    # 方式 2：frozen 回退 — 基于 _internal 目录
+    # PyInstaller 打包时 .spec datas 将 yt_dlp_plugins_ext 挂载到 fluentytdl/ 下
+    # 但 __file__ 在某些 PyInstaller 配置下可能不指向 _internal
+    if is_frozen():
+        source2 = frozen_internal_dir() / "fluentytdl" / _subpath
+        if source2.exists():
+            return source2
+
+    return None
+
+
+def sync_pot_plugins_to_ytdlp() -> bool:
+    """将 POT 插件文件同步到 yt-dlp.exe 旁的标准插件目录。
+
+    yt-dlp 独立编译版（.exe）不支持 PYTHONPATH 插件加载，
+    需要将插件放置在 <exe-dir>/yt-dlp-plugins/<pkg>/yt_dlp_plugins/extractor/ 下。
+
+    此函数执行增量同步：仅当源文件更新（mtime 更新或目标不存在）时才复制。
+
+    Returns:
+        True 如果插件目录就绪（已同步或无需同步）
+    """
+    from loguru import logger
+
+    try:
+        exe = resolve_yt_dlp_exe()
+        if exe is None:
+            logger.debug("POT Plugin Sync: yt-dlp.exe 未找到，跳过同步")
+            return False
+
+        source_dir = _get_pot_plugin_source_dir()
+        if source_dir is None:
+            logger.debug("POT Plugin Sync: 插件源目录不存在，跳过同步")
+            return False
+
+        source_files = list(source_dir.glob(_PLUGIN_FILE_GLOB))
+        if not source_files:
+            logger.debug("POT Plugin Sync: 未找到插件源文件，跳过同步")
+            return False
+
+        # 目标: <exe-dir>/yt-dlp-plugins/<pkg>/yt_dlp_plugins/extractor/
+        target_dir = (
+            exe.parent / "yt-dlp-plugins" / _PLUGIN_PACKAGE_NAME
+            / "yt_dlp_plugins" / "extractor"
+        )
+
+        # 增量同步：只在需要时创建目录和复制文件
+        needs_sync = False
+        if not target_dir.exists():
+            needs_sync = True
+        else:
+            for src_file in source_files:
+                dst_file = target_dir / src_file.name
+                if not dst_file.exists():
+                    needs_sync = True
+                    break
+                # 比较修改时间（源更新则需要同步）
+                if src_file.stat().st_mtime > dst_file.stat().st_mtime:
+                    needs_sync = True
+                    break
+
+        if not needs_sync:
+            logger.debug("POT Plugin Sync: 插件已是最新，无需同步")
+            return True
+
+        # 执行同步
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            logger.warning(
+                f"POT Plugin Sync: 无法创建插件目录 {target_dir}（权限不足）。"
+                "如果安装在 Program Files 下，请以管理员身份运行一次，或手动复制插件文件。"
+            )
+            return False
+
+        synced = 0
+        for src_file in source_files:
+            dst_file = target_dir / src_file.name
+            try:
+                shutil.copy2(src_file, dst_file)
+                synced += 1
+            except PermissionError:
+                logger.warning(
+                    f"POT Plugin Sync: 复制 {src_file.name} 失败（权限不足）。"
+                    "请以管理员身份运行一次应用以完成插件部署。"
+                )
+            except Exception as e:
+                logger.warning(f"POT Plugin Sync: 复制 {src_file.name} 失败: {e}")
+
+        if synced > 0:
+            logger.info(
+                f"POT Plugin Sync: 已同步 {synced} 个插件文件到 {target_dir.parent.parent}"
+            )
+        return synced > 0
+
+    except Exception as e:
+        from loguru import logger
+        logger.debug(f"POT Plugin Sync: 同步异常: {e}")
+        return False
+
+
 def prepare_yt_dlp_env(extra_paths: list[str] | None = None) -> dict[str, str]:
     """Prepare environment so yt-dlp.exe can find bundled ffmpeg and JS runtime.
 
@@ -152,8 +279,11 @@ def prepare_yt_dlp_env(extra_paths: list[str] | None = None) -> dict[str, str]:
             if p and Path(p).exists():
                 _prepend_path(env, p)
 
-    # Allow yt-dlp to load plugins from the internal directory
-    # The plugin directory structure is: src/fluentytdl/yt_dlp_plugins_ext/yt_dlp_plugins/
+    # --- POT Plugin Sync ---
+    # 确保 POT 插件位于 yt-dlp.exe 旁的标准插件目录（独立 exe 兼容）
+    sync_pot_plugins_to_ytdlp()
+
+    # PYTHONPATH fallback: pip 安装的 yt-dlp（Python 脚本版）仍可通过此路径发现插件
     plugin_dir = Path(__file__).resolve().parent.parent / "yt_dlp_plugins_ext"
     if plugin_dir.exists():
         existing_pypath = env.get("PYTHONPATH") or ""

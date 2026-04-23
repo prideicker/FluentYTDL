@@ -315,25 +315,29 @@ class YoutubeService:
         )
 
         # --- Smart client switching ---
-        # With Cookies: keep yt-dlp default (web) extractor behavior (best for 4K/Premium).
-        # Without Cookies: enable android/ios simulation to reduce throttling, but quality/format
-        # availability may be limited depending on video/account.
+        # With Cookies: web first (4K/Premium), mweb fallback (avoids SABR, PO Token works).
+        # Without Cookies: mweb only (PO Token best client, no SABR enforcement).
+        # IMPORTANT: Do NOT use "default" — it may include android_vr as a fallback,
+        # which does NOT support PO Token and triggers bot detection.
+        # IMPORTANT: web client alone may return only 360p due to YouTube SABR enforcement
+        # (Server-Adaptive Bitrate Rendering, see https://github.com/yt-dlp/yt-dlp/issues/12482).
+        # mweb is not affected by SABR and returns full format lists with PO Token.
         if not has_valid_cookie:
             ydl_opts["extractor_args"] = {
                 "youtube": {
-                    # yt-dlp extractor args expect comma-separated values (same as CLI syntax)
-                    "player_client": ["android,ios"],
-                    "player_skip": ["js,configs,hls"],
+                    # mweb: 官方推荐无 Cookie 客户端，PO Token 完整支持，不受 SABR 影响
+                    "player_client": ["mweb"],
                 }
             }
             self._emit_log(
-                "warning", "未检测到有效 Cookies，启用 Android/iOS 模拟（可能缺失部分高画质）"
+                "warning", "未检测到有效 Cookies，使用 mweb 客户端（PO Token 可用，不受 SABR 限制）"
             )
         else:
             extractor_args = ydl_opts.setdefault("extractor_args", {})
             youtube_args = extractor_args.setdefault("youtube", {})
-            youtube_args["player_client"] = ["default"]
-            self._emit_log("info", "🚀 Cookies 模式激活：锁定 Web 默认客户端（已屏蔽 android_vr 探测）")
+            # web 优先（4K/Premium 内容），mweb 兜底（规避 SABR 限制）
+            youtube_args["player_client"] = ["web,mweb"]
+            self._emit_log("info", "🚀 Cookies 模式激活：Web+mweb 客户端（已屏蔽 android_vr 回退）")
 
         # --- POT Provider 服务集成 ---
         # POT (Proof of Origin Token) Provider 提供动态 PO Token 生成服务
@@ -376,6 +380,22 @@ class YoutubeService:
                                 "info",
                                 f"🛡️ POT Provider 已激活: 端口 {pot_manager.active_port} (自动绕过机器人检测)",
                             )
+
+                            # 首次激活时验证 yt-dlp 是否能加载 POT 插件
+                            if not getattr(self, "_pot_plugin_checked", False):
+                                self._pot_plugin_checked = True
+                                try:
+                                    plugin_ok, plugin_msg = pot_manager.verify_plugin_loadable()
+                                    if plugin_ok:
+                                        self._emit_log("info", f"✅ {plugin_msg}")
+                                    else:
+                                        self._emit_log(
+                                            "warning",
+                                            f"⚠️ POT 插件验证失败: {plugin_msg}。"
+                                            "PO Token 服务已运行但可能无法被 yt-dlp 使用。",
+                                        )
+                                except Exception as diag_err:
+                                    self._emit_log("debug", f"POT 插件诊断异常: {diag_err}")
                 else:
                     self._emit_log(
                         "warning",
@@ -383,6 +403,12 @@ class YoutubeService:
                     )
             except Exception as e:
                 self._emit_log("debug", f"POT Provider 检测失败: {e}")
+
+        # --- 诊断日志：打印最终 extractor_args 概要 ---
+        final_ea = ydl_opts.get("extractor_args", {})
+        if final_ea:
+            ea_summary = {k: list(v.keys()) if isinstance(v, dict) else v for k, v in final_ea.items()}
+            self._emit_log("debug", f"[Final] extractor_args: {ea_summary}")
 
         # --- Optional: 手动 YouTube PO Token (备用方案) ---
         # 如果 POT Provider 未启用或未运行，用户可以手动配置静态 PO Token

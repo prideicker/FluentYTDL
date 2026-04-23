@@ -1177,34 +1177,74 @@ class DownloadConfigWindow(FramelessWindow):
 
         # === 根据分类决定显示哪个面板 ===
         if category == ErrorCategory.COOKIE:
-            self._switch_to_state(WindowState.ERROR_COOKIE)
-            if suggests_component_update:
-                self._authSegment.setCurrentItem("update")
-            else:
-                self._authSegment.setCurrentItem("dle")
+            self._switch_to_state(WindowState.ERROR_GENERIC)
+            # 隐藏 _error_label 以免长篇大论影响体验
+            if hasattr(self, "_error_label") and self._error_label:
+                self._error_label.hide()
+                
+            from .cookie_repair_dialog import CookieRepairDialog
+            from ...auth.auth_service import AuthSourceType, auth_service
+            
+            current_source = auth_service.current_source
+            source_map = {
+                AuthSourceType.DLE: "dle",
+                AuthSourceType.FILE: "file",
+            }
+            auth_source_str = source_map.get(current_source, "browser")
+            
+            dialog = CookieRepairDialog(raw_error, parent=self.window(), auth_source=auth_source_str)
+            
+            if current_source == AuthSourceType.DLE:
+                dialog.setWindowTitle("需要重新登录 YouTube")
+                dialog.repair_btn.setText("重新登录")
+            elif current_source == AuthSourceType.FILE:
+                dialog.setWindowTitle("Cookie 文件需要更新")
+                dialog.repair_btn.setText("重新导入")
+            
+            def on_auto_repair():
+                if current_source == AuthSourceType.DLE:
+                    from ...core.controller import Controller
+                    ctrl = Controller.get_instance()
+                    dialog.accept()
+                    if ctrl:
+                        ctrl.show_settings_page()
+                    self.close()
+                elif current_source == AuthSourceType.FILE:
+                    from ...core.controller import Controller
+                    ctrl = Controller.get_instance()
+                    dialog.accept()
+                    if ctrl:
+                        ctrl.show_settings_page()
+                    self.close()
+                else:
+                    from ...auth.cookie_sentinel import cookie_sentinel
+                    success, msg = cookie_sentinel.force_refresh_with_uac()
+                    dialog.show_repair_result(success, msg)
+                    if success:
+                        from PySide6.QtCore import QTimer
+                        QTimer.singleShot(1500, self._retry_parse_with_auth)
+                        
+            dialog.repair_requested.connect(on_auto_repair)
+            
+            def on_manual_import():
+                dialog.accept()
+                from PySide6.QtWidgets import QDialog
+                try:
+                    from fluentytdl.ui.components.cookie_import_dialog import CookieImportDialog
+                except ImportError:
+                    return
+                import_dlg = CookieImportDialog(self.window())
+                if import_dlg.exec() == QDialog.DialogCode.Accepted:
+                    from ...auth.cookie_sentinel import cookie_sentinel
+                    cookie_sentinel.force_refresh()
+                    self._retry_parse_with_auth()
 
-            # 记录失败 + 从 auth 层获取辅助诊断提示
+            dialog.manual_import_requested.connect(on_manual_import)
+            dialog.show()
+            
             try:
                 from ...auth.cookie_probe_throttle import cookie_probe_throttle
-
                 cookie_probe_throttle.record_download_failure("cookie")
-                augment = cookie_probe_throttle.get_cookie_failure_augment_info()
-
-                if augment.get("alternative_hint"):
-                    self._alt_label = CaptionLabel(augment["alternative_hint"], self)
-                    self._alt_label.setWordWrap(True)
-                    self._alt_label.setStyleSheet(
-                        "QLabel { color: #e65100; font-weight: bold; padding: 4px 0; }"
-                    )
-                    self.retryLayout.insertWidget(0, self._alt_label)
-
-                if augment.get("pot_warning"):
-                    self._pot_label = CaptionLabel(augment["pot_warning"], self)
-                    self._pot_label.setWordWrap(True)
-                    self._pot_label.setStyleSheet(
-                        "QLabel { color: #c62828; font-weight: bold; padding: 4px 0; }"
-                    )
-                    self.retryLayout.insertWidget(0, self._pot_label)
             except Exception:
                 pass
         elif category == ErrorCategory.NETWORK:

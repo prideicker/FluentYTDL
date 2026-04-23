@@ -579,6 +579,54 @@ class POTManager:
 
         return result
 
+    def verify_plugin_loadable(self) -> tuple[bool, str]:
+        """验证 POT 插件是否已就位于 yt-dlp.exe 旁的标准插件目录。
+
+        独立编译的 yt-dlp.exe 不支持 PYTHONPATH 插件加载，只能通过
+        <exe-dir>/yt-dlp-plugins/<pkg>/yt_dlp_plugins/extractor/ 发现插件。
+
+        此方法检查：
+        1. yt-dlp.exe 旁是否存在标准插件目录结构
+        2. 插件文件是否存在
+
+        Returns:
+            (ok, message) 元组
+        """
+        try:
+            from .yt_dlp_cli import resolve_yt_dlp_exe
+
+            exe = resolve_yt_dlp_exe()
+            if exe is None:
+                return False, "yt-dlp 可执行文件未找到"
+
+            # 检查标准插件目录
+            plugin_dir = (
+                exe.parent / "yt-dlp-plugins" / "bgutil-ytdlp-pot-provider"
+                / "yt_dlp_plugins" / "extractor"
+            )
+
+            if not plugin_dir.exists():
+                return False, (
+                    f"POT 插件目录不存在: {plugin_dir.parent.parent}。"
+                    "请确保 sync_pot_plugins_to_ytdlp() 已正确执行。"
+                )
+
+            # 检查关键插件文件
+            http_plugin = plugin_dir / "getpot_bgutil_http.py"
+            base_plugin = plugin_dir / "getpot_bgutil.py"
+
+            if not http_plugin.exists():
+                return False, "POT HTTP 插件文件 (getpot_bgutil_http.py) 缺失"
+            if not base_plugin.exists():
+                return False, "POT 基础插件文件 (getpot_bgutil.py) 缺失"
+
+            # 全部检查通过
+            plugin_files = list(plugin_dir.glob("getpot_bgutil*.py"))
+            return True, f"POT 插件已就位 ({len(plugin_files)} 个文件，位于 yt-dlp.exe 旁)"
+
+        except Exception as e:
+            return False, f"插件检测异常: {e}"
+
     def get_extractor_args(self) -> str | None:
         """获取 yt-dlp 的 extractor-args 参数"""
         if not self.is_running():

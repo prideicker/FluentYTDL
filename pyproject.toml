@@ -1,6 +1,6 @@
 [project]
 name = "FluentYTDL"
-version = "3.0.16"
+version = "3.0.17"
 description = "A powerful, modern desktop YouTube downloader with robust anti-bot, subtitle management, and dynamic formatting features."
 license = { text = "GPL-3.0-only" }
 requires-python = ">=3.10"

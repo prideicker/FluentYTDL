@@ -37,9 +37,9 @@ def translate_error(error: BaseException) -> dict:
     }
 
     # 0) 链接无效/不支持
-    if "unsupported url" in err_msg or "not a valid url" in err_msg:
+    if "unsupported url" in err_msg or "not a valid url" in err_msg or "incomplete youtube id" in err_msg or "truncated" in err_msg:
         result["title"] = "链接无效或不受支持"
-        result["content"] = "该链接不是可识别的 YouTube 视频/播放列表链接，或链接参数格式不正确。"
+        result["content"] = "该链接不是可识别的 YouTube 视频/播放列表链接，或链接已被截断/不完整。"
         result["suggestion"] = (
             "1. 重新从浏览器地址栏复制完整链接（建议以 https://www.youtube.com/watch?v=... 开头）。\n"
             "2. 如包含时间参数 t=，请确保是有效值（例如 t=30s 或 t=90）。\n"

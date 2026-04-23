@@ -1088,6 +1088,10 @@ class VideoFormatSelectorWidget(QWidget):
             # --- 纯音频模式 ---
             if intent.get("type") == "audio_only":
                 best_aud = self._get_best_audio_id(audio_rows, ctx) if audio_rows else None
+                # 尊重用户的音轨选择（如果有）
+                audio_pick = getattr(self.simple_widget, 'get_audio_pick_result', lambda: None)()
+                if audio_pick and getattr(audio_pick, 'format_ids', []):
+                    best_aud = audio_pick.format_ids[0]
                 extra: dict = {
                     "extract_audio": True,
                     "audio_format": self.get_audio_format_override() or intent.get("post_audio_format", "mp3"),
@@ -1115,10 +1119,20 @@ class VideoFormatSelectorWidget(QWidget):
 
                 fmt_str = f"{best_vid}+{best_aud}"
                 audio_pick = getattr(self.simple_widget, 'get_audio_pick_result', lambda: None)()
-                if audio_pick and getattr(audio_pick, 'audio_multistreams', False):
-                    extra_opts["audio_multistreams"] = True
-                    extra_opts["__audio_track_count"] = len(audio_pick.format_ids)
-                    fmt_str = f"{best_vid}+" + "+".join(audio_pick.format_ids)
+                if audio_pick and getattr(audio_pick, 'format_ids', []):
+                    # 用户通过音轨选择器做了明确选择 → 尊重用户选择
+                    picked_ids = audio_pick.format_ids
+                    if len(picked_ids) > 1:
+                        extra_opts["audio_multistreams"] = True
+                    extra_opts["__audio_track_count"] = len(picked_ids)
+                    fmt_str = f"{best_vid}+" + "+".join(picked_ids)
+                    # 重新推断 aud_ext 以用于容器决策（取第一条选中音轨的 ext）
+                    first_picked_ext = next(
+                        (r.get("ext") for r in audio_rows if r["format_id"] == picked_ids[0]),
+                        "m4a"
+                    )
+                    merge_fmt = decide_merge_container(vid_ext, first_picked_ext, ctx)
+                    extra_opts["merge_output_format"] = override_fmt or merge_fmt
 
                 return {"format": fmt_str, "extra_opts": extra_opts}
 
