@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time as _time
 import threading
 from typing import Any
 
@@ -10,6 +11,8 @@ from ..core.config_manager import config_manager
 from ..models.yt_dto import YtMediaDTO
 from ..utils.logger import logger
 from ..utils.translator import translate_error
+from ..utils.error_parser import diagnose_error
+from ..models.errors import YtDlpExecutionError
 from ..youtube.youtube_service import YoutubeServiceOptions, youtube_service
 from ..youtube.yt_dlp_cli import YtDlpCancelled
 from .executor import DownloadExecutor
@@ -190,7 +193,6 @@ class DownloadWorker(QThread):
     error = Signal(dict)  # 发生错误（结构化）
     status_msg = Signal(str)  # 状态文本 (正在合并/正在转换...)
     output_path_ready = Signal(str)  # 最终输出文件路径（尽力解析）
-    cookie_error_detected = Signal(str)  # Cookie 错误检测（触发修复流程）
     thumbnail_embed_warning = Signal(str)  # 封面嵌入警告（格式不支持时）
     paused = Signal()  # 已进入暂停状态
     resumed = Signal()  # 已从暂停中恢复
@@ -212,7 +214,6 @@ class DownloadWorker(QThread):
         self._original_format: str | None = None
         self._ssl_error_count = 0
         self._format_warning_shown = False
-        self._fallback_attempted = False
 
         # ── 红绿灯系统 (threading.Event) ──
         # _pause_event: 默认 set()=绿灯(放行), clear()=红灯(暂停)
@@ -363,6 +364,22 @@ class DownloadWorker(QThread):
                 except Exception:
                     pass
 
+
+
+    def _clean_part_files(self) -> None:
+        """清理 sandbox 内的 .part/.ytdl 残骸，避免 403 后断点续传撞过期 token。"""
+        if not hasattr(self, "sandbox_dir") or not self.sandbox_dir:
+            return
+        if not os.path.exists(self.sandbox_dir):
+            return
+        for f in os.listdir(self.sandbox_dir):
+            if f.endswith((".part", ".ytdl")):
+                try:
+                    os.remove(os.path.join(self.sandbox_dir, f))
+                    logger.info("已清理残骸文件: {}", f)
+                except OSError:
+                    pass
+
     def _wait_if_paused(self) -> None:
         """红绿灯检查点：如果红灯则阻塞，直到绿灯或取消。"""
         while not self._pause_event.is_set():
@@ -394,8 +411,9 @@ class DownloadWorker(QThread):
 
             # 合并 YoutubeService 的基础反封锁/网络配置
             base_opts = youtube_service.build_ydl_options()
-            merged = dict(base_opts)
-            merged.update(self.opts)
+            import copy
+            merged = copy.deepcopy(base_opts)
+            merged.update(copy.deepcopy(self.opts))
 
             # 保存原始格式选择（用于错误恢复）
             self._original_format = merged.get("format")
@@ -521,102 +539,8 @@ class DownloadWorker(QThread):
                 if self.is_cancelled:
                     raise DownloadCancelled() from None
 
-                _AUTH_ERROR_KEYWORDS = (
-                    "sign in to confirm",
-                    "not a bot",
-                    "login required",
-                    "http error 403",
-                    "forbidden",
-                    "cookies",
-                )
-                err_lower = str(exc).lower()
-                is_auth_error = any(kw in err_lower for kw in _AUTH_ERROR_KEYWORDS)
-                is_vr_mode = self.opts.get("__fluentytdl_use_android_vr", False)
-
-                if is_auth_error and not is_vr_mode and not self._fallback_attempted:
-                    self._fallback_attempted = True
-                    
-                    # 退避 5 秒后再重试，避免在短时间内连续请求被 YouTube 加重限流
-                    import time
-                    time.sleep(5)
-                    
-                    cookie_refreshed = False
-                    try:
-                        from ..auth.auth_service import (
-                            BROWSER_SOURCES,
-                            AuthSourceType,
-                            auth_service,
-                        )
-                        from ..auth.cookie_sentinel import cookie_sentinel
-                        
-                        source = auth_service.current_source
-                        
-                        if source == AuthSourceType.DLE:
-                            logger.info("🔄 [DLE] 静默重提取 WebView2 Cookie...")
-                            self._clean_logger.force_update("downloading", 0.0, "🔄 正在刷新 Cookie (WebView2)...")
-                            new_cookie = auth_service.get_cookie_file_for_ytdlp(force_refresh=True)
-                            if new_cookie:
-                                import shutil
-                                shutil.copy2(new_cookie, cookie_sentinel.cookie_path)
-                                cookie_refreshed = True
-                                logger.info("✅ [DLE] Cookie 静默刷新成功")
-                                
-                        elif source in BROWSER_SOURCES:
-                            logger.info("🔄 [Browser] 尝试带锁刷新 Cookie...")
-                            self._clean_logger.force_update("downloading", 0.0, "🔄 正在刷新 Cookie (浏览器)...")
-                            ok, msg = cookie_sentinel.force_refresh_with_uac()
-                            cookie_refreshed = ok
-                            if not ok:
-                                logger.warning(f"Cookie 刷新失败: {msg}")
-                    except Exception as refresh_err:
-                        logger.warning(f"Cookie 刷新异常: {refresh_err}")
-                    
-                    retry_success = False
-                    if cookie_refreshed:
-                        try:
-                            logger.info("🔄 使用刷新后的 Cookie 重试下载 (player_client=default)...")
-                            self._clean_logger.force_update("downloading", 0.0, "🔄 使用新 Cookie 重试...")
-                            from ..youtube.youtube_service import youtube_service as ys_instance
-                            base_opts = ys_instance.build_ydl_options()
-                            retry_merged = dict(base_opts)
-                            retry_merged.update(self.opts)
-                            
-                            final_path = self.executor.execute(
-                                self.url, retry_merged,
-                                on_progress=on_progress, on_status=on_status,
-                                on_path=on_path, cancel_check=lambda: self.is_cancelled,
-                                on_file_created=on_file_created, cached_info_dict=self.cached_info,
-                            )
-                            if final_path:
-                                self.output_path = final_path
-                                if not hasattr(self, "sandbox_dir"):
-                                    self.output_path_ready.emit(final_path)
-                                retry_success = True
-                        except Exception as retry_exc:
-                            logger.warning(f"Cookie 刷新重试仍失败: {retry_exc}")
-                    
-                    if not retry_success:
-                        logger.info("🔄 最终降级: 剥离 Cookie + 链式回退客户端 (web_safari,mweb,android_creator)")
-                        self._clean_logger.force_update("downloading", 0.0, "🔄 无 Cookie 降级模式启动...")
-                        
-                        merged.pop("cookiefile", None)
-                        ea = merged.setdefault("extractor_args", {})
-                        yt = ea.setdefault("youtube", {})
-                        yt["player_client"] = ["web_safari,mweb,android_creator"]
-                        yt.pop("player_skip", None)
-                        
-                        final_path = self.executor.execute(
-                            self.url, merged,
-                            on_progress=on_progress, on_status=on_status,
-                            on_path=on_path, cancel_check=lambda: self.is_cancelled,
-                            on_file_created=on_file_created, cached_info_dict=self.cached_info,
-                        )
-                        if final_path:
-                            self.output_path = final_path
-                            if not hasattr(self, "sandbox_dir"):
-                                self.output_path_ready.emit(final_path)
-                else:
-                    raise exc
+                # 直接抛出，让外层 except 做精准诊断
+                raise exc
 
             # === Feature Pipeline: Post-process ===
             # 执行各模块的后处理逻辑（封面嵌入、字幕合并、VR转码等）
@@ -679,31 +603,30 @@ class DownloadWorker(QThread):
             self._sweep_part_files()
             self.status_msg.emit("任务已取消")
             self.cancelled.emit()
+        except YtDlpExecutionError as exc:
+            logger.exception("yt-dlp 执行错误: {}", self.url)
+            pct = getattr(self, "progress_val", 0.0)
+            
+            # 使用新的诊断引擎生成结构化错误
+            diag = diagnose_error(exc.exit_code, exc.stderr, exc.parsed_json)
+            
+            # 更新内部状态和日志
+            self._clean_logger.force_update("error", pct, f"❌ {diag.user_title}: {diag.user_message}")
+            
+            # 传递结构化的 DiagnosedError 给 UI 层
+            self.error.emit(diag.to_dict())
+
         except Exception as exc:
             msg = str(exc)
-            # 恢复 SSL / 格式降级 等错误处理逻辑 (简单版)
-            if "EOF occurred in violation of protocol" in msg or "_ssl.c" in msg:
-                self.status_msg.emit("⚠️ 检测到网络SSL错误，建议检查网络连接后重试")
-
-            logger.exception("下载过程发生异常: {}", self.url)
-            
-            # CRITICAL FIX: Update CleanLogger state so that effective_state doesn't fallback to 'completed'
+            logger.exception("下载过程发生未知异常: {}", self.url)
             pct = getattr(self, "progress_val", 0.0)
+            
             self._clean_logger.force_update("error", pct, f"❌ 错误: {msg}")
             
-            _AUTH_ERROR_KEYWORDS = (
-                "sign in to confirm",
-                "not a bot",
-                "login required",
-                "http error 403",
-                "forbidden",
-                "cookies",
-            )
-            if any(kw in msg.lower() for kw in _AUTH_ERROR_KEYWORDS):
-                logger.warning("下载拦截完毕或 fallback 失效，触发全局 Cookie 修复弹窗")
-                self.cookie_error_detected.emit(msg)
-            
-            self.error.emit(translate_error(exc))
+            # 兼容旧逻辑：如果是纯文本 Exception，依然通过 translate_error 进行基本的处理
+            # 实际上 translate_error 也可以被废弃，我们现在直接传结构化 dict
+            err_dict = translate_error(exc)
+            self.error.emit(err_dict)
         finally:
             self.is_running = False
             self.executor = None

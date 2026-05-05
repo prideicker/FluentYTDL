@@ -121,6 +121,9 @@ class ConfigManager(QObject):
         "concurrent_fragments": 4,  # [新增] 全局分片并发数控制参数
         # Theme Mode
         "theme_mode": "Auto",  # Light / Dark / Auto
+        # 更新通道跳过版本（按通道分别存储）
+        "skipped_stable_version": "",
+        "skipped_pre_version": "",
     }
 
     def __new__(cls) -> ConfigManager:

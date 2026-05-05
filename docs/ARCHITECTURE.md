@@ -1,1480 +1,1124 @@
-# FluentYTDL 架构设计文档
+# FluentYTDL 架构文档
 
-> 一个现代、流畅的 YouTube/视频下载器的完整技术架构
+> [English version](ARCHITECTURE_EN.md)
+>
+> 本文档基于直接代码分析描述当前架构。开发规则见 `docs/RULES.md`，yt-dlp 排障知识见 `docs/YTDLP_KNOWLEDGE.md`。
 
----
+## 0. 全局数据流
 
-## 📐 设计理念
-
-### 核心原则
-
-1. **分层解耦** - UI、业务逻辑、基础设施严格分离
-2. **外部工具封装** - 所有外部依赖（yt-dlp/FFmpeg）通过服务层抽象
-3. **配置驱动** - 行为由配置决定，支持热更新
-4. **异步优先** - 耗时操作全部异步，不阻塞 UI
-
-### 技术栈
-
-| 层级 | 技术栈 |
-|------|--------|
-| UI 框架 | PySide6 + QFluentWidgets |
-| 下载引擎 | yt-dlp (CLI) |
-| 媒体处理 | FFmpeg |
-| 封面嵌入 | AtomicParsley / mutagen |
-| Cookie 提取 | rookiepy |
-| JS 运行时 | Deno / Node.js |
-| 日志系统 | loguru |
-
----
-
-## 🏗️ 系统分层架构
-
-```mermaid
-graph TB
-    subgraph Presentation["🎨 表示层 (Presentation)"]
-        MW[MainWindow<br/>主窗口]
-        SP[SettingsPage<br/>设置页]
-        SD[SelectionDialog<br/>选择对话框]
-        DC[DownloadCard<br/>任务卡片]
-        LV[LogViewer<br/>日志查看器]
-    end
-    
-    subgraph Business["⚙️ 业务层 (Business Logic)"]
-        YS[YoutubeService<br/>YouTube 服务]
-        DM[DownloadManager<br/>下载管理器]
-        PP[ProcessingPipeline<br/>后处理管线]
-    end
-    
-    subgraph Core["📦 核心层 (Core Services)"]
-        CM[ConfigManager<br/>配置管理]
-        AS[AuthService<br/>认证服务]
-        CS[CookieSentinel<br/>Cookie 哨兵]
-        RM[ResumeManager<br/>断点续传]
-        LG[Logger<br/>日志系统]
-    end
-    
-    subgraph Infrastructure["🔧 基础设施 (Infrastructure)"]
-        YTDLP[yt-dlp.exe]
-        FF[ffmpeg.exe]
-        AP[AtomicParsley.exe]
-        DENO[deno.exe]
-        POT[pot-provider.exe]
-    end
-    
-    Presentation --> Business
-    Business --> Core
-    Core --> Infrastructure
-    
-    MW --> SP
-    MW --> SD
-    MW --> DC
-    SP --> LV
-    SD --> YS
-    DM --> PP
-    YS --> YTDLP
-    PP --> FF
-    PP --> AP
-    AS --> CS
-```
-
----
-
-## 🧩 模块职责详解
-
-### 1. 表示层 (Presentation)
-
-#### MainWindow 主窗口
-- 导航管理 (侧边栏)
-- 全局状态显示 (Cookie 状态、任务统计)
-- 剪贴板监听触发
-
-#### SettingsPage 设置页
-设置页包含 9 个功能组：
-
-| 设置组 | 功能 |
-|--------|------|
-| 下载选项 | 默认保存路径 |
-| 网络连接 | 代理模式、自定义代理 |
-| 核心组件 | Cookie 认证、yt-dlp/FFmpeg/Deno 更新 |
-| 高级 | PO Token、JS Runtime 路径 |
-| 自动化 | 剪贴板自动识别 |
-| 后处理 | 封面嵌入、元数据嵌入 |
-| 行为策略 | 删除策略、播放列表加速 |
-| 日志管理 | 查看/清理日志 |
-| 关于 | 版本信息 |
-
-#### SelectionDialog 选择对话框
-- 格式/清晰度选择
-- 播放列表批量选择
-- 下载选项配置
-
----
-
-### 2. 业务层 (Business Logic)
-
-#### YoutubeService - YouTube 服务
-
-**设计模式**: 单例 + 配置聚合 + 策略模式
-
-YoutubeService 是与 yt-dlp 交互的核心封装层，提供统一的视频信息提取和下载接口。
-
----
-
-##### 配置类体系
-
-```mermaid
-classDiagram
-    class YoutubeServiceOptions {
-        +auth: YtDlpAuthOptions
-        +anti_blocking: AntiBlockingOptions
-        +network: NetworkOptions
-    }
-    
-    class YtDlpAuthOptions {
-        +cookies_file: str | None
-        +cookies_from_browser: str | None
-    }
-    
-    class AntiBlockingOptions {
-        +player_clients: tuple
-        +sleep_interval_min: int
-        +sleep_interval_max: int
-    }
-    
-    class NetworkOptions {
-        +proxy: str | None
-        +socket_timeout: int
-        +retries: int
-        +fragment_retries: int
-    }
-    
-    YoutubeServiceOptions --> YtDlpAuthOptions
-    YoutubeServiceOptions --> AntiBlockingOptions
-    YoutubeServiceOptions --> NetworkOptions
-```
-
----
-
-##### 选项构建流程
-
-`build_ydl_options()` 是核心方法，将配置转换为 yt-dlp 可用的参数字典：
+下图展示了从用户粘贴 URL 到最终输出文件的完整链路：
 
 ```mermaid
 flowchart TD
-    Start[build_ydl_options] --> Auth{认证配置}
-    
-    Auth -->|cookies_file| Direct[直接使用文件]
-    Auth -->|AuthService| AS[从 CookieSentinel 获取]
-    AS --> Validate[验证 Cookie 有效性]
-    
-    Start --> Anti[反封锁配置]
-    Anti --> PC[player_clients: android, ios, web]
-    Anti --> Sleep[sleep_interval: 1-5s]
-    Anti --> UA[随机 User-Agent]
-    
-    Start --> Net[网络配置]
-    Net --> Proxy[代理: system/direct/custom]
-    Net --> Timeout[超时: 15s]
-    Net --> Retry[重试: 10 次]
-    
-    Start --> JS[JS 运行时配置]
-    JS --> Detect{检测可用运行时}
-    Detect -->|Deno| UseDeno[extractor_args: youtube:player_client=ios]
-    Detect -->|Node| UseNode[使用 Node.js]
-    Detect -->|None| Warn[警告: 签名解析可能失败]
-    
-    Direct --> Build[构建 ydl_opts 字典]
-    Validate --> Build
-    PC --> Build
-    Sleep --> Build
-    UA --> Build
-    Proxy --> Build
-    Timeout --> Build
-    Retry --> Build
-    UseDeno --> Build
-    UseNode --> Build
+    A["用户粘贴链接"] --> B["解析页发送解析请求信号"]
+    B --> C["主窗口打开选择对话框"]
+    C --> D["下载配置窗口启动提取"]
+    D --> E["信息提取工作线程 (QThread)"]
+    E --> F["YouTube 服务提取视频信息 (对话框模式)"]
+    F --> G["构建 yt-dlp 选项<br/>读取配置管理器 + Cookie 哨兵"]
+    G --> H["执行 yt-dlp -J 提取元数据"]
+    H --> I["原始字典 (JSON)"]
+    I --> J["媒体 DTO 转换<br/>防腐层"]
+    J --> K{"播放列表?"}
+    K -- "是" --> L["设置播放列表界面<br/>→ 扁平条目 → 播放列表调度器"]
+    K -- "否" --> M["设置内容界面<br/>→ 格式选择器"]
+
+    L --> N["用户选择条目 + 点击下载"]
+    M --> N
+
+    N --> O["主窗口添加任务"]
+    O --> P["下载管理器创建工作线程"]
+    P --> Q["任务数据库插入任务 (SQLite)"]
+    P --> R["创建下载工作线程 (QThread)"]
+    R --> S["下载管理器调度 → 启动工作线程"]
+
+    S --> T["下载工作线程运行"]
+    T --> U["YouTube 服务构建 yt-dlp 选项"]
+    U --> V["创建沙箱目录 (.fluent_temp/task_id/)"]
+    V --> W["功能管线: 配置 + 下载开始回调"]
+    W --> X["下载执行器执行<br/>启动 yt-dlp 子进程"]
+    X --> Y["进度解析循环"]
+    Y --> Z{"退出码正常?"}
+    Z -- "非零" --> AA["门槛 1: 文件 ≥ 10KB?<br/>门槛 2: 文件 ≥ 50% 预期大小?"]
+    AA -- "均通过" --> AB["功能管线: 后处理回调"]
+    AA -- "失败" --> AC["错误诊断 → 错误信号"]
+    Z -- "零" --> AB
+    AB --> AD["沙箱 → 最终目录移动"]
+    AD --> AE["发送完成信号"]
+    AE --> AF["下载管理器处理工作线程完成 → 调度下一个<br/>排队中的工作线程启动"]
 ```
 
 ---
 
-##### 元数据提取方法
+## 1. 架构总览
 
-| 方法 | 用途 | 特点 |
-|------|------|------|
-| `extract_info_sync()` | 完整提取 | 阻塞调用，用于 Worker 线程 |
-| `extract_info_for_dialog_sync()` | UI 对话框 | 单视频保留 formats，播放列表快速枚举 |
-| `extract_playlist_flat()` | 播放列表快速提取 | 不提取每个视频的格式信息 |
-| `extract_info()` | 异步提取 | 安全用于 UI 线程 |
+### 1.1 分层架构
 
-**设计决策**：分离同步和异步方法，Worker 线程使用 `_sync` 方法直接阻塞，UI 线程使用 `async` 方法避免卡顿。
+FluentYTDL 遵循严格的四层依赖模型：
 
----
-
-##### 解析策略：单视频 vs 播放列表
-
-应用采用智能的解析策略，针对不同场景优化性能和用户体验：
-
-```mermaid
-flowchart TD
-    Start["用户粘贴 URL"] --> Detect{"URL 类型检测"}
-    
-    Detect -->|单视频| Single["完整解析"]
-    Detect -->|播放列表| Flat["快速扁平解析"]
-    
-    subgraph SingleFlow["单视频解析"]
-        Single --> Formats["提取全部 formats"]
-        Formats --> UI1["显示格式选择器"]
-    end
-    
-    subgraph PlaylistFlow["播放列表解析"]
-        Flat --> List["仅获取视频列表"]
-        List --> UI2["显示列表界面"]
-        UI2 --> Idle{"用户空闲?"}
-        Idle -->|是| Deep["后台深度解析"]
-        Idle -->|否| Wait["等待用户操作"]
-        Deep --> Update["更新可用格式"]
-    end
+```
+┌─────────────────────────────────────────────┐
+│  UI 层 (ui/)                                 │
+│  53 个文件：主窗口、页面、组件、委托、模型      │
+├──────────────┬──────────────────────────────-┤
+│              ↓ 依赖                          │
+│  服务层                                       │
+│  auth/  youtube/  download/  processing/     │
+│  storage/                                    │
+├──────────────┬──────────────────────────────-┤
+│              ↓ 依赖                          │
+│  核心基础设施 (core/)                          │
+│  ConfigManager、controller、dependency_mgr   │
+├──────────────┬──────────────────────────────-┤
+│              ↓ 依赖                          │
+│  基础层 (utils/, models/)                     │
+│  无内部依赖                                    │
+└─────────────────────────────────────────────┘
 ```
 
-**设计原理**：
+**强制规则：**
+- UI 绝不能直接调用 yt-dlp — 所有交互通过 `youtube_service`
+- 服务层绝不能从 `ui/` 导入 — 仅通过 Qt Signal 通信
+- Models 自包含 — 无循环依赖
 
-| 场景 | 策略 | 原因 |
-|------|------|------|
-| **单视频** | 完整解析 (`extract_info_sync`) | 用户需要选择格式，必须获取完整 formats |
-| **播放列表初始** | 快速扁平解析 (`extract_playlist_flat`) | 100 个视频完整解析需 ~5 分钟，不可接受 |
-| **播放列表详情** | 延迟逐项解析 (`EntryDetailWorker`) | 用户浏览时后台逐个补全格式信息 |
+### 1.2 设计原则
 
----
-
-##### 格式选择器：简易模式 vs 专业模式
-
-格式选择器 (`VideoFormatSelectorWidget`) 支持两种模式，通过 `SegmentedWidget` 切换：
-
-```mermaid
-flowchart TB
-    subgraph Simple["简易模式 (SimplePresetWidget)"]
-        direction TB
-        subgraph Recommend["推荐"]
-            P1[🎬 最佳画质 MP4]
-            P2[🎯 最佳画质 原盘]
-        end
-        subgraph Resolution["分辨率限制"]
-            P3[📺 2160p 4K]
-            P4["1440p 2K"]
-            P5["1080p 高清"]
-            P6["720p 标清"]
-            P7["480p / 360p"]
-        end
-        subgraph Audio["音频"]
-            P8["纯音频 MP3"]
-        end
-    end
-    
-    subgraph Advanced["专业模式 (Advanced)"]
-        M1["音视频 可组装"]
-        M2["音视频 整合流"]
-        M3["仅视频"]
-        M4["仅音频"]
-    end
-    
-    User["用户"] --> Toggle{"模式切换"}
-    Toggle -->|简易| Simple
-    Toggle -->|专业| Advanced
-```
-
-**简易模式预设**：
-
-| 预设 ID | 名称 | yt-dlp format 字符串 | 额外参数 |
-|---------|------|---------------------|----------|
-| `best_mp4` | 🎬 最佳画质 (MP4) | `bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b` | `merge_output_format: mp4` |
-| `best_raw` | 🎯 最佳画质 (原盘) | `bestvideo+bestaudio/best` | - |
-| `2160p` | 📺 2160p 4K (MP4) | `bv*[height<=2160][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
-| `1440p` | 📺 1440p 2K (MP4) | `bv*[height<=1440][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
-| `1080p` | 📺 1080p 高清 (MP4) | `bv*[height<=1080][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
-| `720p` | 📺 720p 标清 (MP4) | `bv*[height<=720][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
-| `480p` | 📺 480p (MP4) | `bv*[height<=480][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
-| `360p` | 📺 360p (MP4) | `bv*[height<=360][ext=mp4]+ba[ext=m4a]/...` | `merge_output_format: mp4` |
-| `audio_mp3` | 🎵 纯音频 (MP3) | `bestaudio/best` | `extract_audio: true, audio_format: mp3` |
-
-**专业模式**：
-
-```mermaid
-flowchart LR
-    subgraph Display["专业模式显示逻辑"]
-        Mode["下载模式"] --> Filter{"过滤格式"}
-        
-        Filter -->|可组装| ShowVA["显示分离的 V+A 流"]
-        Filter -->|整合流| ShowMuxed["显示已封装的 muxed 流"]
-        Filter -->|仅视频| ShowV["仅显示 video 流"]
-        Filter -->|仅音频| ShowA["仅显示 audio 流"]
-    end
-```
-
-**格式组装逻辑**：
-
-```python
-# 专业模式：用户选择视频流 + 音频流
-if video_id and audio_id:
-    format_str = f"{video_id}+{audio_id}"
-    # 智能选择封装容器
-    if vext == "webm" and aext == "webm":
-        container = "webm"
-    elif vext in {"mp4", "m4v"} and aext in {"m4a", "aac"}:
-        container = "mp4"
-    else:
-        container = "mkv"  # 万能容器
-```
-
----
-
-##### 播放列表批量选择
-
-播放列表界面提供批量操作和预设套用：
-
-```mermaid
-flowchart TB
-    subgraph Toolbar["批量操作工具栏"]
-        SelectAll["全选"]
-        Unselect["取消"]
-        Invert["反选"]
-        Type["类型选择"]
-        Preset["预设选择"]
-        Apply["重新套用预设"]
-    end
-    
-    subgraph List["视频列表"]
-        Row1["视频 1 - 最佳画质"]
-        Row2["视频 2 - 1080p"]
-        Row3["视频 3 - 待加载"]
-    end
-    
-    Apply --> Row1
-    Apply --> Row2
-    Apply --> Row3
-    
-    Row1 -->|点击| Quality["打开格式选择对话框"]
-```
-
-**预设列表**：
-
-| 索引 | 预设名称 | 说明 |
-|------|----------|------|
-| 0 | 最高质量(自动) | `bestvideo+bestaudio` |
-| 1 | 2160p(严格) | 限制最大高度 2160 |
-| 2 | 1440p(严格) | 限制最大高度 1440 |
-| 3 | 1080p(严格) | 限制最大高度 1080 |
-| 4 | 720p(严格) | 限制最大高度 720 |
-| 5 | 480p(严格) | 限制最大高度 480 |
-| 6 | 360p(严格) | 限制最大高度 360 |
-
----
-
-##### 延迟深度解析 (EntryDetailWorker)
-
-播放列表采用"先显示后补全"策略，用户空闲时后台逐项深度解析：
-
-```mermaid
-sequenceDiagram
-    participant UI as SelectionDialog
-    participant Timer as IdleTimer (2s)
-    participant Queue as DetailQueue
-    participant Worker as EntryDetailWorker
-    participant YT as yt-dlp
-    
-    UI->>UI: 扁平解析完成，显示列表
-    UI->>Timer: 启动空闲检测
-    
-    loop 用户空闲时
-        Timer->>Timer: 2 秒无交互
-        Timer->>Queue: 取出下一个待解析行
-        Queue-->>Timer: row: 3
-        
-        Timer->>Worker: 启动深度解析 (row, url)
-        Worker->>YT: extract_info(url, formats=True)
-        YT-->>Worker: {formats: [...], ...}
-        Worker-->>UI: finished(row, info)
-        
-        UI->>UI: 更新行 3 的格式下拉框
-    end
-```
-
-**空闲检测逻辑**：
-
-```python
-# 每次用户交互时更新时间戳
-def _record_interaction(self):
-    self._last_interaction = time.monotonic()
-
-# 定时器每 2 秒检查一次
-def _on_idle_tick(self):
-    if time.monotonic() - self._last_interaction > 2.0:
-        self._fetch_next_detail()
-```
-
-**设计优势**：
-1. **快速响应**：播放列表立即显示，无需等待所有视频解析
-2. **节省资源**：只在用户空闲时解析，不阻塞 UI
-3. **按需加载**：用户点击某行时优先解析该行
-
-
----
-
-##### JS 运行时配置 (YouTube 签名解析)
-
-YouTube 使用混淆的 JavaScript 生成视频签名，需要外部 JS 运行时解析：
-
-```mermaid
-flowchart LR
-    subgraph Detection["运行时检测顺序"]
-        D1["1. Deno 推荐"] --> D2["2. Node.js 备选"]
-        D2 --> D3["3. 无运行时 降级"]
-    end
-    
-    subgraph Locations["查找位置"]
-        L1["bin/deno/deno.exe"]
-        L2["系统 PATH"]
-        L3["用户自定义路径"]
-    end
-    
-    Detection --> Locations
-```
-
-**配置方式**：
-- 自动检测 `bin/deno/` 目录
-- 配置项 `extractor_args = "youtube:player_client=ios,android"`
-- 使用移动端客户端模拟可绕过部分限制
-
----
-
-#### DownloadManager / TaskQueue - 下载管理器
-
-**设计模式**: 生产者-消费者 + 观察者模式
-
-下载系统由三个组件协作：
-
-| 组件 | 职责 |
+| 原则 | 实现 |
 |------|------|
-| **TaskQueue** | 任务持久化、状态管理、重试逻辑 |
-| **DownloadManager** | 并发控制、Worker 调度、信号广播 |
-| **DownloadWorker** | 执行实际下载、进度解析、后处理 |
-
----
-
-##### 任务状态模型
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: 创建任务
-    
-    PENDING --> QUEUED: 加入队列
-    QUEUED --> DOWNLOADING: Worker 获取
-    
-    DOWNLOADING --> PROCESSING: 下载完成
-    DOWNLOADING --> PAUSED: 用户暂停
-    DOWNLOADING --> FAILED: 网络错误
-    DOWNLOADING --> CANCELLED: 用户取消
-    
-    PAUSED --> DOWNLOADING: 恢复下载
-    
-    PROCESSING --> COMPLETED: 后处理成功
-    PROCESSING --> FAILED: 后处理失败
-    
-    FAILED --> QUEUED: 重试 (最多3次)
-    
-    COMPLETED --> [*]
-    CANCELLED --> [*]
-    FAILED --> [*]: 重试耗尽
-```
-
-**TaskStatus 枚举**:
-```python
-class TaskStatus(Enum):
-    PENDING = "pending"       # 待处理
-    QUEUED = "queued"         # 已入队
-    DOWNLOADING = "downloading" # 下载中
-    PAUSED = "paused"         # 已暂停
-    COMPLETED = "completed"   # 已完成
-    FAILED = "failed"         # 失败
-    CANCELLED = "cancelled"   # 已取消
-```
-
----
-
-##### 任务持久化
-
-任务队列自动持久化到 JSON 文件，支持程序重启后恢复：
-
-```json
-{
-  "tasks": [
-    {
-      "id": "a1b2c3d4",
-      "url": "https://youtube.com/watch?v=xxx",
-      "output_dir": "D:/Downloads",
-      "status": "downloading",
-      "progress": 45.5,
-      "retry_count": 0,
-      "created_at": "2026-02-02T15:00:00",
-      "options": { "format": "bestvideo+bestaudio" }
-    }
-  ]
-}
-```
-
----
-
-##### Worker 线程内部流程
-
-```mermaid
-sequenceDiagram
-    participant DM as DownloadManager
-    participant W as DownloadWorker
-    participant YT as yt-dlp.exe
-    participant PP as PostProcessor
-    
-    DM->>W: start(task)
-    
-    rect rgb(230, 245, 255)
-        Note over W,YT: 下载阶段
-        W->>YT: subprocess.Popen(yt-dlp, ...)
-        
-        loop 读取 stdout
-            YT-->>W: [download] 45.5% ...
-            W->>W: 解析进度 (正则表达式)
-            W-->>DM: progress.emit({percent, speed, eta})
-        end
-        
-        YT-->>W: exit code 0
-    end
-    
-    rect rgb(255, 245, 230)
-        Note over W,PP: 后处理阶段
-        W->>PP: embed_thumbnail(video, thumb)
-        PP-->>W: EmbedResult(success=True)
-        
-        W->>W: cleanup_thumbnail_files()
-    end
-    
-    W-->>DM: completed.emit()
-    DM->>DM: 更新 TaskQueue
-```
-
----
-
-##### 进度解析正则
-
-Worker 解析 yt-dlp 输出的正则表达式：
-
-```python
-# 解析 [download] 45.5% of 123.45MiB at 5.67MiB/s ETA 00:15
-PROGRESS_PATTERN = re.compile(
-    r'\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*)(Ki|Mi|Gi)?B'
-    r'(?:\s+at\s+(\d+\.?\d*)(Ki|Mi|Gi)?B/s)?'
-    r'(?:\s+ETA\s+(\d+:\d+))?'
-)
-```
-
----
-
-#### ProcessingPipeline - 后处理管线
-
-**设计模式**: 责任链模式
-
-下载完成后，视频/音频文件经过一系列后处理步骤：
-
-```mermaid
-flowchart TB
-    subgraph Input["输入"]
-        VF["视频文件 xxx.mp4"]
-        TF["封面文件 xxx.jpg"]
-    end
-    
-    subgraph Pipeline["后处理管线"]
-        SB["SponsorBlock 跳过广告"]
-        TE["ThumbnailEmbed 封面嵌入"]
-        ME["MetadataEmbed 元数据写入"]
-        CL["Cleanup 清理临时文件"]
-    end
-    
-    subgraph Output["输出"]
-        OF["最终文件 xxx.mp4"]
-    end
-    
-    VF --> SB
-    TF --> TE
-    SB --> TE
-    TE --> ME
-    ME --> CL
-    CL --> OF
-```
-
----
-
-##### SponsorBlock 集成
-
-SponsorBlock 是社区驱动的广告跳过数据库，支持以下片段类型：
-
-| 类别 ID | 名称 | 描述 |
-|---------|------|------|
-| `sponsor` | 赞助广告 | 跳过赞助商推广 |
-| `selfpromo` | 自我推广 | 跳过频道推广 |
-| `interaction` | 互动提醒 | 跳过"点赞订阅"提醒 |
-| `intro` | 片头 | 跳过视频片头动画 |
-| `outro` | 片尾 | 跳过视频片尾 |
-| `preview` | 预览 | 跳过"回顾"片段 |
-| `filler` | 填充内容 | 跳过无关内容 |
-| `music_offtopic` | 非音乐内容 | 跳过音乐视频中的非音乐部分 |
-
-**处理模式**：
-- `remove` - 从视频中切除片段（需要重新编码）
-- `mark` - 标记为章节（保留原视频）
-
-yt-dlp 参数：
-```python
-ydl_opts["sponsorblock_remove"] = ["sponsor", "selfpromo", "interaction"]
-```
-
----
-
-##### ThumbnailEmbedder - 封面嵌入器
-
-封面嵌入器支持三种工具，根据文件格式自动选择最佳方案：
-
-```mermaid
-flowchart TD
-    Start[embed_thumbnail] --> GetExt[获取文件扩展名]
-    
-    GetExt --> Check{格式检查}
-    
-    Check -->|mp4/m4a/mov| AP{AtomicParsley 可用?}
-    AP -->|是| UseAP[使用 AtomicParsley]
-    AP -->|否| FallbackFF1[降级到 FFmpeg]
-    
-    Check -->|mkv/webm| UseFF[使用 FFmpeg]
-    
-    Check -->|mp3/flac/ogg| MG{mutagen 可用?}
-    MG -->|是| UseMG[使用 mutagen]
-    MG -->|否| FallbackFF2[降级到 FFmpeg]
-    
-    Check -->|wav/aiff/ts| Skip[不支持 - 跳过]
-    
-    UseAP --> Result[返回 EmbedResult]
-    FallbackFF1 --> Result
-    UseFF --> Result
-    UseMG --> Result
-    FallbackFF2 --> Result
-    Skip --> Result
-```
-
-**工具对比**：
-
-| 工具 | 支持格式 | 优点 | 缺点 |
-|------|----------|------|------|
-| **AtomicParsley** | MP4/M4A/MOV | 专业、可靠、保留元数据 | 需单独安装 |
-| **FFmpeg** | MKV/WebM/大多数 | 通用性强 | MP4 嵌入质量一般 |
-| **mutagen** | MP3/FLAC/OGG | 纯 Python，无需外部工具 | 仅支持音频 |
-
-**封面嵌入代码示例**:
-```python
-# AtomicParsley 命令
-subprocess.run([
-    "AtomicParsley.exe",
-    "video.mp4",
-    "--artwork", "cover.jpg",
-    "--overWrite"
-])
-
-# FFmpeg 命令 (MKV)
-subprocess.run([
-    "ffmpeg.exe",
-    "-i", "video.mkv",
-    "-attach", "cover.jpg",
-    "-metadata:s:t", "mimetype=image/jpeg",
-    "-c", "copy",
-    "output.mkv"
-])
-
-# mutagen (MP3)
-from mutagen.id3 import ID3, APIC
-audio = MP3("audio.mp3")
-audio.tags.add(APIC(type=3, mime="image/jpeg", data=thumbnail_data))
-audio.save()
-```
-
-
----
-
-### 3. 核心层 (Core Services)
-
-#### ConfigManager - 配置管理
-**设计模式**: 单例 + 观察者
-
-```python
-# 主要配置项
-download_dir          # 下载目录
-max_concurrent        # 最大并发数
-embed_thumbnail       # 嵌入封面
-embed_metadata        # 嵌入元数据
-sponsorblock_enabled  # SponsorBlock 开关
-proxy_mode            # 代理模式
-cookie_mode           # Cookie 模式
-...
-```
-
-#### AuthService / CookieSentinel - 认证系统
-
-**设计模式**: 策略模式 + 单例 + 延迟清理
-
-Cookie 认证系统是解锁会员内容、年龄限制视频的核心。由两个核心组件协作：
-
-| 组件 | 职责 |
-|------|------|
-| **AuthService** | Cookie 来源管理、从浏览器提取、验证有效性 |
-| **CookieSentinel** | 统一的 `bin/cookies.txt` 生命周期管理 |
-
----
-
-##### 为什么需要两层架构？
-
-```mermaid
-flowchart TB
-    subgraph Problem["直接使用 yt-dlp cookies-from-browser 的问题"]
-        P1["浏览器运行时数据库被锁定"]
-        P2["每次下载都重新提取性能低下"]
-        P3["无法追踪来源混用不同浏览器"]
-    end
-    
-    subgraph Solution["AuthService + CookieSentinel 方案"]
-        S1["独立提取到文件避免锁定"]
-        S2["缓存机制5分钟有效"]
-        S3["元数据追踪来源可溯"]
-    end
-    
-    Problem -->|重构| Solution
-```
-
----
-
-##### Cookie 提取流程
-
-```mermaid
-sequenceDiagram
-    participant UI as 设置页面
-    participant AS as AuthService
-    participant RP as rookiepy
-    participant CS as CookieSentinel
-    participant YT as yt-dlp
-    
-    UI->>AS: set_source(EDGE)
-    Note over AS: 保存配置到 auth_config.json
-    
-    rect rgb(200, 230, 255)
-        Note over AS,RP: 提取阶段
-        AS->>RP: edge(domains=[".youtube.com", ".google.com"])
-        RP-->>AS: Cookie 列表 (约 50-100 个)
-        AS->>AS: 写入缓存 cached_edge_youtube.txt
-    end
-    
-    rect rgb(255, 230, 200)
-        Note over AS,CS: 验证阶段
-        AS->>AS: 检查必需 Cookie (SID, HSID, SSID, SAPISID, APISID)
-        AS->>CS: 复制到 bin/cookies.txt
-        CS->>CS: 保存元数据 (来源: edge, 时间, 数量)
-    end
-    
-    rect rgb(200, 255, 200)
-        Note over CS,YT: 使用阶段
-        YT->>CS: get_cookie_file_path()
-        CS-->>YT: bin/cookies.txt
-        YT->>YT: --cookies bin/cookies.txt
-    end
-```
-
----
-
-##### 支持的浏览器
-
-| 浏览器 | 类型 | 权限需求 | 说明 |
-|--------|------|----------|------|
-| **Edge** | Chromium | 管理员 (v130+) | 推荐，Windows 默认安装 |
-| **Chrome** | Chromium | 管理员 (v130+) | App-Bound 加密需要提权 |
-| **Chromium** | Chromium | 管理员 (v130+) | 开源版 |
-| **Brave** | Chromium | 管理员 (v130+) | 隐私浏览器 |
-| **Opera** | Chromium | 管理员 (v130+) | - |
-| **Opera GX** | Chromium | 管理员 (v130+) | 游戏版 |
-| **Vivaldi** | Chromium | 管理员 (v130+) | 高度可定制 |
-| **Arc** | Chromium | 管理员 (v130+) | 新一代浏览器 |
-| **Firefox** | Gecko | 无需特权 ✅ | SQLite 直读 |
-| **LibreWolf** | Gecko | 无需特权 ✅ | Firefox 隐私分支 |
-| **手动文件** | - | 无 | 用户提供 cookies.txt |
-
-> **💡 设计决策**：Chromium v130+ 引入了 App-Bound 加密，Cookie 只能在管理员权限下解密。
-> 我们检测此错误后提示用户以管理员身份重启程序，而非每次都请求 UAC。
-
----
-
-##### Windows UAC 提权策略
-
-```mermaid
-flowchart TD
-    Start[用户点击刷新 Cookie] --> Try[尝试普通权限提取]
-    Try --> Success{成功?}
-    
-    Success -->|是| Save[保存到 bin/cookies.txt]
-    Success -->|否| IsAppBound{是 App-Bound 错误?}
-    
-    IsAppBound -->|是| ShowPrompt[显示提权提示对话框]
-    IsAppBound -->|否| ShowError[显示其他错误]
-    
-    ShowPrompt --> UserChoice{用户选择}
-    UserChoice -->|确认| Restart[以管理员身份重启程序]
-    UserChoice -->|取消| UseOld[继续使用旧 Cookie]
-    
-    Restart --> AdminStart[程序以管理员权限启动]
-    AdminStart --> AutoRefresh[自动静默刷新 Cookie]
-    AutoRefresh --> Save
-    
-    Save --> Done[完成]
-    UseOld --> Done
-```
-
-**核心代码逻辑** (`auth_service.py`):
-
-```python
-def _extract_and_cache(self, browser: str, ...):
-    try:
-        cookies = rookiepy.edge(domains)  # 首次尝试
-    except Exception as e:
-        if _is_appbound_error(e):
-            # 检测到 App-Bound 加密，需要管理员权限
-            raise PermissionError(
-                f"{browser} v130+ 使用了 App-Bound 加密。\n"
-                "需要以管理员身份重新启动程序才能提取 Cookie。"
-            )
-```
-
----
-
-##### Cookie 生命周期管理 (CookieSentinel)
-
-CookieSentinel 是 Cookie 的"守护者"，确保整个应用只使用一个统一的文件：
-
-```mermaid
-stateDiagram-v2
-    [*] --> Empty: 首次启动
-    
-    Empty --> Extracting: silent_refresh_on_startup()
-    
-    Extracting --> Valid: 提取成功
-    Extracting --> Fallback: 提取失败但有旧Cookie
-    Extracting --> Empty: 提取失败且无旧Cookie
-    
-    Valid --> Stale: 超过 30 分钟
-    Stale --> Extracting: 手动刷新
-    
-    Valid --> SourceMismatch: 用户切换浏览器
-    SourceMismatch --> Extracting: 延迟清理策略
-    
-    Fallback --> Valid: 手动刷新成功
-    Fallback --> Fallback: UI 显示警告
-    
-    state Valid {
-        [*] --> Ready
-        Ready --> InUse: yt-dlp 读取
-        InUse --> Ready: 下载完成
-    }
-```
-
-**关键设计决策**:
-
-1. **延迟清理策略**
-   - 切换浏览器时**不立即删除**旧 Cookie
-   - 只有新提取**成功后**才覆盖旧文件
-   - 避免提取失败时丢失可用的旧 Cookie
-
-2. **来源追踪**
-   - 每次提取时保存 `.meta` 元数据文件
-   - 记录：来源浏览器、提取时间、Cookie 数量
-   - 检测来源不匹配时显示警告
-
-3. **回退机制**
-   - 提取失败时检测是否有旧 Cookie 可用
-   - 设置 `_using_fallback = True` 标记
-   - UI 显示黄色警告："配置为 Edge，但当前使用 Firefox 的 Cookie"
-
----
-
-##### Cookie 验证逻辑
-
-YouTube 登录需要 5 个关键 Cookie：
-
-```python
-YOUTUBE_REQUIRED_COOKIES = {"SID", "HSID", "SSID", "SAPISID", "APISID"}
-```
-
-验证流程：
-1. 解析 Netscape 格式文件
-2. 检查是否包含所有必需 Cookie
-3. 返回状态：`{ valid: bool, message: str, cookie_count: int }`
-
-```python
-def _validate_cookies(self, cookies: list[dict], platform: str):
-    found = {c.get("name", "") for c in cookies}
-    missing = YOUTUBE_REQUIRED_COOKIES - found
-    
-    if missing:
-        return {"valid": False, "message": f"缺少: {', '.join(missing)}"}
-    return {"valid": True, "message": "已验证 (检测到 YouTube 登录)"}
-```
-
----
-
-##### 错误检测与自动修复
-
-当 yt-dlp 返回错误时，CookieSentinel 自动检测是否为 Cookie 问题：
-
-```python
-COOKIE_ERROR_KEYWORDS = [
-    "sign in to confirm your age",      # 年龄限制
-    "sign in to confirm you're not a bot",  # 机器人检测
-    "http error 403",                    # 禁止访问
-    "forbidden",
-    "private video",                     # 私有视频
-    "members-only",                      # 会员专属
-    "requires authentication",
-]
-```
-
-检测到 Cookie 问题后：
-1. 标记任务失败原因为 "Cookie 失效"
-2. 在 UI 中显示"点击此处刷新 Cookie"按钮
-3. 用户点击后触发 `force_refresh_with_uac()`
-
----
-
-##### 配置持久化
-
-Cookie 配置存储在 `%TEMP%/fluentytdl_auth/auth_config.json`：
-
-```json
-{
-  "version": 2,
-  "source": "edge",
-  "file_path": null,
-  "auto_refresh": true,
-  "updated_at": "2026-02-02T15:00:00"
-}
-```
-
----
-
-#### Logger - 日志系统
-
-**技术**: loguru + Qt Signal 实时转发
-
-日志系统采用 loguru 库，提供三种输出目标和完整的异常捕获能力。
-
----
-
-##### 日志架构
-
-```mermaid
-flowchart TD
-    subgraph Sources["日志来源"]
-        App["应用代码"]
-        Worker["Worker 线程"]
-        Exception["未捕获异常"]
-    end
-    
-    subgraph Loguru["loguru 核心"]
-        Format["格式化器"]
-        Filter["级别过滤"]
-    end
-    
-    subgraph Sinks["输出目标 Sinks"]
-        Console["控制台 Sink INFO及以上"]
-        File["文件 Sink DEBUG及以上 7天轮转"]
-        Signal["Qt Signal Sink 实时转发到 UI"]
-    end
-    
-    Sources --> Loguru
-    Loguru --> Console
-    Loguru --> File
-    Loguru --> Signal
-```
-
----
-
-##### 日志存储路径
-
-| 环境 | 路径 |
-|------|------|
-| **开发环境** | `<项目根>/logs/` |
-| **打包后 (frozen)** | `Documents/FluentYTDL/logs/` |
-| **降级 (无写权限)** | `%TEMP%/FluentYTDL_logs/` |
-
-**路径选择逻辑**:
-```python
-if getattr(sys, "frozen", False):
-    # 打包后: 用户文档目录 (可写)
-    LOG_DIR = os.path.join(os.path.expanduser("~"), "Documents", "FluentYTDL", "logs")
-else:
-    # 开发环境: 项目根目录
-    LOG_DIR = os.path.join(BASE_DIR, "logs")
-```
-
----
-
-##### 控制台输出格式
-
-```
-14:35:22 | INFO     | fluentytdl.core.auth_service:set_source:243 - 验证源已设置: Edge 浏览器
-14:35:23 | WARNING  | fluentytdl.download.workers:run:180 - 下载超时，重试中...
-14:35:25 | ERROR    | fluentytdl.youtube.yt_dlp_cli:_handle_error:89 - yt-dlp 错误: HTTP 403
-```
-
-**格式化配置**:
-```python
-logger.add(
-    sys.stderr,
-    level="INFO",
-    format=(
-        "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | "
-        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-        "<level>{message}</level>"
-    ),
-)
-```
-
----
-
-##### 文件日志配置
-
-文件日志记录所有级别，支持自动轮转和压缩：
-
-```python
-logger.add(
-    os.path.join(LOG_DIR, "app_{time:YYYY-MM-DD}.log"),
-    level="DEBUG",           # 记录所有级别
-    rotation="00:00",        # 每日午夜轮转
-    retention="7 days",      # 保留 7 天
-    compression="zip",       # 旧日志压缩
-    encoding="utf-8",
-    enqueue=True,            # 异步写入，不阻塞主线程
-    backtrace=True,          # 记录异常堆栈
-    diagnose=True,           # 诊断模式
-)
-```
-
-**生成的日志文件**:
-```
-logs/
-├── app_2026-02-01.log.zip   # 昨日日志 (已压缩)
-├── app_2026-02-02.log       # 今日日志 (当前)
-└── ...
-```
-
----
-
-##### Qt Signal 实时转发 (LogSignalHandler)
-
-为了在 UI 中实时显示日志，我们创建了自定义的 loguru sink：
-
-```mermaid
-sequenceDiagram
-    participant App as 应用代码
-    participant LG as loguru
-    participant LSH as LogSignalHandler
-    participant UI as LogViewerDialog
-    
-    App->>LG: logger.info("下载开始")
-    LG->>LSH: sink.write(record)
-    LSH->>LSH: log_received.emit(level, message)
-    LSH-->>UI: Qt Signal (跨线程安全)
-    UI->>UI: 追加到 QPlainTextEdit
-```
-
-**LogSignalHandler 代码**:
-```python
-class LogSignalHandler(QObject):
-    log_received = Signal(str, str)  # (level, message)
-    
-    def write(self, message):
-        """loguru sink 回调"""
-        record = message.record
-        level = record["level"].name
-        text = record["message"]
-        self.log_received.emit(level, text)
-    
-    def install(self):
-        """安装到 loguru"""
-        self._handler_id = logger.add(
-            self.write,
-            format="{message}",
-            level="DEBUG",
-        )
-```
-
----
-
-##### 全局异常捕获
-
-程序即使崩溃，也会在日志中记录完整堆栈：
-
-```python
-def handle_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    logger.opt(exception=(exc_type, exc_value, exc_traceback)).critical("Uncaught exception")
-
-sys.excepthook = handle_exception
-```
-
-**示例崩溃日志**:
-```
-14:35:30 | CRITICAL | Uncaught exception
-Traceback (most recent call last):
-  File "main.py", line 42, in <module>
-    ...
-ZeroDivisionError: division by zero
-```
-
----
-
-##### 日志查看器 UI
-
-设置页的日志管理功能：
-
-| 功能 | 说明 |
-|------|------|
-| **查看日志** | 打开 LogViewerDialog，实时显示 |
-| **清理日志** | 删除旧日志文件 |
-| **打开目录** | 在资源管理器中打开 logs 文件夹 |
-
-**LogViewerDialog 特性**：
-- 级别过滤 (DEBUG/INFO/WARNING/ERROR)
-- 关键词搜索
-- 自动滚动
-- 加载今日已有日志（最近 500 行）
-
-
-
----
-
-### 4. 后处理模块详解
-
-#### ThumbnailEmbedder - 封面嵌入器
-
-```mermaid
-flowchart TB
-    subgraph Tools["嵌入工具"]
-        AP["AtomicParsley MP4/M4A"]
-        FF["FFmpeg MKV/WEBM"]
-        MG["mutagen MP3/FLAC/OGG"]
-    end
-    
-    subgraph Formats["支持格式"]
-        Video["MP4, MKV, WEBM, MOV"]
-        Audio["MP3, M4A, FLAC, OGG, OPUS"]
-    end
-    
-    Video --> AP
-    Video --> FF
-    Audio --> MG
-    Audio --> AP
-```
-
-**工具选择策略**：
-| 格式 | 首选工具 | 备选 |
-|------|----------|------|
-| MP4/M4A | AtomicParsley | FFmpeg |
-| MKV/WEBM | FFmpeg | - |
-| MP3/FLAC/OGG | mutagen | FFmpeg |
-
-#### SponsorBlock - 广告跳过
-
-**支持类别**：
-| ID | 名称 | 描述 |
-|----|------|------|
-| sponsor | 赞助广告 | 跳过赞助商内容 |
-| selfpromo | 自我推广 | 跳过频道推广 |
-| interaction | 互动提醒 | 跳过订阅/点赞提醒 |
-| intro | 片头 | 跳过视频片头 |
-| outro | 片尾 | 跳过视频片尾 |
-
-**处理模式**：
-- `remove` - 从视频中移除片段
-- `mark` - 标记为章节
-
----
-
-## 🔄 线程与进程模型
-
-```mermaid
-graph TB
-    subgraph MainProcess["主进程"]
-        GUI["GUI 主线程 事件循环"]
-        W1["Worker 1 下载线程"]
-        W2["Worker 2 下载线程"]
-        W3["Worker 3 下载线程"]
-    end
-    
-    subgraph SubProcesses["子进程"]
-        YTDLP1["yt-dlp 1"]
-        YTDLP2["yt-dlp 2"]
-        FFMPEG["ffmpeg"]
-        POT["pot-provider 后台服务"]
-    end
-    
-    GUI --> W1
-    GUI --> W2
-    GUI --> W3
-    GUI -.-> POT
-    W1 -.-> YTDLP1
-    W2 -.-> YTDLP2
-    W1 -.-> FFMPEG
-```
-
-**线程职责**：
-- **GUI 主线程**: 事件循环、UI 更新
-- **Worker 线程**: 执行下载、监控进度
-- **POT 服务**: 后台常驻，提供 PO Token
-
----
-
-## 📡 信号系统设计
-
-使用 Qt Signal/Slot 实现跨线程通信：
-
-```mermaid
-sequenceDiagram
-    participant Worker as Worker 线程
-    participant DM as DownloadManager
-    participant UI as UI 主线程
-    
-    Worker->>DM: progress_updated.emit(task_id, %)
-    DM->>UI: task_progress_changed.emit(task_id, %)
-    UI->>UI: 更新进度条
-    
-    Worker->>DM: task_completed.emit(task_id)
-    DM->>UI: task_status_changed.emit(task_id, COMPLETED)
-    UI->>UI: 显示完成通知
-```
-
----
-
-## 📁 目录结构
+| 单向依赖 | 第 N 层只能从第 N-1、N-2、... 层导入 |
+| Qt Signal/Slot 通信 | 所有 UI-后端解耦使用 `pyqtSignal`/`pyqtSlot` |
+| 子进程隔离 | yt-dlp 和 ffmpeg 作为 CLI 子进程运行，绝不作为 Python 库 |
+| 沙箱隔离 | 每个下载在独立的临时目录中运行 |
+| 懒清理 | 在新状态验证前绝不删除旧状态（cookies、临时文件） |
+| 渐进式恢复 | 放弃前多级递增尝试（POT Manager、错误重试） |
+
+### 1.3 包布局
 
 ```
 src/fluentytdl/
-├── core/                   # 核心服务
-│   ├── config_manager.py   # 配置管理
-│   ├── auth_service.py     # 认证服务
-│   ├── cookie_sentinel.py  # Cookie 哨兵
-│   ├── dependency_manager.py # 依赖管理
-│   ├── pot_manager.py      # PO Token 服务
-│   └── resume_manager.py   # 断点续传
-├── download/               # 下载模块
-│   ├── manager.py          # 下载管理器
-│   ├── workers.py          # 工作线程
-│   └── task.py             # 任务模型
-├── processing/             # 后处理
-│   ├── thumbnail_embedder.py  # 封面嵌入
-│   ├── sponsorblock.py     # SponsorBlock
-│   ├── audio_processor.py  # 音频处理
-│   └── subtitle_manager.py # 字幕管理
-├── youtube/                # YouTube 封装
-│   ├── youtube_service.py  # 核心服务
-│   └── yt_dlp_cli.py       # CLI 构建
-├── ui/                     # 用户界面
-│   ├── reimagined_main_window.py
-│   ├── settings_page.py
-│   └── components/         # UI 组件
-└── utils/                  # 工具
-    ├── logger.py           # 日志配置
-    ├── log_signal_handler.py # 日志信号
-    └── paths.py            # 路径工具
+├── auth/                  — Cookie 生命周期、DLE/WebView2 提供者、CookieSentinel
+│   └── providers/         — DLE 提供者（Chrome 扩展注入）、WebView2 提供者（pywebview）
+├── core/                  — ConfigManager（JSON+Qt Signal）、controller（View↔Backend 桥梁）、DependencyManager
+├── download/              — DownloadManager（队列+并发）、DownloadExecutor（子进程）、DownloadWorker（QThread）、
+│                            Feature 管道（5 个 Feature）、Strategy（SPEED/STABLE/HARSH）、AsyncExtractManager
+├── models/                — DTO：YtMediaDTO（防腐层）、VideoTask（UI 领域模型）、VideoInfo、错误码
+│   └── mappers/           — 原始 yt-dlp dict → 类型化 DTO 转换器（VideoInfoMapper）
+├── processing/            — 音频/字幕/封面后处理、SponsorBlock 集成
+├── storage/               — TaskDB（SQLite WAL）、历史服务、TaskDBWriter（异步写入线程）
+├── ui/                    — 53 个文件：主窗口、页面、组件、委托、模型
+│   ├── components/        — 可复用控件（24 个文件），含 DownloadConfigWindow（~3600 行）
+│   ├── delegates/         — QPainter 列表项渲染器（3 个文件：播放列表、下载、历史）
+│   ├── dialogs/           — 模态对话框（4 个文件）
+│   ├── models/            — Qt 列表模型（PlaylistListModel，含脏行去抖）
+│   ├── pages/             — 页面容器
+│   └── settings/          — 设置子模块
+├── utils/                 — 路径、日志、error_parser（16 规则诊断引擎）、format_scorer、验证器
+│   └── spatialmedia/      — Google 空间媒体工具包（第三方，Apache 2.0），用于 VR 元数据
+├── youtube/               — YoutubeService（yt-dlp CLI 封装）、POT Manager（PO Token 提供者）、节点诊断
+└── yt_dlp_plugins_ext/    — yt-dlp PO Token 提供者插件（随应用捆绑）
+    └── yt_dlp_plugins/extractor/
 ```
 
----
+### 1.4 关键单例
 
-## 🔧 外部依赖管理
-
-### DependencyManager
-
-**设计模式**: 异步 Worker + 信号通知
-
-DependencyManager 负责检查、下载和安装外部工具，所有操作在后台线程执行。
-
----
-
-##### 管理的组件
-
-| 组件 | 用途 | 版本检测方式 | 下载源 |
-|------|------|--------------|--------|
-| **yt-dlp** | 视频下载核心 | `yt-dlp --version` | GitHub Releases |
-| **FFmpeg** | 媒体处理 | `ffmpeg -version` | gyan.dev / GitHub |
-| **Deno** | JS 运行时 (签名解析) | `deno --version` | GitHub Releases |
-| **AtomicParsley** | 封面嵌入 (MP4) | 文件存在检测 | GitHub Releases |
-| **pot-provider** | PO Token 提供 | 文件存在检测 | 自定义源 |
+| 单例 | 文件 | 用途 |
+|------|------|------|
+| `config_manager` | `core/config_manager.py` | JSON 配置存储；每次变更发射 Qt Signal |
+| `download_manager` | `download/download_manager.py` | 任务队列、槽位并发、崩溃恢复 |
+| `auth_service` | `auth/auth_service.py` | 统一 Cookie 处理、浏览器提取路由 |
+| `cookie_sentinel` | `auth/cookie_sentinel.py` | Cookie 生命周期：静默预提取、403 恢复、懒清理 |
+| `youtube_service` | `youtube/youtube_service.py` | 所有 yt-dlp 交互、格式排序、选项构建 |
+| `pot_manager` | `youtube/pot_manager.py` | PO Token 提供者生命周期、3 级渐进恢复 |
+| `task_db` | `storage/task_db.py` | SQLite WAL 模式任务持久化 |
+| `app_controller` | `core/controller.py` | View 与 Backend 的桥梁 |
 
 ---
 
-##### 组件信息模型
+## 2. 下载状态机
 
-```python
-class ComponentInfo:
-    key: str           # 内部标识: 'yt-dlp', 'ffmpeg', 'deno'
-    name: str          # 显示名称
-    exe_name: str      # 可执行文件名 (e.g., yt-dlp.exe)
-    current_version: str | None   # 本地版本
-    latest_version: str | None    # 远程最新版本
-    download_url: str | None      # 下载链接
-```
+下载系统采用**两层状态设计**：持久层（SQLite）用于崩溃恢复，临时层（Worker 对象）用于实时运行时状态。
 
----
+### 2.1 状态定义
 
-##### 更新检查流程
+状态是纯字符串（非枚举），在三个层之间共享：
 
 ```mermaid
-sequenceDiagram
-    participant UI as 设置页面
-    participant DM as DependencyManager
-    participant Worker as UpdateCheckerWorker
-    participant GitHub as GitHub API
-    
-    UI->>DM: check_update("yt-dlp")
-    DM->>Worker: start()
-    
-    rect rgb(230, 245, 255)
-        Note over Worker,GitHub: 后台线程
-        Worker->>Worker: _get_local_version()
-        Note over Worker: 执行 yt-dlp --version
-        
-        Worker->>GitHub: GET /repos/yt-dlp/yt-dlp/releases/latest
-        GitHub-->>Worker: {tag_name: "2026.02.01", assets: [...]}
-        
-        Worker->>Worker: 对比版本
-    end
-    
-    Worker-->>DM: finished_signal.emit(key, result)
-    DM-->>UI: check_finished.emit(key, {has_update: True, ...})
-    UI->>UI: 显示更新按钮
+stateDiagram-v2
+    [*] --> 排队中 : 插入任务
+    排队中 --> 运行中 : 调度器启动工作线程
+    运行中 --> 已暂停 : 用户暂停
+    已暂停 --> 运行中 : 用户恢复
+    运行中 --> 已完成 : 下载 + 后处理成功
+    运行中 --> 错误 : 异常 / yt-dlp 失败
+    运行中 --> 已取消 : 用户取消
+    已完成 --> [*]
+    错误 --> [*]
+    已取消 --> [*]
 ```
 
----
+| 状态 | 含义 | 设置者 |
+|------|------|--------|
+| `queued` | 等待并发槽位 | `task_db.insert_task()` 默认值 |
+| `running` / `downloading` | 正在下载 | `CleanLogger` 通过 `unified_status` signal |
+| `parsing` | 从 yt-dlp 提取元数据 | `CleanLogger.force_update("parsing", ...)` |
+| `paused` | 用户暂停或崩溃恢复时自动暂停 | `DownloadWorker.pause()` |
+| `completed` | 下载成功完成 | `DownloadWorker.run()` 后处理块 |
+| `error` | 下载失败 | `run()` 中的异常处理 |
+| `cancelled` | 用户取消 | `DownloadCancelled` 处理 |
 
-##### 安装流程
+### 2.2 两层设计
+
+**持久层（SQLite）：** `TaskDB` 是以 WAL 模式运行的单例。它存储 `tasks` 表，包含 `state`、`progress`、`status_text`、`output_path`、`file_size`、`ydl_opts_json` 等列。所有跨会话有意义的状态转换都持久化在此。
+
+**临时层（Worker 对象）：** `DownloadWorker` 是一个 `QThread`，持有实时运行时状态：`_pause_event`、`_cancel_event`、`executor`、`output_path`、`dest_paths`、`progress_val`、`status_text`。进程退出时销毁。
+
+**桥接层：** `TaskDBWriter` 是一个专用后台线程，带 `Queue`。主线程绝不直接操作高频写入的 SQLite。`DownloadManager.create_worker()` 将 `worker.unified_status` signal 以 `Qt.ConnectionType.QueuedConnection` 连接到 `db_writer.enqueue_status()` — "单写者桥接连接"防止 SQLite 争用。
+
+**`effective_state` 属性：** `DownloadWorker` 上的权威状态解析器。消除 `_final_state`（由 CleanLogger 设置）和 `QThread.isRunning()` 之间的竞态条件：
+- 如果线程 `isRunning()` → 返回 `"running"`（除非 CleanLogger 已标记为 `"paused"`）
+- 如果不在运行 → 检查 `_final_state` 是否为终止状态
+- 如果 `isFinished()` 但无显式状态 → 默认 `"completed"`
+- 否则 → `"queued"`
+
+### 2.3 崩溃恢复
+
+启动时，`DownloadManager.load_unfinished_tasks()`：
+
+1. 从 `task_db.get_all_tasks()` 读取所有行
+2. 按逆时间顺序遍历
+3. 跳过终止状态（`completed`、`error`、`cancelled`）
+4. 跳过 `skip_download` 任务（字幕/封面提取）— 标记为错误，因为对话上下文已丢失
+5. **关键安全阀：** 所有 `running`/`downloading`/`parsing` 状态的任务降级为 `paused` — 防止重启时并发下载风暴
+6. 从持久化字段重建 `DownloadWorker` 对象
+7. 不调用 `pump()` — 等待 UI 初始化
+
+### 2.4 Worker.run() 三路分支
+
+`DownloadWorker.run()` 有三个互斥的执行路径：
 
 ```mermaid
 flowchart TD
-    Start["用户点击更新"] --> Download["DownloaderWorker.start"]
-    
-    Download --> Progress{"下载进度"}
-    Progress -->|更新| UI["progress_signal: 45%"]
-    Progress -->|完成| Handle{"文件类型"}
-    
-    Handle -->|.exe| Copy["直接复制到 bin/"]
-    Handle -->|.zip| Unzip["解压到 bin/component/"]
-    
-    Copy --> Success["finished_signal.emit"]
-    Unzip --> Success
-    
-    Success --> Refresh["刷新本地版本"]
+    A["下载工作线程运行"] --> B{"是否为封面直接下载?"}
+    B -- "是" --> C["路径 A: 封面直接下载<br/>原始子进程，无执行器/功能管线"]
+    B -- "否" --> D{"跳过下载?"}
+    D -- "是" --> E["路径 B: 轻量提取<br/>字幕/封面提取"]
+    D -- "否" --> F["路径 C: 完整下载"]
+
+    F --> G["构建 yt-dlp 选项 → 合并选项"]
+    G --> H["创建沙箱 .fluent_temp/task_id/"]
+    H --> I["功能管线配置 + 下载开始回调"]
+    I --> J["清理内部标记键"]
+    J --> K["下载执行器执行"]
+    K --> L["功能管线后处理回调"]
+    L --> M["沙箱 → 最终目录移动"]
+    M --> N["发送完成信号"]
+
+    C --> O{"成功?"}
+    E --> P{"成功?"}
+    O -- "是" --> N
+    O -- "否" --> Q["发送错误信号"]
+    P -- "是" --> N
+    P -- "否" --> Q
+```
+
+### 2.5 异常处理流程
+
+```mermaid
+flowchart TD
+    A["运行中发生异常"] --> B{"异常类型?"}
+    B -- "下载取消异常" --> C["日志清理器 → 已取消状态"]
+    C --> D["等待 1 秒 (Windows 文件锁释放)"]
+    D --> E["清理分片临时文件"]
+    E --> F["发送取消信号"]
+
+    B -- "yt-dlp 执行错误" --> G["错误诊断 (退出码, 标准错误)"]
+    G --> H["日志清理器 → 错误状态 + 诊断标题"]
+    H --> I["发送错误信号 (诊断错误字典)"]
+
+    B -- "通用异常" --> J["翻译错误信息"]
+    J --> K["发送错误信号 (错误字典)"]
 ```
 
 ---
 
-##### 镜像源支持
+## 3. 并发模型
 
-对于国内用户，支持 GHProxy 镜像加速：
+### 3.1 槽位调度器
+
+`DownloadManager` 使用两个数据结构：
+
+- `active_workers: list[DownloadWorker]` — 本次会话创建的所有 worker
+- `_pending_workers: deque[DownloadWorker]` — 等待槽位的 FIFO 队列
+
+并发限制从配置运行时读取（`max_concurrent_downloads`，默认 3，钳制在 `[1, 2_147_483_647]`）。
+
+### 3.2 pump() 循环
+
+并发调度器的核心：
 
 ```python
-def get_mirror_url(self, original_url: str) -> str:
-    """应用配置的镜像源"""
-    source = config_manager.update_source  # "github" or "ghproxy"
-    
-    if source == "ghproxy" and "github.com" in original_url:
-        # https://github.com/xxx -> https://ghproxy.com/github.com/xxx
-        return original_url.replace(
-            "https://github.com",
-            "https://ghproxy.com/https://github.com"
-        )
-    return original_url
+def pump(self) -> None:
+    limit = self._max_concurrent()
+    while self._pending_workers and self._running_count() < limit:
+        w = self._pending_workers.popleft()
+        if w.isRunning() or w.isFinished():
+            continue
+        w.start()
+    self.task_updated.emit()
 ```
 
-**配置选项**:
-```json
-{
-  "update_source": "github"  // 或 "ghproxy"
-}
+从队列前端弹出 worker（FIFO），检查未在运行/已完成，然后启动。当待处理队列为空或运行数达到限制时停止。
+
+### 3.3 自动补充链
+
+创建 worker 时，`DownloadManager.create_worker()` 将 worker 的 `QThread.finished` signal 连接到 `_on_worker_finished`：
+
 ```
+Worker 完成 → _on_worker_finished() → 槽位释放 → pump() → 下一个排队 worker 启动
+```
+
+形成自动补充链。`stop_all()` 先清空待处理队列（防止暂停运行中的任务后排队任务启动），然后停止每个运行中的 worker。`shutdown()` 提供可配置的宽限期（默认 2000ms），超时后回退到 `terminate()`，然后刷新 `TaskDBWriter`。
 
 ---
 
-##### 安装位置
+## 4. 沙箱下载模式
 
-| 环境 | 安装路径 |
-|------|----------|
-| **开发环境** | `<项目根>/bin/{component}/` |
-| **打包后** | `<exe目录>/bin/{component}/` |
+### 4.1 为什么需要沙箱？
 
-**目录结构**:
+直接下载到最终目录会在取消或失败时留下碎片文件（`.part`、`.ytdl`）。沙箱模式将所有中间文件隔离在每个任务的临时目录中，保持用户下载目录干净。
+
+### 4.2 生命周期
+
 ```
-bin/
-├── yt-dlp/
-│   └── yt-dlp.exe
-├── ffmpeg/
-│   ├── ffmpeg.exe
-│   └── ffprobe.exe
-├── deno/
-│   └── deno.exe
-├── atomicparsley/
-│   └── AtomicParsley.exe
-└── pot-provider/
-    └── pot-provider.exe
+创建沙箱              下载到沙箱中                移动 / 清理
+     │                    │                         │
+     ▼                    ▼                         ▼
+.fluent_temp/         yt-dlp 写入               成功时：
+  task_{id}/          .part、.ytdl、             扫描沙箱 →
+  ├── home: 沙箱      最终文件                   将所有非 .part
+  └── temp: 沙箱      全部在此                   文件移动到 download_dir
+                                                    → rmtree 沙箱
+
+                                               取消时：
+                                                sleep(1.0) 等待 Windows
+                                                文件锁释放
+                                                → rmtree 沙箱（5 次重试）
+                                                → 回退：逐个删除文件
 ```
+
+### 4.3 关键设计决策
+
+| 决策 | 原因 |
+|------|------|
+| 沙箱使用 DB 主键（`db_id`），非 UUID | 崩溃恢复确定性 — 恢复的任务写入同一沙箱 |
+| 沙箱是 `download_dir` 的子目录 | 同文件系统 → 原子 `shutil.move()`，无跨设备复制 |
+| `home` 和 `temp` 路径都重定向 | yt-dlp 碎片和最终输出都落在沙箱中 |
+| 取消前 1 秒延迟 | Windows 在进程终止后仍持有文件锁；子进程（ffmpeg）可能仍有句柄 |
+| 清理中 5 次重试、0.5 秒延迟 | 对持久 Windows 文件锁的额外弹性 |
+| `_clean_part_files()` 用于 403 恢复 | 陈旧的 `.part` 碎片导致 yt-dlp 恢复时重新请求已过期的签名 URL |
+
+### 4.4 沙箱绕过场景
+
+两种下载路径跳过沙箱：
+- **封面直链**（`__fluentytdl_is_cover_direct`）：直接下载单个图片 URL
+- **轻量提取**（`skip_download`）：不下载视频的字幕/封面提取
 
 ---
 
-##### Qt 信号系统
+## 5. Feature 管道
 
-DependencyManager 通过信号通知 UI 更新状态：
+### 5.1 模板方法模式
 
-| 信号 | 参数 | 用途 |
+基类 `DownloadFeature` 定义三个生命周期钩子：
+
+```mermaid
+flowchart LR
+    A["配置阶段<br/>修改选项"] --> B["下载开始回调<br/>预检调整"]
+    B --> C["yt-dlp 子进程<br/>下载文件"]
+    C --> D["后处理回调<br/>嵌入、转换、注入"]
+
+    style A fill:#4CAF50,color:#fff
+    style B fill:#4CAF50,color:#fff
+    style C fill:#2196F3,color:#fff
+    style D fill:#FF9800,color:#fff
+```
+
+| 钩子 | 时机 | 用途 |
 |------|------|------|
-| `check_started` | (key) | 开始检查 |
-| `check_finished` | (key, result_dict) | 检查完成 |
-| `check_error` | (key, error_msg) | 检查失败 |
-| `download_started` | (key) | 开始下载 |
-| `download_progress` | (key, percent) | 下载进度 |
-| `download_finished` | (key) | 下载完成 |
-| `download_error` | (key, error_msg) | 下载失败 |
+| `configure(ydl_opts)` | yt-dlp 运行前 | 修改选项字典（添加后处理器、设置标志） |
+| `on_download_start(context)` | yt-dlp 运行前 | 基于上下文的预检调整 |
+| `on_post_process(context)` | yt-dlp 完成后 | 下载后处理（嵌入、转换、注入） |
 
+### 5.2 5 个 Feature（固定顺序）
+
+```python
+self.features = [
+    SponsorBlockFeature(),   # 1. 仅 configure() — 注入 sponsorblock_remove/mark
+    MetadataFeature(),       # 2. 仅 configure() — 追加 FFmpegMetadata 后处理器
+    SubtitleFeature(),       # 3. 两个钩子 — 双语合并、格式兼容修复、嵌入
+    ThumbnailFeature(),      # 4. 仅 on_post_process() — 通过 AtomicParsley/FFmpeg/mutagen 嵌入
+    VRFeature(),             # 5. 仅 on_post_process() — EAC→Equi 转换 + 空间元数据
+]
+```
+
+执行顺序固定且不可更改 — 后续 Feature 依赖前面的已完成配置。
+
+```mermaid
+flowchart TD
+    subgraph configure["配置阶段 — yt-dlp 运行前"]
+        SB1["SponsorBlock 功能<br/>注入广告跳过/标记参数"]
+        MF1["元数据功能<br/>追加 FFmpeg 元数据后处理器"]
+    end
+
+    subgraph on_start["下载开始回调 — yt-dlp 运行前"]
+        SF1["字幕功能<br/>嵌入字幕时强制输出格式为 mkv"]
+    end
+
+    subgraph on_post["后处理回调 — yt-dlp 运行后"]
+        SF2["字幕功能<br/>双语合并 + 清理外部字幕文件"]
+        TF1["封面功能<br/>定位封面 → 通过<br/>AtomicParsley/FFmpeg/mutagen 嵌入 → 清理"]
+        VF1["VR 功能<br/>EAC→等矩形 FFmpeg 转换<br/>+ 空间元数据注入"]
+    end
+
+    SB1 --> MF1 --> SF1
+    SF1 --> C["yt-dlp 子进程"]
+    C --> SF2 --> TF1 --> VF1
+```
+
+### 5.3 DownloadContext 外观
+
+`DownloadContext` 封装 `DownloadWorker`，为 Feature 提供受控接口：
+- `output_path` 属性（getter/setter）
+- `dest_paths` 属性（只读）
+- `emit_status(msg)`、`emit_warning(msg)`、`emit_thumbnail_warning(msg)`
+- `find_final_merged_file()` — 即使 `output_path` 指向碎片文件（如 `.f136.mp4`）也能定位合并后的输出
+- `find_thumbnail_file(video_path)` — 扫描 `.jpg/.jpeg/.webp/.png` 变体
+
+### 5.4 `__fluentytdl_` 前缀约定
+
+以 `__fluentytdl_` 为前缀的内部元数据键在 UI/选项层和 Feature 管道之间传递应用特定标志。在传入 yt-dlp 前从选项字典中剥离：
+
+```python
+for k in list(merged.keys()):
+    if isinstance(k, str) and k.startswith("__fluentytdl_"):
+        merged.pop(k, None)
+```
+
+示例：`__fluentytdl_is_cover_direct`、`__fluentytdl_use_android_vr`、`__vr_projection`、`__vr_convert_eac`、`__vr_stereo_mode`。
 
 ---
 
-## 📝 配置持久化
+## 6. 三种下载路径
 
-配置存储在 `config.json`：
+`DownloadWorker.run()` 方法实现三种由选项标志选择的执行路径：
 
-```json
-{
-  "download_dir": "D:/Downloads",
-  "max_concurrent_downloads": 3,
-  "embed_thumbnail": true,
-  "embed_metadata": true,
-  "sponsorblock_enabled": true,
-  "cookie_mode": "auto",
-  "cookie_browser": "edge",
-  "proxy_mode": "system",
-  "update_source": "github"
-}
+### 6.1 路径对比
+
+| 方面 | 路径 A：封面直链 | 路径 B：轻量提取 | 路径 C：完整下载 |
+|------|-----------------|-----------------|-----------------|
+| 触发条件 | `__fluentytdl_is_cover_direct` | `skip_download` | 默认 |
+| 用途 | 单个图片 URL | 字幕/封面提取 | 视频/音频下载 |
+| Executor | 否（原始子进程） | 否（原始子进程） | 是（`DownloadExecutor`） |
+| Strategy | 否 | 否 | 是（SPEED/STABLE/HARSH） |
+| 沙箱 | 否 | 否 | 是（`.fluent_temp/task_{id}/`） |
+| Feature 管道 | 否 | 否 | 是（全部 5 个 Feature） |
+| 进度 | 最小（"Destination:" 时 50%） | `YtDlpOutputParser` | 完整 `FLUENTYTDL\|` 模板 |
+| 崩溃恢复 | 否 | 否（对话上下文丢失） | 是 |
+| 使用者 | 封面解析模式 | 字幕 + 封面（回退） | 视频、VR、频道、播放列表 |
+
+### 6.2 完整下载管道（路径 C）
+
+```
+1. 与 youtube_service.build_ydl_options() 基础选项合并
+2. 创建沙箱目录（.fluent_temp/task_{id}/）
+3. Feature 管道：对全部 5 个 Feature 执行 configure() + on_download_start()
+4. 剥离 __fluentytdl_ 内部键
+5. 创建 DownloadExecutor → execute() 并传入进度/状态/取消回调
+6. Feature 管道：对全部 5 个 Feature 执行 on_post_process()
+7. 将文件从沙箱移动到最终目录
+8. 发射 completed signal
 ```
 
 ---
 
-<p align="center">
-  <sub>FluentYTDL Architecture v1.0 | 2026</sub>
-</p>
+## 7. 播放列表懒加载架构
+
+这是最复杂的子系统之一。它处理播放列表（可能有数千条目）和频道标签页列表，使用多层优先队列和视口感知调度。
+
+### 7.1 两阶段提取
+
+**阶段 1 — 扁平枚举（快速，2-5 秒）：**
+
+```python
+ydl_opts = {
+    "extract_flat": True,      # 仅枚举，不获取每条详情
+    "lazy_playlist": True,     # yt-dlp 懒模式
+    "skip_download": True,
+}
+```
+
+返回扁平条目列表，仅有基本元数据（标题、id、URL、缩略图）— 无格式列表，无详细元数据。
+
+**阶段 2 — 逐条深度提取（懒加载，按需）：**
+
+每个条目的完整元数据（格式、时长等）由 `EntryDetailWorker` 通过 `AsyncExtractManager` 单独获取。`PlaylistScheduler` 优先处理可见行，然后在后台爬取其余部分。
+
+### 7.2 PlaylistScheduler — 三层优先队列
+
+```mermaid
+flowchart LR
+    FG["前台队列<br/>(视口条目)<br/>最高优先级"] --> EXEC["执行队列<br/>(管线门控, 限制: 3)"]
+    BG["后台队列<br/>(回补爬取)<br/>最低优先级"] --> EXEC
+    EXEC --> AEM["异步提取管理器<br/>线程池, 最大 3"]
+    AEM --> |"任务完成"| SCH["播放列表调度器<br/>处理完成回调"]
+    SCH --> |"详情完成 (行号, 信息)"| UI["下载配置窗口<br/>更新模型"]
+
+    scroll["滚动事件"] --> |"50ms 节流"| VP["设置视口 (首行, 末行)"]
+    VP --> |"前 1 行, 后 3 行"| FG
+    crawl["400ms 爬取定时器"] --> BG
+```
+
+| 层级 | 队列 | 优先级 | 来源 |
+|------|------|--------|------|
+| **前台** | `_fg_queue` / `_fg_set` | 最高 — 始终优先消费 | `set_viewport()` + 用户点击 |
+| **执行** | `_exec_queue` / `_exec_set` | 管道门控（限制：3） | `_fill_exec_queue()` 从前台或后台移入 |
+| **后台** | `_bg_queue` / `_bg_set` | 最低 — 仅当前台为空时消费 | 400ms 爬取定时器 |
+
+### 7.3 视口优先调度
+
+`set_viewport(first, last)` 实现前瞻：
+
+```python
+pre_first = max(0, first - 1)      # 第一个可见行前 1 行
+pre_last = min(total - 1, last + 3) # 最后一个可见行后 3 行
+for row in range(pre_first, pre_last + 1):
+    self._enqueue(row, foreground=True)
+self._pump()
+```
+
+`_enqueue()` 方法处理去重，并将已在后台队列中的行**提升**到前台 — 视口条目始终抢占后台工作。
+
+**基于 URL 的任务标识：** 不使用行号（会导致行偏移 bug），而是使用条目 URL 作为稳定的 `task_id`。双向映射（`_url_to_row` / `_row_to_row`）在 URL 和行号之间转换。
+
+**重试逻辑：** 出错时，调度器自动重试一次。如果重试也失败，行标记为失败。
+
+### 7.4 数据流 — 5 阶段管道
+
+```mermaid
+flowchart LR
+    S1["阶段 1<br/>yt-dlp CLI<br/>(子进程)"] --> S2["阶段 2<br/>原始字典<br/>(JSON)"]
+    S2 --> S3["阶段 3<br/>媒体 DTO<br/>(防腐层)"]
+    S3 --> S4["阶段 4<br/>视频任务<br/>(UI 领域模型)"]
+    S4 --> S5["阶段 5<br/>QPainter 委托<br/>(渲染)"]
+
+    S3 -.-> |"DTO 模型<br/>解析状态枚举<br/>格式 DTO<br/>from_dict()"| S3
+    S4 -.-> |"视频任务模型<br/>视频元数据<br/>缩略图状态<br/>详情状态<br/>选择状态"| S4
+```
+
+**阶段 1 — yt-dlp 子进程：** 通过 `run_dump_single_json()` 调用 CLI。扁平播放列表使用 `--flat-playlist --lazy-playlist --dump-single-json`。
+
+**阶段 2 — 原始 Dict：** JSON dict 含 `entries` 数组。每个条目是部分 dict（扁平模式下无 `formats`）。
+
+**阶段 3 — YtMediaDTO（防腐层）：** `YtMediaDTO.from_dict()` 将原始 dict 转换为类型化 DTO。`ParseState` 枚举跟踪提取深度：`FLAT`（仅标题/缩略图）、`FETCHING`（深度请求进行中）、`READY`（格式可用）。
+
+**阶段 4 — VideoTask（UI 领域模型）：** 使用子数据类组合：
+- `VideoMetadata` — 轻量级，用于初始列表渲染
+- `ThumbnailState` — URL 和缓存状态
+- `DetailState` — 重量级状态（格式、DTO 引用、状态：idle/loading/ready/error）
+- `SelectionState` — 用户本地选择（复选框、自定义格式覆盖）
+
+**阶段 5 — PlaylistListModel + QPainter 委托：** `PlaylistListModel` 存储 `VideoTask` 对象。`PlaylistItemDelegate` 通过 `TaskObjectRole` 读取任务，直接用 QPainter 绘制。
+
+### 7.5 分块模型填充
+
+播放列表条目以 30 个为一块添加到模型：
+
+```python
+self._build_chunk_size = 30
+# 每块：QTimer.singleShot(0, self._process_next_build_chunk)
+# 块间让出事件循环 → UI 保持响应
+```
+
+所有块完成后：
+1. 通过 `_setup_scheduler()` 创建 `PlaylistScheduler`
+2. 启动缩略图加载
+3. 50ms 后调度初始视口扫描
+4. 200ms 后启动后台爬取
+
+### 7.6 脏行去抖
+
+`PlaylistListModel` 使用前缘去抖模式：
+
+```python
+_dirty_rows: set[int]     # 累积的脏行
+_update_timer: QTimer     # 200ms 单次触发
+
+def mark_row_dirty(row):
+    self._dirty_rows.add(row)
+    if not self._update_timer.isActive():
+        self._update_timer.start()  # 前缘：第一次标记启动窗口
+
+def _flush_updates():
+    rows = sorted(self._dirty_rows)
+    # 将连续行合并为最小 dataChanged 范围
+    # 50 行脏行 → 约 3-5 个 dataChanged signal
+```
+
+即使 200ms 内有 50 行更新，视图也只收到覆盖连续范围的少量 `dataChanged` signal。
+
+### 7.7 延迟解析指示器
+
+避免快速提取时的"待处理 → 加载中 → 格式"三闪：
+
+```python
+def _schedule_deferred_parsing_indicator(self, row):
+    def _apply():
+        if self._scheduler and (self._scheduler.is_loaded(row) or self._scheduler.is_failed(row)):
+            return  # 已完成，跳过加载指示器
+        self._set_row_parsing(row, True)
+    QTimer.singleShot(800, _apply)  # 仅在提取耗时 >800ms 时显示"加载中"
+```
+
+### 7.8 QPainter 委托
+
+所有列表项用 QPainter 渲染，而非每行 QWidget 实例。这避免了 `QScrollArea` 为每行分配多个完整 QWidget 实例，导致高内存占用和卡顿。
+
+```
+PlaylistItemDelegate (playlist_delegate.py)
+├── paint() 管道：
+│   1. 清除背景（WA_OpaquePaintEvent）
+│   2. 卡片背景（Fluent Design 颜色，选中/悬停/默认）
+│   3. 复选框（自定义 Fluent 风格，无 QCheckBox 控件）
+│   4. 缩略图（圆角矩形裁剪，带预缩放缓存的像素图缓存）
+│   5. 文本信息（标题加粗 14px 省略，元数据 12px）
+│   6. 操作按钮（状态徽章：loading/error/pending/格式字符串）
+├── sizeHint()：固定 108px 高度（MARGIN*2 + THUMB_HEIGHT）
+└── hit_test()：返回 "checkbox" / "action_btn" / "row"
+```
+
+三个委托遵循此模式：`PlaylistItemDelegate`、`HistoryItemDelegate`、`DownloadItemDelegate`。
+
+### 7.9 频道与播放列表
+
+在调度器层面，两者没有区别 — 都使用相同的 `PlaylistScheduler`、`AsyncExtractManager`、`EntryDetailWorker` 和 `PlaylistListModel`。差异仅存在于 UI 层：
+
+| 方面 | 频道 | 播放列表 |
+|------|------|----------|
+| URL 规范化 | 追加 `/videos` 或 `/shorts` | 无 |
+| 标签页组合框 | 视频 / Shorts（用不同后缀重新加载） | 无 |
+| 排序组合框 | 最新 / 最旧（`--playlist-reverse`） | 无 |
+| 重新加载能力 | 有（清除模型，重新请求 URL） | 无 |
+| 检测方式 | `UrlValidator.is_channel_url()` | 响应中 `_type == "playlist"` |
+
+---
+
+## 8. Cookie 与认证生命周期
+
+### 8.1 CookieSentinel — 4 个阶段
+
+CookieSentinel 是线程安全的单例，管理单个规范的 `bin/cookies.txt` 文件：
+
+```mermaid
+flowchart TD
+    subgraph P1["阶段 1：静默启动预提取"]
+        A1["守护线程（启动后 2s 延迟）"]
+        A1 --> A2{"auth_service.current_source?"}
+        A2 -- "NONE" --> A3["跳过"]
+        A2 -- "DLE" --> A4["复制缓存 cookie 文件"]
+        A2 -- "FILE" --> A5["_copy_from_auth_service()"]
+        A2 -- "Browser" --> A6["_update_from_browser(silent=True)"]
+        A4 --> A7{"成功?"}
+        A5 --> A7
+        A6 --> A7
+        A7 -- "是" --> A8["保存元数据，清除回退"]
+        A7 -- "否" --> A9{"旧 cookie 存在?"}
+        A9 -- "是" --> A10["进入回退模式<br/>（保留旧 cookies）"]
+        A9 -- "否" --> A11["记录警告"]
+    end
+
+    subgraph P2["阶段 2：下载时使用"]
+        B1["get_cookie_file_path()"]
+        B1 --> B2["返回路径供 yt-dlp --cookies"]
+    end
+
+    subgraph P4["阶段 4：强制刷新（需 UAC）"]
+        D1["force_refresh_with_uac()"]
+        D1 --> D2["_update_lock 防止并发"]
+        D2 --> D3["_update_from_browser(force=True)"]
+        D3 --> D4{"成功?"}
+        D4 -- "是" --> D5["覆盖 cookies + meta"]
+        D4 -- "否" --> D6["回退：保留旧 cookies"]
+    end
+```
+
+### 8.2 懒清理模式
+
+核心设计原则：**在新提取成功前绝不删除旧 cookies**。
+
+- `_clear_cookie_and_meta()` 存在但在正常流程中**从不调用**
+- `validate_source_consistency()` 仅返回状态元组 — 明确不强制清理
+- 提取失败时，如果存在来自不同来源的旧 cookie 文件，进入**回退模式**而非删除
+- `.txt.meta` 辅助文件记录来源浏览器、提取时间戳和 cookie 数量，用于不匹配检测
+
+### 8.3 DLE vs WebView2 提供者
+
+| 方面 | DLE 提供者 | WebView2 提供者 |
+|------|-----------|-----------------|
+| 机制 | 临时 Chrome 扩展注入到干净浏览器实例 | pywebview + Edge WebView2 后端 |
+| 进程模型 | 同进程（subprocess.Popen） | 双进程（multiprocessing.Process + Queue） |
+| 配置文件 | 隔离的 `--user-data-dir` | 持久化 WebView2 缓存（`private_mode=False`） |
+| 登录检测 | 轮询本地 HTTP 服务器的 cookie POST | 轮询 `LOGIN_INFO` cookie 存在 |
+| 状态 | 旧版 | 当前（替代 DLE） |
+
+### 8.4 POT Manager — 3 级渐进恢复
+
+POTManager 管理 `bgutil-ytdlp-pot-provider` 子进程，用于 PO Token 生成（绕过 YouTube 机器人检测）：
+
+```mermaid
+flowchart TD
+    A["尝试恢复"] --> B["级别 1：清除缓存<br/>POST /invalidate_caches (~100ms)"]
+    B --> C{"验证令牌生成<br/>po_token ≥ 16 字符?"}
+    C -- "是" --> D["恢复成功"]
+    C -- "否" --> E["级别 2：清除完整性令牌<br/>POST /invalidate_it (~5秒)"]
+    E --> F{"验证令牌生成?"}
+    F -- "是" --> D
+    F -- "否" --> G["级别 3：重启服务器<br/>完整进程拆除 + 重启 (~15秒)"]
+    G --> H{"验证令牌生成?"}
+    H -- "是" --> D
+    H -- "否" --> I["恢复失败"]
+```
+
+`try_recover()` 实现递增阶梯。每步之后调用 `verify_token_generation()` 验证响应包含至少 16 字符的 `po_token`。
+
+**健康验证层：**
+- L0：`is_running()` — 通过 `poll()` 检查进程是否存活
+- L1：`verify_token_generation()` — POST `/get_pot`，验证 token 长度
+- L2：`check_minter_health()` — GET `/minter_cache`，检查 BotGuard minter 初始化
+- 综合：`get_health_status()` — 返回三层状态加人类可读摘要
+
+**Windows Job Object：** POT 提供者子进程分配到具有 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object。如果 FluentYTDL 崩溃，操作系统自动杀死 POT 提供者 — 无僵尸服务器。
+
+---
+
+## 9. 错误诊断引擎
+
+### 9.1 三层专家系统
+
+`utils/error_parser.py` 中的 `diagnose_error()` 实现：
+
+```mermaid
+flowchart TD
+    A["错误诊断 (退出码, 标准错误, 解析后的 JSON)"] --> B{"第 1 层：JSON 级<br/>parsed_json['error']['_type']?"}
+    B -- "premium_only" --> C["诊断错误<br/>需要登录, 提取 Cookie"]
+    B -- "无匹配" --> D{"第 2 层：正则匹配<br/>16 条规则，首匹配获胜"}
+    D -- "匹配成功" --> E["诊断错误<br/>匹配规则的错误码/严重性/修复动作"]
+    D -- "无匹配" --> F{"第 3 层：回退<br/>提取 'ERROR:' 行"}
+    F --> G["诊断错误<br/>通用, 致命, 截断到 97 字符"]
+```
+
+```mermaid
+sequenceDiagram
+    participant Executor as 下载执行器
+    participant Worker as 下载工作线程
+    participant Parser as 错误诊断器
+    participant UI as UI 层
+
+    Executor->>Executor: yt-dlp 非零退出
+    Executor->>Executor: 门槛 1: 文件 ≥ 10KB?<br/>门槛 2: 文件 ≥ 50% 预期大小?
+    Executor-->>Worker: 抛出 yt-dlp 执行错误 (退出码, 标准错误)
+    Worker->>Parser: 错误诊断 (退出码, 标准错误)
+    Parser-->>Worker: 诊断错误结果
+    Worker->>Worker: 日志清理器 → 错误状态
+    Worker->>UI: 发送错误信号 (诊断结果字典)
+    UI->>UI: 显示错误卡片<br/>含修复动作 + 恢复提示
+```
+
+### 9.2 16 条错误规则
+
+| # | 模式 | ErrorCode | 严重性 | 修复动作 |
+|---|------|-----------|--------|----------|
+| 1 | 机器人检测 / PO Token | POTOKEN_FAILURE | 致命 | — |
+| 2 | 会员专属内容 | LOGIN_REQUIRED | 致命 | extract_cookie |
+| 3 | 年龄限制 | LOGIN_REQUIRED | 致命 | extract_cookie |
+| 4 | 私有视频 | LOGIN_REQUIRED | 致命 | — |
+| 5 | "Sign in to confirm" | LOGIN_REQUIRED | 可恢复 | extract_cookie |
+| 6 | 连接重置/拒绝/超时 | NETWORK_ERROR | 可恢复 | — |
+| 7 | SSL 证书错误 | NETWORK_ERROR | 致命 | — |
+| 8 | DNS 解析失败 | NETWORK_ERROR | 致命 | — |
+| 9 | HTTP 429 限流 | RATE_LIMITED | 警告 | — |
+| 10 | 代理连接失败 | NETWORK_ERROR | 可恢复 | switch_proxy |
+| 11 | HTTP 403 / 禁止 | HTTP_ERROR | 可恢复 | — |
+| 12 | 地理限制 | GEO_RESTRICTED | 致命 | switch_proxy |
+| 13 | 首映未开始 | FORMAT_UNAVAILABLE | 警告 | — |
+| 14 | 格式不可用 | FORMAT_UNAVAILABLE | 警告 | — |
+| 15 | 缺少 FFmpeg | EXTRACTOR_ERROR | 致命 | — |
+| 16 | 磁盘已满 | DISK_FULL | 致命 | — |
+
+### 9.3 错误码模型
+
+```python
+class ErrorCode(IntEnum):
+    SUCCESS = 0
+    GENERAL = 1
+    LOGIN_REQUIRED = 2
+    FORMAT_UNAVAILABLE = 3
+    HTTP_ERROR = 4
+    NETWORK_ERROR = 5
+    GEO_RESTRICTED = 6
+    EXTRACTOR_ERROR = 7
+    POTOKEN_FAILURE = 8
+    RATE_LIMITED = 9
+    COOKIE_EXPIRED = 10
+    DISK_FULL = 11
+    UNKNOWN = 99
+```
+
+`DiagnosedError` 是包含 `code`、`severity`、`user_title`、`user_message`、`fix_action`、`technical_detail`、`recovery_hint` 的数据类。通过 `to_dict()`/`from_dict()` 序列化以跨 Qt Signal 边界传输。
+
+### 9.4 探测函数
+
+| 函数 | 用途 |
+|------|------|
+| `probe_youtube_connectivity()` | HEAD 请求到 youtube.com，遵循代理配置 |
+| `_run_ytdlp_probe()` | 运行 yt-dlp `--dump-json`，每个链接 12 小时冷却 |
+| `probe_cookie_and_ip()` | 两阶段探测：先带 cookies，再不带 → 判断是 cookie 问题还是 IP 级别 |
+| `probe_ip_risk_control()` | 无 cookie 探测，检测 IP 级别封锁 |
+
+---
+
+## 10. 六种解析流程
+
+### 10.1 流程对比表
+
+| 方面 | 视频 | VR | 频道 | 播放列表 | 字幕 | 封面 |
+|------|------|-----|------|----------|------|------|
+| UI 页面 | ParsePage | VRParsePage | ChannelParsePage | ParsePage（自动） | SubtitleDownloadPage | CoverDownloadPage |
+| ConfigWindow mode | `"default"` | `"vr"` | `"default"` | `"default"` | `"subtitle"` | `"cover"` |
+| Extract Worker | InfoExtract | VRInfoExtract | InfoExtract | InfoExtract | InfoExtract | InfoExtract |
+| yt-dlp client | 默认 | `android_vr` | 默认 | 默认 | 默认 | 默认 |
+| Cookies | 是 | **否** | 是 | 是 | 是 | 是/否 |
+| 沙箱 | 是 | 是 | 是 | 是 | **否** | **否** |
+| Feature 管道 | 完整 | 完整 + VR | 完整（逐条目） | 完整（逐条目） | **无** | **无** |
+| 下载路径 | C（完整） | C（完整） | C（完整） | C（完整） | B（轻量） | A 或 B |
+| 最终输出 | 视频文件 | 视频 + VR 元数据 | 视频文件（批量） | 视频文件（批量） | 字幕文件 | 图片文件 |
+
+```mermaid
+flowchart TD
+    A["用户输入链接"] --> B{"哪个页面?"}
+    B -- "解析页" --> C["启动提取<br/>信息提取工作线程"]
+    B -- "VR 解析页" --> D["VR 信息提取工作线程<br/>android_vr 客户端"]
+    B -- "频道解析页" --> E["规范化链接 +/videos<br/>→ 信息提取工作线程"]
+    B -- "字幕下载页" --> F["信息提取工作线程<br/>跳过下载"]
+    B -- "封面下载页" --> G["信息提取工作线程<br/>封面模式"]
+
+    C --> H{"yt-dlp 响应<br/>类型 == '播放列表'?"}
+    H -- "是" --> I["设置播放列表界面<br/>→ 播放列表调度器"]
+    H -- "否" --> J["设置内容界面<br/>→ 格式选择器"]
+
+    D --> K["VR 格式检测<br/>→ 下载配置窗口 (VR 模式)"]
+    E --> I
+    F --> L["字幕选择对话框"]
+    G --> M["封面选择对话框"]
+
+    I --> N["用户点击下载"]
+    J --> N
+    K --> N
+    L --> O["轻量提取 (路径 B)"]
+    M --> P["直接下载 (路径 A)<br/>或轻量提取 (路径 B)"]
+```
+
+### 10.2 视频解析
+
+- **入口**：`ParsePage` → `show_selection_dialog(url)` → `DownloadConfigWindow(mode="default")`
+- **Worker**：`InfoExtractWorker` → `YoutubeService.extract_info_for_dialog_sync()`
+- **yt-dlp 选项**：`--flat-playlist --lazy-playlist`，默认 client，通过 Cookie Sentinel 使用 cookies
+- **播放列表自动检测**：响应中 `_type == "playlist"` → 分支到 `setup_playlist_ui()`
+- **选择控件**：`VideoFormatSelectorWidget`
+- **下载路径**：`DownloadExecutor`，完整沙箱模式
+- **关键文件**：`parse_page.py`、`download_config_window.py:956`、`workers.py:390`
+
+### 10.3 VR 解析
+
+- **入口**：`VRParsePage` → `show_vr_selection_dialog(url)` → `DownloadConfigWindow(mode="vr", vr_mode=True, smart_detect=True)`
+- **Worker**：`VRInfoExtractWorker` → `YoutubeService.extract_vr_info_sync()`
+- **yt-dlp 选项**：`player_client=["android_vr"]`、`--no-playlist`、**无 cookies**（android_vr 不支持）
+- **VR 检测**：`_detect_vr_projection(info)` 为每个格式标注 `__vr_projection` 和 `__vr_stereo_mode`
+- **后处理**：完整管道 + `VRFeature`（始终激活）：
+  - EAC → 等矩形投影转换（ffmpeg `v360=eac:e` 滤镜）
+  - GPU 加速（NVENC/QSV/AMF）或 CPU（libx264）
+  - MP4/MOV 空间元数据注入
+- **关键文件**：`vr_parse_page.py`、`youtube_service.py:1229`、`features.py:308`
+
+### 10.4 频道解析
+
+- **入口**：`ChannelParsePage` → `_show_channel_dialog(url)` → URL 规范化（追加 `/videos`）→ `show_selection_dialog(normalized_url)`
+- **Worker**：`InfoExtractWorker`（同视频模式）
+- **yt-dlp 选项**：同视频模式，URL 带 `/videos` 后缀 → yt-dlp 视为频道标签页列表
+- **UI 差异**：
+  - 标签页组合框：视频 / Shorts（`_on_channel_tab_changed` 用 `/shorts` 重新加载）
+  - 排序组合框：最新 / 最旧（`--playlist-reverse`）
+  - `PlaylistScheduler` 在滚动时通过 `EntryDetailWorker` 懒加载条目详情
+- **关键文件**：`channel_parse_page.py`、`reimagined_main_window.py:585`
+
+### 10.5 播放列表解析
+
+- **入口**：`ParsePage`（同视频模式）— 通过 yt-dlp 响应中 `_type == "playlist"` 自动检测
+- **Worker**：`InfoExtractWorker`（同视频模式）
+- **UI 差异**：
+  - 批量操作工具栏（全选、预设、类型组合）
+  - `PlaylistScheduler` 在滚动时懒加载条目详情
+  - 无频道特有的标签页/排序控件
+- **关键文件**：`download_config_window.py:1053`（播放列表检测逻辑）
+
+### 10.6 独立字幕解析
+
+- **入口**：`SubtitleDownloadPage` → `show_subtitle_selection_dialog(url)` → `DownloadConfigWindow(mode="subtitle")`
+- **yt-dlp 选项**：`skip_download=True`、`writesubtitles`/`writeautomaticsub`、`subtitleslangs`、`convertsubtitles`
+- **下载路径**：`_run_lightweight_extract()` — **完全绕过 Executor/Strategy/Feature 管道**
+- **后处理**：**无** — .srt/.vtt/.ass 文件即为最终输出
+- **关键文件**：`subtitle_download_page.py`、`workers.py:635`
+
+### 10.7 独立封面解析
+
+- **入口**：`CoverDownloadPage` → `show_cover_selection_dialog(url)` → `DownloadConfigWindow(mode="cover")`
+- **两条下载路径**：
+  - **路径 A** — 直链图片 URL：`_run_cover_direct_download()`（最精简：无 cookie、无 ffmpeg、无 extractor-args）
+  - **路径 B** — 回退：`_run_lightweight_extract()`（同字幕模式）
+- **后处理**：**无** — 图片文件即为最终输出
+- **关键文件**：`cover_download_page.py`、`workers.py:836`
+
+---
+
+## 11. 进度解析
+
+`DownloadExecutor` 使用自定义 `--progress-template` 字符串，输出以 `FLUENTYTDL|` 为前缀的结构化行：
+
+```
+FLUENTYTDL|download|<downloaded>|<total>|<estimate>|<speed>|<eta>|<vcodec>|<acodec>|<ext>|<filename>
+FLUENTYTDL|postprocess|<status>|<postprocessor>
+```
+
+`CleanLogger` 将原始进度转换为统一的 `(state, percent, message)` 三元组，带多流阶段跟踪：
+- 视频流：总进度的 0%-50%
+- 音频流：50%-95%
+- 后处理：95%-99%
+- 单流（混合）：0%-95%
+
+## 12. 非零退出验证
+
+yt-dlp 以非零返回码退出时，执行器执行两门验证：
+
+- **门 1**：文件存在且 ≥ 10 KB（处理 Windows `.part-Frag` 删除失败）
+- **门 2**：文件 ≥ 预期总大小的 50%（防止将截断的下载视为成功）
+
+如果两门都通过，非零退出码记录为警告但下载被视为成功。
+
+---
+
+## 13. 线程模型
+
+| 线程 | 用途 | 生命周期 |
+|------|------|----------|
+| 主线程 | Qt 事件循环、UI 更新 | 应用生命周期 |
+| DownloadWorker (QThread) | 每个并发下载一个（最多 3 个） | 每个任务 |
+| InfoExtractWorker (QThread) | UI 的元数据提取 | 每次提取 |
+| VRInfoExtractWorker (QThread) | VR 专用提取 | 每次 VR 提取 |
+| EntryDetailWorker (QThread) | 深度播放列表条目提取 | 每个条目 |
+| MetadataFetchRunnable (QRunnable) | 封装 EntryDetailWorker 供 QThreadPool 使用 | 每个条目 |
+| QThreadPool | 播放列表并发元数据获取 | 应用生命周期 |
+| TaskDBWriter | 异步 SQLite 写入 | 应用生命周期 |
+| CookieSentinel-SilentRefresh | 启动时 cookie 预提取 | 一次性守护线程 |
+| 子进程 | yt-dlp.exe、ffmpeg.exe、AtomicParsley.exe | 每次操作 |
+
+---
+
+## 14. 启动流程
+
+```mermaid
+flowchart TD
+    A["程序入口"] --> B["管理员模式检查"]
+    B --> C["OpenSSL 路径修复"]
+    C --> D["创建 QApplication"]
+    D --> E["主题设置 (浅色/深色/自动)"]
+    E --> F["字体设置 (微软雅黑, 9pt)"]
+    F --> G{"更新工作线程模式?"}
+    G -- "是" --> H["运行更新工作线程，退出"]
+    G -- "否" --> I{"POT 提供者已启用?"}
+    I -- "是" --> J["POT 启动画面<br/>(不确定进度环)"]
+    J --> K["POT 初始化线程"]
+    K --> L["启动 POT 服务器<br/>+ 验证令牌生成 (12秒)"]
+    L --> M{"12 秒超时或<br/>令牌就绪?"}
+    M --> N["POT 就绪回调"]
+    I -- "否" --> N
+    N --> O["启动主窗口"]
+    O --> P["创建主窗口 (应用控制器)"]
+    P --> Q["守护线程: Cookie 哨兵<br/>启动时静默刷新 (2秒延迟)"]
+    Q --> R["应用事件循环"]
+    R --> S["清理: 停止 POT 服务器"]
+```
+
+---
+
+## 15. 依赖关系
+
+```
+基础层（无内部依赖）：
+  utils.logger, utils.paths, utils.formatters, utils.validators,
+  models.errors, models.subtitle_config
+
+核心基础设施：
+  core.config_manager → models.subtitle_config, utils.paths
+  core.dependency_manager → utils.logger, utils.paths
+
+服务层：
+  auth.* → utils.*, core.config_manager
+  youtube.* → core.config_manager, auth.*, utils.*
+  download.* → core.config_manager, youtube.*, storage.*, models.*, processing.*, utils.*
+  processing.* → core.config_manager, utils.*
+  storage.* → utils.paths
+
+UI 层：
+  ui.* → 依赖所有服务层
+  download_config_window.py 是耦合度最高的组件（~3600 行，几乎导入了所有包）
+```
+
+---
+
+## 16. 配置系统
+
+| 文件 | 用途 | 格式 |
+|------|------|------|
+| `config.json` | 用户设置（download_dir、max_concurrent、proxy、cookie browser、theme） | JSON |
+| `task_db`（SQLite WAL） | 完整任务生命周期持久化、崩溃恢复 | SQLite |
+
+外部工具由 `DependencyManager` 解析：
+- `yt-dlp` — 优先级：配置路径 > 捆绑的 `_internal/yt-dlp/yt-dlp.exe` > PATH
+- `ffmpeg` — 优先级：捆绑 > PATH
+- JS 运行时 — 优先级：捆绑 deno > PATH deno > winget deno > PATH node > PATH bun > PATH quickjs
+
+---
+
+## 17. Windows 进程管理
+
+| 组件 | 机制 | 文件 |
+|------|------|------|
+| yt-dlp 进程树 | `taskkill /F /T /PID`（杀死整个进程树，含 ffmpeg 子进程） | `executor.py:636` |
+| POT 提供者孤儿预防 | Windows Job Object + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` | `pot_manager.py:62` |
+| WebView2 子进程清理 | `terminate()` → `join(5)` → `kill()` | `webview2_provider.py:416` |
+| 沙箱文件清理 | `rmtree` 带 5 次重试、0.5 秒间隔处理文件锁释放 | `workers.py:334` |
+| 取消延迟 | 清理前 1 秒延迟等待 Windows 文件锁释放 | `workers.py:599` |
+
+---
+
+## 18. 单例交互图
+
+```mermaid
+flowchart TD
+    CM["配置管理器"]
+    DM["下载管理器"]
+    YS["YouTube 服务"]
+    CS["Cookie 哨兵"]
+    AS["认证服务"]
+    PM["POT 管理器"]
+    TDB["任务数据库"]
+    DBW["数据库写入器"]
+
+    CM -- "配置变更信号<br/>(仅 UI 订阅)" --> UI["UI 层"]
+    YS -- "懒读: 构建 yt-dlp 选项" --> CM
+    DM -- "懒读: 最大并发数" --> CM
+    YS -- "获取 Cookie 文件路径<br/>存在 / 已过期" --> CS
+    CS -- "获取 yt-dlp Cookie 文件<br/>更新文件状态" --> AS
+    YS -- "强制刷新 (需 UAC)<br/>(DLE 重载错误时)" --> CS
+    DM -- "插入任务" --> TDB
+    DM -- "入队元数据/状态/结果" --> DBW
+    DBW -- "更新任务状态/结果" --> TDB
+    YS -- "构建 yt-dlp 选项:<br/>POT 提取器参数" --> PM
+```
+
+```mermaid
+flowchart LR
+    subgraph Read["懒读模式（方法调用时读取）"]
+        YS2["YouTube 服务构建 yt-dlp 选项"] --> |"读取"| CM2["配置管理器 get()"]
+        DM2["下载管理器获取最大并发数"] --> |"读取"| CM2
+        WK2["下载工作线程运行"] --> |"读取"| CM2
+    end
+
+    subgraph Signal["信号模式（事件驱动）"]
+        CM3["配置管理器 set()"] --> |"配置变更信号 (键, 值)"| UI3["统一任务列表页<br/>(仅最大并发下载数)"]
+    end
+```
+
+---
+
+## 19. 信号拓扑
+
+### 19.1 DownloadWorker 信号
+
+```mermaid
+flowchart LR
+    W["下载工作线程 (QThread)"]
+
+    W -- "统一状态信号<br/>(状态, 百分比, 消息)<br/>队列连接" --> DM["下载管理器<br/>→ 数据库写入器入队状态"]
+    W -- "输出路径就绪信号<br/>(路径)<br/>队列连接" --> DM2["下载管理器<br/>→ 数据库写入器入队结果"]
+    W -- "完成信号<br/>队列连接" --> DM3["下载管理器<br/>→ 任务更新信号"]
+    W -- "错误信号 (字典)<br/>队列连接" --> DM4["下载管理器<br/>→ 任务更新信号"]
+    W -- "取消信号<br/>队列连接" --> DM5["下载管理器<br/>→ 任务更新信号"]
+    W -- "线程结束信号<br/>(QThread 内置)" --> DM6["下载管理器<br/>→ 处理工作线程完成 → 调度"]
+
+    W -- "进度信号 (字典)<br/>队列连接" --> DLM["下载列表模型<br/>(节流重绘)"]
+    W -- "状态消息信号 (字符串)<br/>队列连接" --> DLM
+    W -- "统一状态信号<br/>队列连接" --> DLM
+    W -- "完成/错误/取消信号<br/>队列连接" --> DLM2["下载列表模型<br/>(立即重绘)"]
+```
+
+### 19.2 播放列表信号链
+
+```mermaid
+sequenceDiagram
+    participant Scroll as 列表视图滚动条
+    participant DCW as 下载配置窗口
+    participant PS as 播放列表调度器
+    participant AEM as 异步提取管理器
+    participant EFW as 条目详情工作线程
+    participant Model as 播放列表列表模型
+
+    Scroll->>DCW: 值变更 (50ms 节流)
+    DCW->>PS: 设置视口 (首行, 末行)
+    PS->>PS: 入队 (前台) + 调度
+    PS->>AEM: 入队 (任务ID, 链接, 选项)
+    AEM->>EFW: 元数据获取任务运行
+    EFW->>AEM: 任务完成信号 (任务ID, DTO)
+    AEM->>PS: 管理器完成回调 (任务ID, DTO)
+    PS->>DCW: 详情完成 (行号, 信息字典)
+    DCW->>Model: 更新任务 (行号, 详情状态)
+    DCW->>DCW: 自动应用行预设 (行号)
+```
+
+### 19.3 解析 → 下载信号链
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant PP as 解析页
+    participant MW as 主窗口
+    participant DCW as 下载配置窗口
+    participant IW as 信息提取工作线程
+    participant YS as YouTube 服务
+    participant DM as 下载管理器
+    participant W as 下载工作线程
+
+    User->>PP: 粘贴链接，点击解析
+    PP->>MW: 发送解析请求 (链接)
+    MW->>DCW: 创建下载配置窗口 (链接)
+    DCW->>IW: 启动 [QThread]
+    IW->>YS: 提取视频信息 (对话框模式)
+    YS-->>IW: 原始字典
+    IW->>DCW: 提取完成 (媒体 DTO)
+    DCW->>DCW: 设置内容界面 或 设置播放列表界面
+    User->>DCW: 点击下载
+    DCW->>MW: 发送下载请求 (任务列表)
+    MW->>DM: 添加任务 → 创建工作线程
+    DM->>DM: 插入任务数据库 + 调度
+    DM->>W: 启动 [QThread]
+    W->>W: 运行 → 下载执行器 → yt-dlp
+```

@@ -164,6 +164,9 @@ class DownloadManager(QObject):
                 db_writer.enqueue_result(worker.db_id, path, fsize)
             self.task_updated.emit()
 
+        def _on_error(err: dict):
+            self.task_updated.emit()
+
         worker.unified_status.connect(_on_unified_status, Qt.ConnectionType.QueuedConnection)
         worker.output_path_ready.connect(_on_output_ready, Qt.ConnectionType.QueuedConnection)
 
@@ -173,7 +176,7 @@ class DownloadManager(QObject):
         worker.finished.connect(partial(self._on_worker_finished, worker))
         worker.completed.connect(_on_completed)
         worker.cancelled.connect(self.task_updated.emit)
-        worker.error.connect(self.task_updated.emit)
+        worker.error.connect(_on_error)
         return worker
 
     def _on_worker_finished(self, worker: DownloadWorker) -> None:

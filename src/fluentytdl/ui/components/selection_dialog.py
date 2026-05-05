@@ -1292,12 +1292,6 @@ class SelectionDialog(MessageBoxBase):
 
             dialog.manual_import_requested.connect(on_manual_import)
             dialog.show()
-            
-            try:
-                from ...auth.cookie_probe_throttle import cookie_probe_throttle
-                cookie_probe_throttle.record_download_failure("cookie")
-            except Exception:
-                pass
         else:
             self._error_label = CaptionLabel(text, self)
             try:

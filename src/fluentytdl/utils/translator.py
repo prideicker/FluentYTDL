@@ -19,9 +19,11 @@ def translate_error(error: BaseException) -> dict:
     raw = _strip_ansi(raw_original)
     err_msg = raw.lower()
 
-    from .error_parser import generate_issue_url, parse_ytdlp_error
+    from .error_parser import generate_issue_url, diagnose_error
 
-    friendly_title, friendly_content, suggests_component_update = parse_ytdlp_error(raw)
+    diag = diagnose_error(1, raw)
+    friendly_title = diag.user_title
+    friendly_content = diag.user_message
 
     issue_url = generate_issue_url(
         friendly_title if friendly_title != "解析或下载失败" else "发生未知错误", raw
@@ -33,7 +35,15 @@ def translate_error(error: BaseException) -> dict:
         "suggestion": "1. 请重试\n2. 查看日志文件\n3. 将此错误反馈给开发者",
         "raw_error": raw,
         "issue_url": issue_url,
-        "suggests_component_update": suggests_component_update,
+        "suggests_component_update": False,
+        # 兼容新的 Diagnose 体系
+        "code": diag.code.value,
+        "severity": diag.severity,
+        "user_title": friendly_title,
+        "user_message": friendly_content,
+        "fix_action": diag.fix_action,
+        "technical_detail": diag.technical_detail,
+        "recovery_hint": diag.recovery_hint,
     }
 
     # 0) 链接无效/不支持
@@ -62,26 +72,42 @@ def translate_error(error: BaseException) -> dict:
         )
         return result
 
-    # 2) 账号/风控类（通常伴随 403 / forbidden / not a bot / poToken）
+    # 2a) 人机验证类（Bot / poToken — 优先更新组件）
     if (
         "confirm you are not a bot" in err_msg
         or "not a bot" in err_msg
-        or "login required" in err_msg
-        or "http error 403" in err_msg
-        or " 403" in err_msg
-        or "forbidden" in err_msg
         or "potoken" in err_msg
     ):
-        result["title"] = "访问被拒绝 (403/风控)"
+        result["title"] = "人机验证拦截 (Bot 检测)"
         result["content"] = (
-            "YouTube 拒绝了请求，通常是因为节点本身被限禁或面临人机验证 (如 poToken 挑战)。"
+            "YouTube 认为当前 IP 的请求来自自动化工具。"
+            "这几乎总是因为 IP 不够干净，而非组件或 Cookie 问题。"
         )
         result["suggestion"] = (
-            "1. 【强烈推荐】点击底部进行『一键更新 yt-dlp 组件』。\n"
-            "2. 尝试更新 Cookies（设置 -> 核心组件 -> Cookies 来源）。\n"
-            "3. 暂时关闭软件，等待 30 分钟后重试或更换代理节点。"
+            "1. 更换代理节点或 IP（最有效）。\n"
+            "2. 若持续出现，尝试更新 yt-dlp 组件。\n"
+            "3. Cookie 仅影响年龄限制/私密视频，公开视频无需 Cookie。"
         )
-        result["suggests_component_update"] = True
+        result["suggests_component_update"] = False
+        return result
+
+    # 2b) 403 风控类（IP/节点封禁 — 优先换节点）
+    if (
+        "http error 403" in err_msg
+        or " 403" in err_msg
+        or "forbidden" in err_msg
+    ):
+        result["title"] = "访问被拒绝 (403 风控)"
+        result["content"] = (
+            "YouTube 拒绝了请求，通常是当前 IP 或代理节点被临时封锁。"
+            "这与 Cookie 或组件版本无关，换节点或等待即可恢复。"
+        )
+        result["suggestion"] = (
+            "1. 更换代理节点或 IP（最有效）。\n"
+            "2. 等待 2-12 小时后 IP 封锁自动解除。\n"
+            "3. 使用家庭宽带时，重启光猫/路由器可获得新 IP。"
+        )
+        result["suggests_component_update"] = False
         return result
 
     # 3) 需要登录/权限不足（与 403 风控区分开）

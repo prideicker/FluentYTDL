@@ -156,7 +156,9 @@ class Builder:
         self.arch = "win64" if sys.maxsize > 2**32 else "win32"
         self.skip_hygiene = skip_hygiene
         self.config = self._load_config()
-        self.version = (override_version or self.config.get("version", "0.0.0")).lstrip("v")
+        # 保留完整版本格式（如 "v-3.0.18" / "pre-3.0.18" / "beta-0.0.5"）
+        self._full_version = override_version or self.config.get("version", "0.0.0")
+        self.version = self._full_version  # _sync_version_to_all 会更新为纯数字
 
     def _load_config(self) -> dict:
         pyproject = ROOT / "pyproject.toml"
@@ -221,6 +223,82 @@ class Builder:
             sys.exit(1)
         print("  ✓ 环境干净，准许打包")
 
+    @staticmethod
+    def _parse_version_prefix(full_version: str) -> tuple[str, str]:
+        """解析版本前缀和数字部分。
+        "v-3.0.18" → ("v-", "3.0.18")
+        "pre-3.0.18" → ("pre-", "3.0.18")
+        "beta-0.0.5" → ("beta-", "0.0.5")
+        "3.0.18" → ("v-", "3.0.18")  # 无前缀默认 v-
+        """
+        for pfx in ("v-", "pre-", "beta-"):
+            if full_version.startswith(pfx):
+                return pfx, full_version[len(pfx):]
+        return "v-", full_version
+
+    def _sync_version_to_all(self) -> None:
+        """将 self.version 同步到所有需要版本号的文件。
+        VERSION 和 __init__.py 写入完整格式（含前缀），
+        pyproject.toml 和 .iss 只写纯数字（PEP 440 / Inno Setup 兼容）。
+        """
+        full = self._full_version
+        prefix, numeric = self._parse_version_prefix(full)
+
+        # 1. VERSION 文件 — 完整带前缀版本 (source of truth)
+        (ROOT / "VERSION").write_text(full + "\n", encoding="utf-8")
+
+        # 2. __init__.py — 完整版本（运行时 UI 显示）
+        init_file = ROOT / "src" / "fluentytdl" / "__init__.py"
+        if init_file.exists():
+            content = init_file.read_text(encoding="utf-8")
+            content = re.sub(
+                r'^__version__\s*=\s*["\'][^"\']+["\']',
+                f'__version__ = "{full}"',
+                content,
+                flags=re.MULTILINE,
+            )
+            init_file.write_text(content, encoding="utf-8")
+
+        # 3. pyproject.toml — 纯数字版本（PEP 440 兼容）
+        pyproject = ROOT / "pyproject.toml"
+        if pyproject.exists():
+            content = pyproject.read_text(encoding="utf-8")
+            content = re.sub(
+                r'^version\s*=\s*["\'][^"\']+["\']',
+                f'version = "{numeric}"',
+                content,
+                flags=re.MULTILINE,
+            )
+            # 如果使用 dynamic，替换为固定 version
+            if 'dynamic = ["version"]' in content:
+                content = content.replace('dynamic = ["version"]', "")
+                content = re.sub(
+                    r'\[project\]',
+                    f'[project]\nversion = "{numeric}"',
+                    content,
+                    count=1,
+                )
+                content = re.sub(
+                    r'\[tool\.setuptools\.dynamic\]\n[^\[]*', '', content
+                )
+            pyproject.write_text(content, encoding="utf-8")
+
+        # 4. FluentYTDL.iss — 纯数字版本（Inno Setup 要求）
+        iss_file = ROOT / "installer" / "FluentYTDL.iss"
+        if iss_file.exists():
+            content = iss_file.read_text(encoding="utf-8")
+            content = re.sub(
+                r'#define\s+MyAppVersion\s+"[^"]+"',
+                f'#define MyAppVersion "{numeric}"',
+                content,
+            )
+            iss_file.write_text(content, encoding="utf-8")
+
+        # 更新 self.version 为纯数字（PE 资源用纯数字）
+        self.version = numeric
+
+        print(f"  ✓ 版号已同步至所有位置: {full} (数字: {numeric})")
+
     def clean(self) -> None:
         print("🧹 清理历史构建...")
         _terminate_processes(["FluentYTDL.exe", "yt-dlp.exe", "ffmpeg.exe", "deno.exe"])
@@ -242,6 +320,7 @@ class Builder:
 
     def build_spec(self) -> Path:
         """根据 FluentYTDL.spec 核心蓝图进行构建"""
+        self._sync_version_to_all()
         self.clean()
         self._check_hygiene()
         self.ensure_tools()
@@ -277,8 +356,146 @@ class Builder:
         if not output.exists():
             raise ChildProcessError("构建异常：未生成对应文件夹。")
 
+        # 清理 PyInstaller 未能通过 excludes 彻底拦截的 Qt 残留
+        self.strip_qt_bloat(output)
+
         print(f"✓ .spec 构建落地: {output}")
         return output
+
+    def strip_qt_bloat(self, target_dir: Path) -> None:
+        """清理 _internal/PySide6 中确定不需要的文件。
+
+        PyInstaller 的 excludes 只能阻止 Python 模块（.pyd）被收集，
+        但无法阻止对应的 C++ DLL 和资源文件被拖入。
+        此函数在构建后物理删除这些残留。
+        """
+        pyside_dir = target_dir / "_internal" / "PySide6"
+        if not pyside_dir.exists():
+            print("  ⚠️ 未找到 PySide6 目录，跳过清理")
+            return
+
+        saved = 0
+
+        # ── 1. WebEngine 相关（最大头，约 390 MB） ──
+        webengine_patterns = [
+            "Qt6WebEngine*.dll",
+            "qtwebengine_*.pak",
+            "QtWebEngine*.pyd",
+            "QtWebChannel.pyd",
+            "v8_context_snapshot*.bin",
+            "icudtl.dat",              # ICU 数据（WebEngine 专用）
+            "vk_swiftshader*.dll",     # Vulkan 软件渲染
+            "libGLESv2.dll",
+            "libEGL.dll",
+        ]
+        for pattern in webengine_patterns:
+            for f in pyside_dir.glob(pattern):
+                sz = f.stat().st_size
+                f.unlink(missing_ok=True)
+                saved += sz
+
+        # ── 2. QML / Quick（约 32 MB） ──
+        qml_dir = pyside_dir / "qml"
+        if qml_dir.exists():
+            sz = sum(f.stat().st_size for f in qml_dir.rglob("*") if f.is_file())
+            shutil.rmtree(qml_dir, ignore_errors=True)
+            saved += sz
+
+        quick_patterns = [
+            "Qt6Quick*.dll",
+            "Qt6Qml*.dll",
+            "QtQuick*.pyd",
+            "QtQml*.pyd",
+            "qtquickcontrols2*.dll",
+        ]
+        for pattern in quick_patterns:
+            for f in pyside_dir.glob(pattern):
+                sz = f.stat().st_size
+                f.unlink(missing_ok=True)
+                saved += sz
+
+        # ── 3. 3D 模块（约 7 MB） ──
+        for f in pyside_dir.glob("Qt63D*.dll"):
+            sz = f.stat().st_size
+            f.unlink(missing_ok=True)
+            saved += sz
+
+        # ── 4. 软件 OpenGL 渲染器（20 MB） ──
+        sw_gl = pyside_dir / "opengl32sw.dll"
+        if sw_gl.exists():
+            saved += sw_gl.stat().st_size
+            sw_gl.unlink()
+
+        # ── 5. Qt 内置 FFmpeg（已有外部 ffmpeg，约 16 MB） ──
+        for pattern in ["avcodec-*.dll", "avformat-*.dll", "avutil-*.dll", "swresample-*.dll", "swscale-*.dll"]:
+            for f in pyside_dir.glob(pattern):
+                sz = f.stat().st_size
+                f.unlink(missing_ok=True)
+                saved += sz
+
+        # ── 6. PDF / Charts / Graphs / ShaderTools 等 DLL ──
+        misc_patterns = [
+            "Qt6Pdf*.dll",
+            "Qt6Charts*.dll",
+            "Qt6DataVisualization*.dll",
+            "Qt6Graphs*.dll",
+            "Qt6ShaderTools.dll",
+            "Qt6Bluetooth*.dll",
+            "Qt6Nfc*.dll",
+            "Qt6SerialPort*.dll",
+            "Qt6Sensors*.dll",
+            "Qt6Positioning*.dll",
+            "Qt6Location*.dll",
+            "Qt6RemoteObjects*.dll",
+            "Qt6Designer*.dll",
+            "Qt6Help*.dll",
+            "Qt6Test*.dll",
+            "Qt6Sql*.dll",
+            "QtOpenGL.pyd",
+            "Qt6OpenGL.dll",
+        ]
+        for pattern in misc_patterns:
+            for f in pyside_dir.glob(pattern):
+                sz = f.stat().st_size
+                f.unlink(missing_ok=True)
+                saved += sz
+
+        # ── 7. 翻译文件：只保留中文和英文 ──
+        tr_dir = pyside_dir / "translations"
+        if tr_dir.exists():
+            keep_prefixes = ("qtbase_zh", "qt_zh", "qtbase_en", "qt_en")
+            for f in tr_dir.iterdir():
+                if f.is_file() and f.suffix == ".qm":
+                    if not any(f.name.startswith(p) for p in keep_prefixes):
+                        saved += f.stat().st_size
+                        f.unlink()
+
+        # ── 8. resources 目录中的 WebEngine 资源 ──
+        res_dir = pyside_dir / "resources"
+        if res_dir.exists():
+            for f in res_dir.iterdir():
+                if f.is_file() and ("webengine" in f.name.lower() or "devtools" in f.name.lower()):
+                    saved += f.stat().st_size
+                    f.unlink()
+
+        # ── 9. plugins 中不需要的插件 ──
+        plugins_dir = pyside_dir / "plugins"
+        if plugins_dir.exists():
+            unwanted_plugins = [
+                "multimedia", "qmltooling", "qmllint",
+                "position", "sensors", "sqldrivers",
+                "designer", "webview",
+            ]
+            for name in unwanted_plugins:
+                plugin_subdir = plugins_dir / name
+                if plugin_subdir.exists():
+                    sz = sum(f.stat().st_size for f in plugin_subdir.rglob("*") if f.is_file())
+                    shutil.rmtree(plugin_subdir, ignore_errors=True)
+                    saved += sz
+
+        saved_mb = saved / (1024 * 1024)
+        print(f"🧹 Qt 瘦身完成：清理了 {saved_mb:.1f} MB 的无用文件")
+
 
     def bundle_tools(self, target_dir: Path) -> None:
         excluded_tool_dirs = {"dle_user", "dle_profile", "profile", "profiles", "cookies"}
@@ -339,7 +556,7 @@ class Builder:
             return Path()
 
         RELEASE_DIR.mkdir(exist_ok=True)
-        out_name = f"FluentYTDL-v{self.version}-{self.arch}-setup"
+        out_name = f"FluentYTDL-{self._full_version}-{self.arch}-setup"
         cmd = [
             str(iscc),
             f"/DMyAppVersion={self.version}",
@@ -355,28 +572,45 @@ class Builder:
         return RELEASE_DIR / f"{out_name}.exe"
 
     def run_all(self, target: str = "all") -> None:
-        print(f"========== FluentYTDL Pipelined Build v{self.version} ==========")
+        # "full" 是 "7z" 的别名
+        effective_target = {"full": "7z"}.get(target, target)
+
+        print(f"========== FluentYTDL Pipelined Build {self._full_version} ==========")
 
         # 1. 编译核心依赖
         app_dir = self.build_spec()
 
-        # 2. 注入二进制工具
+        # 2. 构建 updater.exe 并复制到应用目录
+        self.build_updater(copy_to=app_dir)
+
+        # 3. 注入二进制工具
         self.bundle_tools(app_dir)
 
-        # 3. 产物分发
+        # 4. 产物分发
         print("\n========== Release 打包 ==========")
         results = []
 
         # 完整绿化包
-        if target in ("all", "7z"):
-            full_archive = self.create_7z(app_dir, f"FluentYTDL-v{self.version}-{self.arch}-full")
+        if effective_target in ("all", "7z"):
+            full_archive = self.create_7z(
+                app_dir, f"FluentYTDL-{self._full_version}-{self.arch}-full"
+            )
             results.append(full_archive)
 
+        # app-core 归档（仅主程序，用于增量更新）
+        if effective_target in ("all", "7z"):
+            app_core_archive = self.create_app_core_7z(app_dir)
+            if app_core_archive.exists():
+                results.append(app_core_archive)
+
         # Inno 安装包
-        if target in ("all", "setup"):
+        if effective_target in ("all", "setup"):
             setup_exe = self.build_setup(app_dir)
             if setup_exe and setup_exe.exists():
                 results.append(setup_exe)
+
+        # 生成更新清单
+        self.generate_update_manifest()
 
         # 计算全局指纹
         self.generate_checksums()
@@ -395,6 +629,109 @@ class Builder:
         checksum_file = RELEASE_DIR / "SHA256SUMS.txt"
         checksum_file.write_text("\n".join(checksums) + "\n", encoding="utf-8")
 
+    def build_updater(self, copy_to: Path | None = None) -> Path:
+        """构建 updater.exe（独立更新器）。"""
+        spec_file = ROOT / "scripts" / "updater.spec"
+        if not spec_file.exists():
+            print("⚠ updater.spec 不存在，跳过更新器构建")
+            return Path()
+
+        print("🔨 构建 updater.exe ...")
+        cmd = [
+            sys.executable,
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--workpath",
+            str(ROOT / "build" / "updater"),
+            "--distpath",
+            str(ROOT / "dist"),
+            str(spec_file),
+        ]
+        subprocess.run(cmd, check=True, cwd=ROOT)
+
+        updater_exe = ROOT / "dist" / "updater.exe"
+        if not updater_exe.exists():
+            print("⚠ updater.exe 构建失败")
+            return Path()
+
+        # 复制到目标目录
+        if copy_to:
+            dest = copy_to / "updater.exe"
+            shutil.copy2(updater_exe, dest)
+            print(f"✓ updater.exe 已复制到 {dest}")
+
+        print(f"✓ updater.exe 构建完成: {updater_exe}")
+        return updater_exe
+
+    def create_app_core_7z(self, source_dir: Path) -> Path:
+        """创建 app-core 归档（仅主程序，不含 bin/ 工具）。"""
+        RELEASE_DIR.mkdir(exist_ok=True)
+        output_name = f"FluentYTDL-{self._full_version}-{self.arch}-app-core"
+        output_path = RELEASE_DIR / f"{output_name}.7z"
+        if output_path.exists():
+            output_path.unlink()
+
+        # 创建临时目录，只包含 app-core 文件
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="fluentytdl_appcore_") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+
+            # 复制主程序文件（排除 bin/）
+            for item in source_dir.iterdir():
+                if item.name == "bin":
+                    continue  # 排除 bin/ 工具目录
+                dest = tmp_path / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest)
+
+            # 确保 updater.exe 存在
+            updater_src = source_dir / "updater.exe"
+            if updater_src.exists():
+                shutil.copy2(updater_src, tmp_path / "updater.exe")
+
+            # 压缩
+            sevenzip = shutil.which("7z") or shutil.which("7za")
+            if sevenzip:
+                subprocess.run(
+                    [sevenzip, "a", "-t7z", "-mx=9", "-mmt=on", str(output_path), "."],
+                    check=True,
+                    cwd=tmp_path,
+                )
+            else:
+                import importlib
+
+                py7zr = importlib.import_module("py7zr")
+                with py7zr.SevenZipFile(output_path, "w") as archive:
+                    archive.writeall(tmp_path, arcname=".")
+
+        print(f"📦 app-core 归档: {output_path.name}")
+        return output_path
+
+    def generate_update_manifest(self) -> Path:
+        """生成更新清单 update-manifest.json。"""
+        manifest_script = ROOT / "scripts" / "generate_manifest.py"
+        if not manifest_script.exists():
+            print("⚠ generate_manifest.py 不存在，跳过清单生成")
+            return Path()
+
+        print("📋 生成更新清单...")
+        cmd = [
+            sys.executable,
+            str(manifest_script),
+            "--version", self._full_version,
+            "--release-dir", str(RELEASE_DIR),
+        ]
+        subprocess.run(cmd, check=True, cwd=ROOT)
+
+        manifest_path = RELEASE_DIR / "update-manifest.json"
+        if manifest_path.exists():
+            print(f"✓ 更新清单: {manifest_path.name}")
+        return manifest_path
+
 
 # ============================================================================
 # Entry Point
@@ -404,7 +741,10 @@ class Builder:
 def main():
     parser = argparse.ArgumentParser(description="FluentYTDL 构建中枢系统")
     parser.add_argument(
-        "--target", "-t", choices=["all", "7z", "setup"], default="all", help="构建目标 (默认: all)"
+        "--target", "-t",
+        choices=["all", "7z", "setup", "full"],
+        default="all",
+        help="构建目标 (默认: all, full=7z)",
     )
     parser.add_argument("--version", "-v", help="覆盖打包版本号")
     parser.add_argument("--skip-hygiene", action="store_true", help="强制无视黑名单环境污染告警")

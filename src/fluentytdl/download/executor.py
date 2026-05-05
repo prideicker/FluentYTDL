@@ -25,6 +25,7 @@ from ..youtube.yt_dlp_cli import (
     resolve_yt_dlp_exe,
     ydl_opts_to_cli_args,
 )
+from ..models.errors import YtDlpExecutionError
 from .output_parser import YtDlpOutputParser
 
 # 字幕/封面等附属文件后缀，不应被视为主输出文件
@@ -53,44 +54,9 @@ def _is_auxiliary_file(path: str) -> bool:
     return ext in _AUXILIARY_EXTENSIONS
 
 
-# yt-dlp 输出中表示下载根本不可能成功的致命错误关键词（全小写）
-# 匹配到这些关键词时，即使磁盘上存在文件也不应视为成功
-_FATAL_ERROR_PATTERNS = (
-    "sign in to confirm",
-    "not a bot",
-    "login required",
-    "http error 403",
-    "forbidden",
-    "private video",
-    "video unavailable",
-    "members only",
-    "sign in to confirm your age",
-    "geo-restricted",
-    "not available in your country",
-    "unable to download webpage",
-    "unable to download api page",
-    "potoken",
-)
-
 # 有效媒体文件的最小大小门槛（10 KB）
 # 低于此大小的文件几乎不可能是有效的音视频
 _MIN_VALID_MEDIA_BYTES = 10 * 1024
-
-
-def _tail_contains_fatal_error(tail: deque) -> bool:
-    """扫描 yt-dlp 尾部输出，检测是否包含致命错误（认证/权限/网络等）。
-
-    这些错误意味着下载根本不可能成功完成，即使磁盘上存在残留文件也不应视为成功。
-    """
-    for line in tail:
-        lower = line.lower()
-        # 仅检查包含 ERROR 标记的行
-        if "error" not in lower:
-            continue
-        for pattern in _FATAL_ERROR_PATTERNS:
-            if pattern in lower:
-                return True
-    return False
 
 
 # ── 回调协议 ──────────────────────────────────────────────
@@ -386,16 +352,7 @@ class DownloadExecutor:
         if rc != 0:
             last_lines = "\n".join(tail)
 
-            # ━━━ 关卡 1: 致命错误检测 ━━━
-            # 如果 yt-dlp 输出包含认证/权限/网络等致命错误，
-            # 说明下载根本不可能成功完成，直接抛出，不做任何容错
-            if _tail_contains_fatal_error(tail):
-                logger.error(
-                    "yt-dlp 退出码 {} 且检测到致命错误，跳过文件容错判定", rc
-                )
-                raise RuntimeError(f"yt-dlp 退出码 {rc}:\n{last_lines}")
-
-            # ━━━ 关卡 2: 文件存在性 + 大小有效性检查 ━━━
+            # ━━━ 关卡 1: 文件存在性 + 大小有效性检查 ━━━
             # 容错场景：Windows 下 yt-dlp 常因无法删除 .part-Frag 文件返回 exit code 1
             # 但此时文件实际上已经完整下载并合并成功
             is_valid = False
@@ -425,7 +382,7 @@ class DownloadExecutor:
                         except OSError:
                             pass
 
-            # ━━━ 关卡 3: 预期大小比对 ━━━
+            # ━━━ 关卡 2: 预期大小比对 ━━━
             # 如果进度回调中记录了预期总大小，且实际文件远小于预期，
             # 说明文件是不完整的残留，不应视为成功
             if is_valid and expected_total_bytes > 0 and actual_size > 0:
@@ -445,7 +402,7 @@ class DownloadExecutor:
                     rc, output_path, actual_size / 1024,
                 )
             else:
-                raise RuntimeError(f"yt-dlp 退出码 {rc}:\n{last_lines}")
+                raise YtDlpExecutionError(exit_code=rc, stderr=last_lines)
 
         return output_path
 

@@ -407,8 +407,22 @@ class UpdateCheckerWorker(QThread):
 
     def _get_remote_version(self, key: str) -> tuple[str, str]:
         # Return (version_tag, download_url)
-        # Using GitHub API via urllib
+        # 优先从缓存清单读取，回退到各工具 GitHub API
 
+        # 尝试从 ComponentUpdateManager 的缓存清单读取
+        try:
+            from .component_update_manager import component_update_manager
+
+            manifest_comp = component_update_manager.get_manifest_component(f"bin/{key}")
+            if manifest_comp:
+                version = manifest_comp.get("version", "")
+                url = manifest_comp.get("url", "")
+                if version:
+                    return version, url
+        except Exception:
+            pass
+
+        # 回退到 GitHub API
         url = ""
         channel_label = ""
         if key == "yt-dlp":

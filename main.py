@@ -190,6 +190,14 @@ def main() -> None:
         window.show()
         app._main_window = window  # type: ignore[attr-defined]  # 保持引用防回收
 
+        # === 启动版本日志 ===
+        try:
+            from fluentytdl.utils.startup_info import log_startup_info
+
+            log_startup_info()
+        except Exception:
+            pass
+
         # === Cookie Sentinel: 启动时静默预提取 (Best-Effort) ===
         def start_cookie_sentinel_thread():
             import time

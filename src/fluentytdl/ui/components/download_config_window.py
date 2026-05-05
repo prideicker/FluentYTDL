@@ -346,6 +346,9 @@ class DownloadConfigWindow(FramelessWindow):
 
         # === 状态初始化 ===
         self._is_playlist = False
+        self._is_channel = False
+        self._channel_tab = "videos"
+        self._channel_reverse = False
         self.download_tasks: list[dict[str, Any]] = []
         self._active_workers: list[QThread] = []
 
@@ -1035,13 +1038,7 @@ class DownloadConfigWindow(FramelessWindow):
         except Exception:
             self.video_info_dto = None
 
-        # 解析成功 → 重置连续失败计数
-        try:
-            from ...auth.cookie_probe_throttle import cookie_probe_throttle
-
-            cookie_probe_throttle.record_download_success()
-        except Exception:
-            pass
+        # 解析成功
         if self._error_label:
             self._error_label.deleteLater()
             self._error_label = None
@@ -1050,6 +1047,11 @@ class DownloadConfigWindow(FramelessWindow):
         self._is_playlist = str(info_dict.get("_type") or "").lower() == "playlist" or bool(
             info_dict.get("entries")
         )
+
+        # 频道检测：通过 URL 模式判断
+        from ...utils.validators import UrlValidator
+        self._is_channel = UrlValidator.is_channel_url(self.url)
+
         self._apply_dialog_size_for_mode()
 
         if self._is_playlist:
@@ -1241,31 +1243,18 @@ class DownloadConfigWindow(FramelessWindow):
 
             dialog.manual_import_requested.connect(on_manual_import)
             dialog.show()
-            
-            try:
-                from ...auth.cookie_probe_throttle import cookie_probe_throttle
-                cookie_probe_throttle.record_download_failure("cookie")
-            except Exception:
-                pass
         elif category == ErrorCategory.NETWORK:
             self._switch_to_state(WindowState.ERROR_NETWORK)
             self._netProbeResult.setText("")
-            try:
-                from ...auth.cookie_probe_throttle import cookie_probe_throttle
-
-                cookie_probe_throttle.record_download_failure("network")
-            except Exception:
-                pass
-        elif category == ErrorCategory.AMBIGUOUS:
-            # 403 模糊情况 → 异步探测后决定
+        elif category == ErrorCategory.BOT:
             self._switch_to_state(WindowState.ERROR_GENERIC)
-            self._run_connectivity_probe(friendly_title, raw_error, suggests_component_update)
-            try:
-                from ...auth.cookie_probe_throttle import cookie_probe_throttle
-
-                cookie_probe_throttle.record_download_failure("ambiguous")
-            except Exception:
-                pass
+            self.retryWidget.show()
+            self._authSegment.setCurrentItem("update")
+            self.networkDiagWidget.hide()
+        elif category == ErrorCategory.AMBIGUOUS:
+            self._switch_to_state(WindowState.ERROR_GENERIC)
+            self.retryWidget.hide()
+            self.networkDiagWidget.hide()
         else:
             self.retryWidget.hide()
             self.networkDiagWidget.hide()
@@ -1735,8 +1724,41 @@ class DownloadConfigWindow(FramelessWindow):
         if isinstance(entries, list):
             count = len(entries)
 
-        self.titleLabel.setText(f"播放列表：{title}（{count} 条）")
+        if self._is_channel:
+            self.titleLabel.setText(f"频道：{title}（{count} 条）")
+        else:
+            self.titleLabel.setText(f"播放列表：{title}（{count} 条）")
         self.titleLabel.show()
+
+        # 频道专属控件：标签页切换 + 排序
+        if self._is_channel:
+            channel_controls = QHBoxLayout()
+            channel_controls.setContentsMargins(0, 0, 0, 0)
+            channel_controls.setSpacing(12)
+
+            tab_label = CaptionLabel("内容类型", self.contentWidget)
+            channel_controls.addWidget(tab_label)
+
+            self._channel_tab_combo = ComboBox(self.contentWidget)
+            self._channel_tab_combo.addItems(["视频", "Shorts"])
+            # 恢复当前标签页选中状态
+            if self._channel_tab == "shorts":
+                self._channel_tab_combo.setCurrentIndex(1)
+            self._channel_tab_combo.currentIndexChanged.connect(self._on_channel_tab_changed)
+            channel_controls.addWidget(self._channel_tab_combo)
+
+            sort_label = CaptionLabel("排序", self.contentWidget)
+            channel_controls.addWidget(sort_label)
+
+            self._channel_sort_combo = ComboBox(self.contentWidget)
+            self._channel_sort_combo.addItems(["最新在前", "最旧在前"])
+            if self._channel_reverse:
+                self._channel_sort_combo.setCurrentIndex(1)
+            self._channel_sort_combo.currentIndexChanged.connect(self._on_channel_sort_changed)
+            channel_controls.addWidget(self._channel_sort_combo)
+
+            channel_controls.addStretch(1)
+            self.contentLayout.addLayout(channel_controls)
 
         # header row (progress)
         header_row = QHBoxLayout()
@@ -2020,6 +2042,82 @@ class DownloadConfigWindow(FramelessWindow):
         if self._mode == "cover":
             for row in range(len(self._playlist_rows)):
                 QTimer.singleShot(0, partial(self._process_cover_bypass, row))
+
+    # ── 频道标签页/排序切换 ────────────────────────────────────────────────
+
+    def _on_channel_tab_changed(self, index: int) -> None:
+        tab_map = {0: "videos", 1: "shorts"}
+        new_tab = tab_map.get(index, "videos")
+        if new_tab == self._channel_tab:
+            return
+        self._channel_tab = new_tab
+        self._reload_channel()
+
+    def _on_channel_sort_changed(self, index: int) -> None:
+        new_reverse = (index == 1)  # 0=最新在前, 1=最旧在前
+        if new_reverse == self._channel_reverse:
+            return
+        self._channel_reverse = new_reverse
+        self._reload_channel()
+
+    def _reload_channel(self) -> None:
+        """切换频道标签页或排序后重新加载"""
+        # 1. 停止当前所有后台解析
+        self._stop_background_parsing()
+        self._is_closing = False  # 重置关闭标记
+
+        # 2. 清空当前列表
+        self._playlist_rows = []
+        self._action_widget_by_row = {}
+        self._thumb_url_to_rows = {}
+        self._thumb_applied_rows = {}
+        self._thumb_requested = set()
+        self._thumb_pending.clear()
+        self._thumb_inflight = 0
+        self._thumb_retry_count = {}
+
+        if self._playlist_model is not None:
+            self._playlist_model.clear()
+
+        # 重新连接 image_loader 信号（_stop_background_parsing 断开了它们）
+        try:
+            self.image_loader.loaded.connect(self._on_thumb_loaded)
+            self.image_loader.loaded_with_url.connect(self._on_thumb_loaded_with_url)
+            self.image_loader.failed.connect(self._on_thumb_failed)
+        except Exception:
+            pass
+
+        # 重新连接 dependency_manager 信号
+        try:
+            from ...core.dependency_manager import dependency_manager
+            dependency_manager.check_finished.connect(self._on_dep_check_finished)
+            dependency_manager.install_finished.connect(self._on_dep_install_finished)
+            dependency_manager.check_error.connect(self._on_dep_error)
+            dependency_manager.download_error.connect(self._on_dep_error)
+        except Exception:
+            pass
+
+        # 3. 切换到 loading 状态
+        tab_name = "Shorts" if self._channel_tab == "shorts" else "视频"
+        sort_name = "最旧在前" if self._channel_reverse else "最新在前"
+        self._switch_to_state(
+            WindowState.LOADING,
+            f"正在加载频道{tab_name}（{sort_name}）...",
+            show_ring=True,
+        )
+
+        # 4. 重新 flat 解析
+        from ...youtube.youtube_service import youtube_service
+        normalized_url = youtube_service._normalize_channel_url(
+            self.url, self._channel_tab
+        )
+
+        from ...download.workers import InfoExtractWorker
+        w = InfoExtractWorker(normalized_url, self._current_options, playlist_flat=True)
+        w.finished.connect(self.on_parse_success)
+        w.error.connect(self.on_parse_error)
+        self.worker = w
+        w.start()
 
     def _on_playlist_row_checked(self, row: int, checked: bool) -> None:
         # Legacy callback for old widget path; retained for safety.

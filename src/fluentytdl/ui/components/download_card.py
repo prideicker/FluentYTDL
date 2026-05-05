@@ -261,13 +261,7 @@ class DownloadItemCard(CardWidget):
             )
         except Exception:
             pass
-        # Cookie 错误检测
-        try:
-            self.worker.cookie_error_detected.connect(
-                self._on_cookie_error, Qt.ConnectionType.UniqueConnection
-            )
-        except Exception:
-            pass
+
         # Also forward to MainWindow if it provides a structured error dialog.
         try:
             self.worker.error.connect(
@@ -285,104 +279,7 @@ class DownloadItemCard(CardWidget):
         except Exception:
             pass
 
-    def _on_cookie_error(self, error_message: str) -> None:
-        """
-        处理 Cookie / Bot 检测错误
 
-        先尝试 POT 渐进式恢复（清缓存 → 重置 Token → 重启），
-        如果恢复成功则自动重试下载；否则再弹出 Cookie 修复对话框。
-        """
-        try:
-            # ===== 第一步：尝试 POT 自动恢复 =====
-            from ...core.config_manager import config_manager
-
-            if config_manager.get("pot_provider_enabled", True):
-                try:
-                    from ...youtube.pot_manager import pot_manager
-
-                    pot_recovered = pot_manager.try_recover()
-                    if pot_recovered:
-                        from ...utils.logger import logger
-
-                        logger.info("Bot 检测恢复: POT 服务已恢复，自动重试下载")
-                        InfoBar.success(
-                            "POT 服务已恢复",
-                            "已自动清除 Token 缓存并重新生成，正在重试下载...",
-                            parent=self.window(),
-                            position=InfoBarPosition.TOP,
-                            duration=4000,
-                        )
-                        from PySide6.QtCore import QTimer
-
-                        QTimer.singleShot(1500, lambda: self._retry_download())
-                        return
-                except Exception as e:
-                    from ...utils.logger import logger
-
-                    logger.debug(f"POT 恢复尝试失败: {e}")
-
-            # ===== 第二步：POT 恢复失败，走 Cookie 修复流程 =====
-            from ...auth.auth_service import AuthSourceType, auth_service
-            from ...auth.cookie_sentinel import cookie_sentinel
-            from .cookie_repair_dialog import CookieRepairDialog
-
-            current_source = auth_service.current_source
-
-            # 映射 auth_source 字符串给 CookieRepairDialog
-            source_map = {
-                AuthSourceType.DLE: "dle",
-                AuthSourceType.FILE: "file",
-            }
-            auth_source_str = source_map.get(current_source, "browser")
-
-            # 创建修复对话框
-            dialog = CookieRepairDialog(
-                error_message, parent=self.window(), auth_source=auth_source_str
-            )
-
-            # 根据验证模式自适应文案和按钮行为
-            if current_source == AuthSourceType.DLE:
-                dialog.setWindowTitle("需要重新登录 YouTube")
-                dialog.repair_btn.setText("重新登录")
-            elif current_source == AuthSourceType.FILE:
-                dialog.setWindowTitle("Cookie 文件需要更新")
-                dialog.repair_btn.setText("重新导入")
-
-            # 连接自动修复信号（根据模式分流）
-            def on_auto_repair():
-                if current_source == AuthSourceType.DLE:
-                    # DLE → 跳转到设置页重新登录
-                    dialog.accept()
-                    self._jump_to_settings("请点击「登录 YouTube」按钮重新登录")
-                elif current_source == AuthSourceType.FILE:
-                    # 手动导入 → 跳转到设置页重新导入
-                    dialog.accept()
-                    self._jump_to_settings("请重新选择 Cookie 文件导入")
-                else:
-                    # 浏览器提取 → 直接自动修复
-                    success, message = cookie_sentinel.force_refresh_with_uac()
-                    dialog.show_repair_result(success, message)
-
-                    if success:
-                        from PySide6.QtCore import QTimer
-
-                        QTimer.singleShot(2000, lambda: self._retry_download())
-
-            dialog.repair_requested.connect(on_auto_repair)
-
-            # 连接手动导入信号
-            def on_manual_import():
-                self._jump_to_settings("请在设置页面导入 Cookie 文件")
-
-            dialog.manual_import_requested.connect(on_manual_import)
-
-            # 显示对话框
-            dialog.exec()
-
-        except Exception as e:
-            from ...utils.logger import logger
-
-            logger.error(f"显示 Cookie 修复对话框失败: {e}", exc_info=True)
 
     def _jump_to_settings(self, hint: str) -> None:
         """跳转到设置页并显示提示"""
@@ -534,8 +431,20 @@ class DownloadItemCard(CardWidget):
                 pass
 
     def on_error(self, err_data: dict) -> None:
-        err_msg = str(err_data.get("raw_error") or err_data.get("content") or "")
-        friendly_title = str(err_data.get("title") or "下载出错")
+        # 兼容新的 DiagnosedError 结构和旧的直接字符串 dict
+        if "code" in err_data and "severity" in err_data:
+            friendly_title = err_data.get("user_title", "下载出错")
+            err_msg = err_data.get("user_message", "未知错误")
+            fix_action = err_data.get("fix_action")
+            recovery_hint = err_data.get("recovery_hint")
+            technical_detail = err_data.get("technical_detail", "")
+        else:
+            err_msg = str(err_data.get("raw_error") or err_data.get("content") or "")
+            friendly_title = str(err_data.get("title") or "下载出错")
+            fix_action = None
+            recovery_hint = None
+            technical_detail = err_msg
+
         self.statusLabel.setText("出错")
         self.set_state("error")
         if hasattr(self.progressBar, "setError"):
@@ -543,12 +452,30 @@ class DownloadItemCard(CardWidget):
         self.actionBtn.setEnabled(True)
         self.actionBtn.setIcon(FluentIcon.PLAY)
         self.actionBtn.setToolTip("继续/重试")
-        InfoBar.error(
-            friendly_title,
-            str(err_data.get("content") or err_msg),
-            parent=self.window(),
-            position=InfoBarPosition.TOP_RIGHT,
-        )
+        
+        if fix_action:
+            # 如果包含诊断出的修复方案，使用 MessageBox 弹出并引导修复
+            try:
+                from .fix_registry import execute_fix_action
+                box = MessageBox(
+                    friendly_title,
+                    f"{err_msg}\n\n[技术详情]\n{technical_detail[:200]}...",
+                    parent=self.window(),
+                )
+                box.yesButton.setText(recovery_hint or "去处理")
+                box.cancelButton.setText("关闭")
+                if box.exec():
+                    execute_fix_action(fix_action, self)
+            except Exception:
+                pass
+        else:
+            # 否则显示普通错误通知条
+            InfoBar.error(
+                friendly_title,
+                err_msg,
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+            )
 
         # Issue URL handler
         issue_url = err_data.get("issue_url")
@@ -557,9 +484,12 @@ class DownloadItemCard(CardWidget):
             self._current_issue_url = issue_url
 
         # If format is not available, offer downgrade/reselect.
+        err_code = err_data.get("code")
+        # 兼容新规则引擎抛出的 FORMAT_UNAVAILABLE(3) 或旧版降级关键词
         lower = (err_msg or "").lower()
         if (
-            "requested format is not available" in lower
+            err_code == 3
+            or "requested format is not available" in lower
             or "no video formats" in lower
             or "no formats" in lower
             or "requested format" in lower

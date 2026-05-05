@@ -59,7 +59,7 @@ class ParsePage(QWidget):
         self.cardLayout.setSpacing(15)
 
         self.instructionLabel = BodyLabel(
-            "在此处粘贴 YouTube 视频链接 (支持 Short/Live/Playlist)", self
+            "在此处粘贴 YouTube 视频链接 (支持 Short/Live/Playlist/Channel)", self
         )
         self.cardLayout.addWidget(self.instructionLabel)
 
@@ -101,7 +101,8 @@ class ParsePage(QWidget):
             "支持格式示例：\n"
             "- https://www.youtube.com/watch?v=...\n"
             "- https://youtu.be/...\n"
-            "- https://www.youtube.com/playlist?list=...",
+            "- https://www.youtube.com/playlist?list=...\n"
+            "- https://www.youtube.com/@ChannelName（频道请使用「频道下载」页面）",
             self,
         )
         self.tipsLabel.setWordWrap(True)

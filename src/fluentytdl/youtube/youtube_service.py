@@ -38,8 +38,10 @@ class AntiBlockingOptions:
     """Anti-blocking / anti-bot options."""
 
     player_clients: tuple[str, ...] = ("android", "ios", "web")
-    sleep_interval_min: int = 1
-    sleep_interval_max: int = 5
+    # sleep_interval 已禁用：裸 yt-dlp 测试证实其对单视频下载有害，
+    # 会导致 YouTube 下载 URL 签名在传输中过期 → 403。
+    sleep_interval_min: int = 0
+    sleep_interval_max: int = 0
 
 
 @dataclass(slots=True)
@@ -157,9 +159,8 @@ class YoutubeService:
             # Some videos may return an incomplete/empty format list under android/ios
             # simulation, causing "Requested format is not available".
             # Let yt-dlp choose the most stable default (web) extractor behavior.
-            # Random delay for batch/playlist
-            "sleep_interval": int(anti.sleep_interval_min),
-            "max_sleep_interval": int(anti.sleep_interval_max),
+            # NOTE: sleep_interval 已移除 — 裸 yt-dlp 测试证实其对单视频下载有害,
+            # 会导致 YouTube 的带签名下载 URL 在传输过程中过期 → 触发 403.
             # Network
             "socket_timeout": int(net.socket_timeout),
             "retries": int(net.retries),
@@ -315,29 +316,18 @@ class YoutubeService:
         )
 
         # --- Smart client switching ---
-        # With Cookies: web first (4K/Premium), mweb fallback (avoids SABR, PO Token works).
-        # Without Cookies: mweb only (PO Token best client, no SABR enforcement).
-        # IMPORTANT: Do NOT use "default" — it may include android_vr as a fallback,
-        # which does NOT support PO Token and triggers bot detection.
-        # IMPORTANT: web client alone may return only 360p due to YouTube SABR enforcement
-        # (Server-Adaptive Bitrate Rendering, see https://github.com/yt-dlp/yt-dlp/issues/12482).
-        # mweb is not affected by SABR and returns full format lists with PO Token.
+        # yt-dlp default strategy (tv -> web_safari -> android_vr) is the most robust.
+        # We do not hardcode player_client to allow yt-dlp to adapt to YouTube SABR changes.
         if not has_valid_cookie:
-            ydl_opts["extractor_args"] = {
-                "youtube": {
-                    # mweb: 官方推荐无 Cookie 客户端，PO Token 完整支持，不受 SABR 影响
-                    "player_client": ["mweb"],
-                }
-            }
+            # 不指定 player_client，让 yt-dlp 使用默认策略
+            # (内部会尝试 tv → web_safari → android_vr，自动选择可用的)
             self._emit_log(
-                "warning", "未检测到有效 Cookies，使用 mweb 客户端（PO Token 可用，不受 SABR 限制）"
+                "warning", "未检测到有效 Cookies，将使用无 Cookie 默认模式"
             )
         else:
-            extractor_args = ydl_opts.setdefault("extractor_args", {})
-            youtube_args = extractor_args.setdefault("youtube", {})
-            # web 优先（4K/Premium 内容），mweb 兜底（规避 SABR 限制）
-            youtube_args["player_client"] = ["web,mweb"]
-            self._emit_log("info", "🚀 Cookies 模式激活：Web+mweb 客户端（已屏蔽 android_vr 回退）")
+            # 不强制指定 player_client，让 yt-dlp 自行决定最优组合
+            # yt-dlp 社区每天跟踪 YouTube 变化，default 是集体智慧的结晶
+            self._emit_log("info", "🚀 Cookies 模式激活：交由 yt-dlp 自动管理最优客户端组合")
 
         # --- POT Provider 服务集成 ---
         # POT (Proof of Origin Token) Provider 提供动态 PO Token 生成服务
@@ -1219,7 +1209,7 @@ class YoutubeService:
                 fallback_opts.pop("cookiefile", None)
                 fb_ea = fallback_opts.setdefault("extractor_args", {})
                 fb_yt = fb_ea.setdefault("youtube", {})
-                fb_yt["player_client"] = ["android_creator,ios"]
+                fb_yt["player_client"] = ["ios,mweb"]
                 fb_yt.pop("player_skip", None)
 
                 try:
@@ -1502,6 +1492,110 @@ class YoutubeService:
 
     def get_local_version(self) -> str:
         return run_version()
+
+    # ── 频道解析 ───────────────────────────────────────────────────────────
+
+    def extract_channel_flat(
+        self,
+        url: str,
+        options: "YoutubeServiceOptions | None" = None,
+        *,
+        tab: str = "videos",
+        reverse: bool = False,
+        cancel_event: "threading.Event | None" = None,
+    ) -> dict[str, Any]:
+        """频道专用 flat 提取，支持标签页和排序。
+
+        在 extract_playlist_flat 基础上增加：
+        - 根据 tab 参数自动拼接 URL 后缀 (/videos 或 /shorts)
+        - 根据 reverse 参数注入 --playlist-reverse
+        """
+        normalized_url = self._normalize_channel_url(url, tab)
+
+        options = options or YoutubeServiceOptions()
+        base_opts = self.build_ydl_options(options)
+        ydl_opts = dict(base_opts)
+        ydl_opts.update(
+            {
+                "skip_download": True,
+                "extract_flat": True,
+                "lazy_playlist": True,
+                "ignoreerrors": False,
+            }
+        )
+
+        if bool(config_manager.get("playlist_skip_authcheck") or False):
+            ydl_opts = self._with_youtubetab_skip_authcheck(ydl_opts)
+
+        extra_args = ["--flat-playlist", "--lazy-playlist"]
+        if reverse:
+            extra_args.append("--playlist-reverse")
+
+        self._emit_log(
+            "info",
+            f"[ChannelFlat] extracting: {normalized_url} (tab={tab}, reverse={reverse})",
+        )
+
+        try:
+            try:
+                _ = locate_runtime_tool(
+                    "yt-dlp.exe", "yt-dlp/yt-dlp.exe", "yt_dlp/yt-dlp.exe"
+                )
+            except FileNotFoundError as e:
+                raise FileNotFoundError(
+                    "未找到 yt-dlp.exe。请在设置页指定路径，或将 yt-dlp.exe 放入 _internal/yt-dlp/，或加入 PATH。"
+                ) from e
+
+            try:
+                info = run_dump_single_json(
+                    normalized_url,
+                    ydl_opts,
+                    extra_args=extra_args,
+                    cancel_event=cancel_event,
+                )
+            except Exception as exc:
+                if isinstance(exc, YtDlpCancelled):
+                    raise
+                msg = str(exc)
+                if self._should_retry_with_youtubetab_skip_authcheck(msg):
+                    retry_opts = self._with_youtubetab_skip_authcheck(ydl_opts)
+                    if retry_opts is not ydl_opts:
+                        self._emit_log(
+                            "warning",
+                            "检测到频道 authcheck 限制，自动启用 youtubetab:skip=authcheck 并重试。",
+                        )
+                        info = run_dump_single_json(
+                            normalized_url,
+                            retry_opts,
+                            extra_args=extra_args,
+                            cancel_event=cancel_event,
+                        )
+                    else:
+                        raise
+                else:
+                    raise
+
+            if not isinstance(info, dict):
+                raise RuntimeError("频道解析失败：返回结果为空")
+            return cast(dict[str, Any], info)
+        except Exception as exc:
+            msg = str(exc)
+            self._emit_log("error", f"频道解析失败: {msg}")
+            raise
+
+    @staticmethod
+    def _normalize_channel_url(url: str, tab: str) -> str:
+        """根据标签页选择规范化频道 URL 后缀"""
+        url = url.rstrip("/")
+        # 移除已有的标签页后缀
+        for suffix in ("/videos", "/shorts", "/streams", "/playlists", "/community"):
+            if url.endswith(suffix):
+                url = url[: -len(suffix)]
+                break
+        # 拼接目标标签页
+        if tab == "shorts":
+            return url + "/shorts"
+        return url + "/videos"
 
 
 youtube_service = YoutubeService()

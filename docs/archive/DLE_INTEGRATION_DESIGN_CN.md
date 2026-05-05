@@ -20,8 +20,8 @@ DLE 系统由四个主要组件构成：
 sequenceDiagram
     participant User as 用户
     participant GUI as FluentYTDL 界面
-    participant Sentinel as Cookie Sentinel
-    participant DLE as DLE Provider
+    participant Sentinel as Cookie 哨兵
+    participant DLE as DLE 提供者
     participant Receiver as 本地 HTTP 服务器
     participant Browser as Edge/Chrome 浏览器
     participant Ext as 临时扩展插件

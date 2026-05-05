@@ -1,0 +1,279 @@
+# yt-dlp Empirical Knowledge Book
+
+> [中文版](YTDLP_KNOWLEDGE.md)
+>
+> Each entry follows: **Symptom → Root Cause → Rule → Code Reference**
+
+## 1. Download Failures
+
+### 1.1 403 During Download (Signed URL Expiry)
+
+**Symptom**: HTTP 403 mid-download, especially on long videos
+
+**Root Cause**: `sleep_interval` introduces delays between requests; YouTube signed URLs have short TTL (~minutes)
+
+**Rule**: NEVER set `sleep_interval_min` or `sleep_interval_max` to non-zero values
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py` — AntiBlockingOptions comment
+
+### 1.2 403 on Age-Restricted / Members-Only Content
+
+**Symptom**: "Sign in to confirm your age" or "This video is members-only"
+
+**Root Cause**: Missing or expired cookies; age-restricted content requires authenticated session
+
+**Rule**: CookieSentinel auto-detects these keywords and triggers cookie refresh flow
+
+**Code**: `src/fluentytdl/auth/cookie_sentinel.py` — `COOKIE_ERROR_KEYWORDS`
+
+### 1.3 Bot Detection (LOGIN_REQUIRED)
+
+**Symptom**: `LOGIN_REQUIRED` error from yt-dlp extraction
+
+**Root Cause**: YouTube detected automated access; needs PO Token or fresh cookies
+
+**Rule**: POT Manager provides PO Token; if unavailable, falls back to `mweb` client with static token from settings
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py` — fallback logic in `build_ydl_options()`
+
+### 1.4 "Page Needs to Be Reloaded" Error
+
+**Symptom**: yt-dlp returns error about page reload
+
+**Root Cause**: Stale cookies or session state
+
+**Rule**: Auto-detect this error and force-refresh DLE cookies for a single retry
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py` — retry logic in extraction methods
+
+### 1.5 Playlist Auth Check Hint
+
+**Symptom**: yt-dlp hints about `youtubetab:skip=authcheck`
+
+**Root Cause**: YouTube playlist requires auth check that can be skipped
+
+**Rule**: Auto-detect this hint and inject `youtubetab:skip=authcheck` as extractor-arg on retry
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py` — playlist retry logic
+
+## 2. Format Selection
+
+### 2.1 Language Preference Override Failure
+
+**Symptom**: `-S lang:xx` in format sort does not select correct audio track
+
+**Root Cause**: yt-dlp's `language_preference=10` in extractor_args overrides sort priority; `-S` alone cannot win
+
+**Rule**: Use `_inject_language_into_format()` to prepend `[language=xx]` filters to each alternative in the format string
+
+**Code**: `src/fluentytdl/youtube/yt_dlp_cli.py` — `_inject_language_into_format()`
+
+### 2.2 BCP-47 Alias Expansion
+
+**Symptom**: Audio language matching fails for locale variants (e.g., `zh-CN` vs `zh-Hans`)
+
+**Root Cause**: YouTube uses different locale codes in different contexts
+
+**Rule**: Use `bcp47_expand_for_sort()` to expand language codes to all possible aliases before building format_sort
+
+**Code**: `src/fluentytdl/utils/format_scorer.py`
+
+### 2.3 web_music Client Needs disable_innertube
+
+**Symptom**: Format extraction fails for YouTube Music URLs
+
+**Root Cause**: `web_music` client has broken InnerTube challenge handling
+
+**Rule**: When using `web_music` player_client, always set `disable_innertube=True` in PO Token request
+
+**Code**: `src/fluentytdl/yt_dlp_plugins_ext/yt_dlp_plugins/extractor/getpot_bgutil_http.py`
+
+### 2.4 No player_client Forcing
+
+**Symptom**: Temptation to force `android` or `ios` client for better formats
+
+**Root Cause**: Android/iOS simulation can return incomplete format lists; yt-dlp's default strategy (tv → web_safari → android_vr) is well-tested
+
+**Rule**: NEVER force `player_client` via extractor_args; trust yt-dlp defaults
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py` — comment in `build_ydl_options()`
+
+## 3. Windows-Specific Issues
+
+### 3.1 .part-Frag File Deletion Failure
+
+**Symptom**: yt-dlp returns exit code 1 but download appears complete
+
+**Root Cause**: Windows file locking prevents deletion of `.part-Frag` files; download is actually complete
+
+**Rule**: On non-zero exit code, check if output file exists and its size >= 50% of expected total bytes
+
+**Code**: `src/fluentytdl/download/executor.py` — expected size validation
+
+### 3.2 DPAPI Cookie Lock
+
+**Symptom**: Browser cookie extraction hangs or fails; other browser features break
+
+**Root Cause**: `--cookies-from-browser` locks Chrome/Edge SQLite DB via DPAPI on Windows
+
+**Rule**: NEVER use `--cookies-from-browser`; always extract to file via rookiepy first
+
+**Code**: `src/fluentytdl/auth/auth_service.py`
+
+### 3.3 POT Plugin Discovery Failure
+
+**Symptom**: PO Token provider not found by compiled yt-dlp.exe
+
+**Root Cause**: Standalone compiled yt-dlp does not read PYTHONPATH for plugin discovery
+
+**Rule**: Sync POT plugin `.py` files to `<exe-dir>/yt-dlp-plugins/bgutil-ytdlp-pot-provider/` using mtime-based incremental sync
+
+**Code**: `src/fluentytdl/youtube/yt_dlp_cli.py` — `sync_pot_plugins_to_ytdlp()`
+
+### 3.4 Process Tree Termination
+
+**Symptom**: Orphaned yt-dlp or ffmpeg processes after cancel
+
+**Root Cause**: `terminate()` only kills direct child, not spawned subprocesses
+
+**Rule**: On Windows, use `taskkill /F /T /PID` to kill entire process tree
+
+**Code**: `src/fluentytdl/download/executor.py` — process termination logic
+
+### 3.5 Cross-Drive File Move Failure
+
+**Symptom**: `os.replace()` fails when temp and target are on different drives
+
+**Root Cause**: `os.replace()` cannot move across drives on Windows
+
+**Rule**: Create temp files in same directory as target to avoid cross-drive moves
+
+**Code**: `src/fluentytdl/download/workers.py` — sandbox directory creation
+
+## 4. Network / Proxy
+
+### 4.1 TUN Mode Double-Proxy
+
+**Symptom**: Downloads fail or are extremely slow when system TUN/VPN (e.g., V2RayN) is active
+
+**Root Cause**: Injecting `HTTPS_PROXY`/`HTTP_PROXY` env vars causes traffic to go through both TUN and proxy
+
+**Rule**: When TUN mode is detected, do NOT inject proxy env vars into POT Manager subprocess
+
+**Code**: `src/fluentytdl/youtube/pot_manager.py` — proxy injection logic
+
+### 4.2 Proxy Off Override
+
+**Symptom**: System proxy still used even when "No Proxy" selected
+
+**Root Cause**: System-level proxy env vars override yt-dlp settings
+
+**Rule**: When proxy mode is "off", explicitly set `proxy: ""` to override any system proxy
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py` — `NetworkOptions`
+
+### 4.3 Localhost Proxy Bypass
+
+**Symptom**: POT Manager HTTP requests go through TUN proxy instead of localhost
+
+**Root Cause**: `urllib.request.urlopen()` respects system proxy settings
+
+**Rule**: Use empty `ProxyHandler` for localhost requests to bypass TUN-mode proxies
+
+**Code**: `src/fluentytdl/youtube/pot_manager.py` — `_local_urlopen()`
+
+## 5. Cookie System
+
+### 5.1 Lazy Cookie Cleanup
+
+**Symptom**: Old cookies deleted before new extraction succeeds → auth gap
+
+**Root Cause**: Eager cleanup removes working cookies before replacement is verified
+
+**Rule**: NEVER delete old cookies until new extraction succeeds and validates
+
+**Code**: `src/fluentytdl/auth/cookie_sentinel.py`
+
+### 5.2 Required YouTube Cookies
+
+**Symptom**: Partial auth — some features work, others don't
+
+**Root Cause**: Missing required cookie fields
+
+**Rule**: Validate presence of: SID, HSID, SSID, SAPISID, APISID
+
+**Code**: `src/fluentytdl/auth/cookie_cleaner.py`
+
+### 5.3 Chromium v130+ App-Bound Encryption
+
+**Symptom**: Cookie extraction fails silently on newer Chrome/Edge
+
+**Root Cause**: Chromium v130+ uses App-Bound Encryption requiring admin privileges for decryption
+
+**Rule**: Detect Chromium version and prompt for admin elevation if needed
+
+**Code**: `src/fluentytdl/auth/cookie_manager.py`
+
+### 5.4 JSON Cookie File Rejection
+
+**Symptom**: User provides cookies in JSON format, yt-dlp ignores them
+
+**Root Cause**: yt-dlp expects Netscape format only
+
+**Rule**: Detect JSON cookie files and reject with clear warning message
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py`
+
+## 6. VR Video
+
+### 6.1 Dual-Pass Extraction
+
+**Symptom**: VR video shows low resolution formats only
+
+**Root Cause**: Default client does not expose high-res VR formats; need `android_vr` client
+
+**Rule**: VR mode always uses `extract_vr_info_sync()` with `player_client=["android_vr"]`
+
+**Code**: `src/fluentytdl/youtube/youtube_service.py:1229`
+
+### 6.2 EAC to Equirectangular Conversion
+
+**Symptom**: VR video plays in wrong projection on non-VR players
+
+**Root Cause**: Some YouTube VR videos use EAC (Equi-Angular Cubemap) projection
+
+**Rule**: If projection is EAC and auto-convert enabled, run ffmpeg `v360=eac:e` filter
+
+**Code**: `src/fluentytdl/download/features.py:308` — `VRFeature.on_post_process()`
+
+### 6.3 VR Detection Heuristics
+
+**Symptom**: Non-VR video incorrectly detected as VR, or VR video missed
+
+**Root Cause**: VR detection uses multiple signals: title keywords, format metadata, resolution anomalies
+
+**Rule**: Check projection field, tags, and title for keywords (360, VR, vr180, equirectangular)
+
+**Code**: `src/fluentytdl/core/video_analyzer.py`
+
+## 7. Sandbox Download Model
+
+### 7.1 Temp Directory Per Task
+
+**Symptom**: Partial files pollute download directory on cancel
+
+**Root Cause**: Direct download to final directory leaves fragments on failure
+
+**Rule**: Each download runs in `.fluent_temp/task_<id>/`; files moved to final dir only on success
+
+**Code**: `src/fluentytdl/download/workers.py` — sandbox creation in `DownloadWorker`
+
+### 7.2 Cancel Cleanup Delay
+
+**Symptom**: Sandbox directory not fully deleted on cancel
+
+**Root Cause**: Windows file lock release takes time after process termination
+
+**Rule**: Wait 1 second after process kill before sweeping sandbox directory
+
+**Code**: `src/fluentytdl/download/workers.py` — cancel cleanup logic

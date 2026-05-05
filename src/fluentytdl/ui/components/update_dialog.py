@@ -2,7 +2,7 @@
 更新提示对话框
 
 展示:
-- 新版本号
+- 新版本号（区分稳定版/预发布版）
 - 更新日志 (Markdown 渲染)
 - 下载进度条
 - 按钮: "立即更新" / "跳过此版本" / "稍后提醒"
@@ -21,7 +21,7 @@ from qfluentwidgets import (
     TextEdit,
 )
 
-from ...core.app_update_manager import app_update_manager
+from ...core.component_update_manager import component_update_manager
 from ...core.config_manager import config_manager
 
 
@@ -37,9 +37,24 @@ class UpdateDialog(MessageBoxBase):
         # 设置最小尺寸
         self.widget.setMinimumSize(600, 420)
 
-        # 标题
-        self.titleLabel = SubtitleLabel(f"\U0001f389 发现新版本 v{update_info['version']}", self)
+        # 标题（区分稳定版/预发布版）
+        version = update_info.get("version", "?")
+        is_prerelease = update_info.get("is_prerelease", False)
+        if is_prerelease:
+            title_text = f"发现预发布版本 pre-{version}"
+        else:
+            title_text = f"发现新版本 v{version}"
+
+        self.titleLabel = SubtitleLabel(title_text, self)
         self.viewLayout.addWidget(self.titleLabel)
+
+        # 预发布提示
+        if is_prerelease:
+            self.preNotice = BodyLabel(
+                "此为预发布版本，可能存在不稳定因素。建议仅在测试环境中使用。", self
+            )
+            self.preNotice.setStyleSheet("color: #e6a817;")
+            self.viewLayout.addWidget(self.preNotice)
 
         # 更新日志
         self.changelog = TextEdit(self)
@@ -58,7 +73,7 @@ class UpdateDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.progressBar)
 
         # 按钮
-        self.yesButton.setText("\U0001f680 立即更新")
+        self.yesButton.setText("立即更新")
         self.cancelButton.setText("稍后提醒")
 
         self.skipBtn = PushButton("跳过此版本", self.buttonGroup)
@@ -69,15 +84,15 @@ class UpdateDialog(MessageBoxBase):
         self.yesButton.clicked.connect(self._on_update_clicked)
         self.skipBtn.clicked.connect(self._on_skip_clicked)
 
-        # 连接 manager 信号
-        app_update_manager.download_progress.connect(self._on_progress)
-        app_update_manager.download_finished.connect(self._on_downloaded)
-        app_update_manager.download_error.connect(self._on_error)
+        # 连接 ComponentUpdateManager 信号
+        component_update_manager.download_progress.connect(self._on_progress)
+        component_update_manager.download_finished.connect(self._on_downloaded)
+        component_update_manager.download_error.connect(self._on_error)
 
     def _on_update_clicked(self) -> None:
-        url = self.update_info.get("download_url")
+        url = self.update_info.get("url") or self.update_info.get("download_url")
         if not url:
-            self.progressLabel.setText("\u274c 下载地址无效")
+            self.progressLabel.setText("下载地址无效")
             self.progressLabel.show()
             return
 
@@ -89,7 +104,7 @@ class UpdateDialog(MessageBoxBase):
         self.progressBar.show()
 
         sha256 = self.update_info.get("sha256") or ""
-        app_update_manager.download_update(url, sha256)
+        component_update_manager.download_app_update(url, sha256)
 
     def _on_progress(self, percent: int) -> None:
         self.progressBar.setValue(percent)
@@ -97,26 +112,34 @@ class UpdateDialog(MessageBoxBase):
 
     def _on_downloaded(self, path: str) -> None:
         self.progressLabel.setText("下载完成，正在安装...")
-        install_type = self.update_info.get("install_type") or "setup"
-        app_update_manager.apply_update(path, install_type)
+        try:
+            component_update_manager.apply_app_core_update(path)
+        except Exception as e:
+            self.progressLabel.setText(f"安装失败: {e}")
+            self.yesButton.setEnabled(True)
+            self.skipBtn.setEnabled(True)
+            self.cancelButton.setEnabled(True)
 
     def _on_error(self, msg: str) -> None:
-        self.progressLabel.setText(f"\u274c {msg}")
+        self.progressLabel.setText(msg)
         self.yesButton.setEnabled(True)
         self.skipBtn.setEnabled(True)
         self.cancelButton.setEnabled(True)
 
     def _on_skip_clicked(self) -> None:
         ver = self.update_info.get("version") or ""
-        config_manager.set("skipped_app_version", ver)
+        is_prerelease = self.update_info.get("is_prerelease", False)
+        # 按通道分别存储跳过版本
+        key = "skipped_pre_version" if is_prerelease else "skipped_stable_version"
+        config_manager.set(key, ver)
         self.reject()
 
     def hideEvent(self, event) -> None:  # noqa: N802
         """对话框关闭时断开信号，避免多次连接"""
         try:
-            app_update_manager.download_progress.disconnect(self._on_progress)
-            app_update_manager.download_finished.disconnect(self._on_downloaded)
-            app_update_manager.download_error.disconnect(self._on_error)
+            component_update_manager.download_progress.disconnect(self._on_progress)
+            component_update_manager.download_finished.disconnect(self._on_downloaded)
+            component_update_manager.download_error.disconnect(self._on_error)
         except (RuntimeError, TypeError):
             pass
         super().hideEvent(event)

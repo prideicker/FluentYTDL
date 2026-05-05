@@ -219,6 +219,7 @@ def fetch_ffmpeg(dest_dir: Path) -> None:
     print(f"  ✓ ffmpeg (yt-dlp) 已安装到 {dest_dir}")
 
 
+
 def fetch_deno(dest_dir: Path) -> None:
     """获取 Deno (JavaScript 运行时)"""
     print("\n🔧 获取 Deno...")
@@ -233,9 +234,7 @@ def fetch_deno(dest_dir: Path) -> None:
         (
             a
             for a in release["assets"]
-            if "x86_64" in a["name"]
-            and "windows" in a["name"].lower()
-            and a["name"].endswith(".zip")
+            if "x86_64" in a["name"] and "windows" in a["name"].lower() and a["name"].endswith(".zip")
         ),
         None,
     )

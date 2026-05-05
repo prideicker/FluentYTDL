@@ -405,28 +405,28 @@ FluentYTDL/
 ```mermaid
 sequenceDiagram
     participant U as 用户
-    participant MW as MainWindow
-    participant SD as SelectionDialog
-    participant YS as YoutubeService
-    participant DM as DownloadManager
-    participant DW as DownloadWorker
+    participant MW as 主窗口
+    participant SD as 选择对话框
+    participant YS as YouTube 服务
+    participant DM as 下载管理器
+    participant DW as 下载工作线程
     participant YT as yt-dlp
 
     U->>MW: 粘贴链接/剪贴板检测
     MW->>SD: 打开选择对话框
-    SD->>YS: extract_info_for_dialog_sync()
+    SD->>YS: 提取视频信息 (对话框模式)
     YS->>YT: 调用 yt-dlp --dump-json
     YT-->>YS: 返回元数据
     YS-->>SD: 返回视频信息
     SD->>U: 显示格式选择
     U->>SD: 选择格式，开始下载
-    SD->>DM: create_worker()
-    DM->>DW: 创建 Worker
-    DM->>DW: start_worker()
+    SD->>DM: 创建下载任务
+    DM->>DW: 创建工作线程
+    DM->>DW: 启动工作线程
     DW->>YT: 执行下载命令
-    DW-->>MW: progress 信号
+    DW-->>MW: 发送进度信号
     MW->>U: 更新进度条
-    DW-->>MW: completed 信号
+    DW-->>MW: 发送完成信号
     MW->>U: 显示完成状态
 ```
 

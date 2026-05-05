@@ -30,6 +30,7 @@ from qfluentwidgets import (
     ToolTipPosition,
 )
 
+from ..core.component_update_manager import component_update_manager
 from ..core.config_manager import config_manager
 from ..core.dependency_manager import dependency_manager
 from ..core.hardware_manager import hardware_manager
@@ -38,6 +39,7 @@ from ..processing.subtitle_manager import COMMON_SUBTITLE_LANGUAGES
 from ..utils.logger import LOG_DIR
 from ..utils.paths import find_bundled_executable, is_frozen
 from ..youtube.yt_dlp_cli import resolve_yt_dlp_exe, run_version
+from .components.app_update_card import AppUpdateSettingCard
 from .components.custom_info_bar import InfoBar
 from .components.smart_setting_card import SmartSettingCard
 
@@ -623,39 +625,6 @@ class AudioLanguageMultiSelectCard(SettingCard):
         self._update_button_text()
 
 
-from qfluentwidgets import TextEdit  # noqa: E402
-
-
-class ProbePoolEditorDialog(MessageBox):
-    """探针链接池编辑对话框"""
-
-    def __init__(self, current_pool: list[str], parent=None):
-        super().__init__(
-            "管理探针链接池", "添加或删除风控探测时用于测试的 YouTube 链接（每行一个）。", parent
-        )
-
-        self.textEdit = TextEdit(self.widget)
-        self.textEdit.setMinimumHeight(250)
-        self.textEdit.setMinimumWidth(500)
-
-        # 将现有的列表转成多行文本
-        self.textEdit.setPlainText("\n".join(current_pool))
-
-        self.textLayout.addWidget(self.textEdit)
-        self.widget.setMinimumWidth(550)
-
-    def get_links(self) -> list[str]:
-        """获取编辑后的有效链接列表"""
-        text = self.textEdit.toPlainText()
-        links = []
-        for line in text.split("\n"):
-            line = line.strip()
-            # 简单的验证，只保留非空且看起来像 url 的行
-            if line and line.startswith("http"):
-                links.append(line)
-        return links
-
-
 class DLEAccountNameDialog(MessageBox):
     """新增 DLE 账号名称输入对话框（Fluent 风格）。"""
 
@@ -880,7 +849,7 @@ class SettingsPage(QWidget):
         )
         self.pivot.addItem(
             routeKey="componentsInterface",
-            text="组件",
+            text="更新",
             onClick=lambda: self.stackedWidget.setCurrentWidget(self.componentsInterface),
         )
         self.pivot.addItem(
@@ -1145,15 +1114,6 @@ class SettingsPage(QWidget):
         self.accountGroup.addSettingCard(self.cookieFileCard)
 
         # 一键诊断
-        self.diagCard = PushSettingCard(
-            "一键检测",
-            FluentIcon.SEARCH,
-            "环境诊断",
-            "检测 Cookie、网络连通性、代理和 IP 风控状态",
-            self.accountGroup,
-        )
-        self.diagCard.clicked.connect(self._on_diag_clicked)
-        self.accountGroup.addSettingCard(self.diagCard)
 
         layout.addWidget(self.accountGroup)
 
@@ -1168,14 +1128,22 @@ class SettingsPage(QWidget):
         self._indent_setting_card(self.cookieStatusCard)
 
     def _init_component_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
-        """初始化核心组件与更新设置组"""
+        """初始化软件更新与核心组件设置组"""
+
+        # ── 软件更新组 ──
+        self.appUpdateGroup = SettingCardGroup("软件更新", parent_widget)
+        self.appUpdateCard = AppUpdateSettingCard(self.appUpdateGroup)
+        self.appUpdateGroup.addSettingCard(self.appUpdateCard)
+        layout.addWidget(self.appUpdateGroup)
+
+        # ── 核心组件组 ──
         self.coreGroup = SettingCardGroup("核心组件", parent_widget)
 
         # Check Updates on Startup
         self.checkUpdatesOnStartupCard = InlineSwitchCard(
             FluentIcon.SYNC,
             "启动时自动检查更新",
-            "开启后，每隔 24 小时尝试自动检查 yt-dlp 和 ffmpeg 更新（默认开启）",
+            "开启后，每隔 24 小时自动检查所有组件更新（默认开启）",
             parent=self.coreGroup,
         )
         self.checkUpdatesOnStartupCard.checkedChanged.connect(
@@ -1202,7 +1170,7 @@ class SettingsPage(QWidget):
         )
         self.ytDlpChannelCard.comboBox.currentIndexChanged.connect(self._on_ytdlp_channel_changed)
 
-        # New Component Cards
+        # Component Cards
         self.ytDlpCard = ComponentSettingCard(
             "yt-dlp",
             FluentIcon.DOWNLOAD,
@@ -1215,7 +1183,6 @@ class SettingsPage(QWidget):
             "ffmpeg", FluentIcon.VIDEO, "FFmpeg 引擎", "点击检查更新以获取最新版本", self.coreGroup
         )
 
-        # JS Runtime (Deno only for auto-update now)
         self.denoCard = ComponentSettingCard(
             "deno",
             FluentIcon.CODE,
@@ -1224,7 +1191,6 @@ class SettingsPage(QWidget):
             self.coreGroup,
         )
 
-        # POT Provider (PO Token 服务)
         self.potProviderCard = ComponentSettingCard(
             "pot-provider",
             FluentIcon.CERTIFICATE,
@@ -1233,7 +1199,6 @@ class SettingsPage(QWidget):
             self.coreGroup,
         )
 
-        # AtomicParsley (封面嵌入工具)
         self.atomicParsleyCard = ComponentSettingCard(
             "atomicparsley",
             FluentIcon.PHOTO,
@@ -1259,7 +1224,6 @@ class SettingsPage(QWidget):
         self.coreGroup.addSettingCard(self.denoCard)
         self.coreGroup.addSettingCard(self.potProviderCard)
         self.coreGroup.addSettingCard(self.atomicParsleyCard)
-
         self.coreGroup.addSettingCard(self.jsRuntimeCard)
         layout.addWidget(self.coreGroup)
 
@@ -1539,35 +1503,10 @@ class SettingsPage(QWidget):
             self._on_playlist_skip_authcheck_changed
         )
 
-        self.autoRiskProbeCard = InlineSwitchCard(
-            FluentIcon.CERTIFICATE,
-            "自动风控探测",
-            "在启动或切页时自动向 YouTube 发送探针请求，以便提前预知 Cookie 失效。开启可能增加 IP 暴露风险（默认关闭）",
-            parent=self.behaviorGroup,
-        )
-        self.autoRiskProbeCard.checkedChanged.connect(self._on_auto_risk_probe_changed)
-
-        self.probePoolCard = SettingCard(
-            FluentIcon.LINK,
-            "探针链接池管理",
-            "管理用于风控探测测试的 YouTube 视频链接池（12小时内不会重复探测同一链接）",
-            parent=self.behaviorGroup,
-        )
-        self.probePoolEditBtn = PushButton("编辑连接池")
-        self.probePoolEditBtn.clicked.connect(self._on_probe_pool_clicked)
-        self.probePoolCard.hBoxLayout.addWidget(
-            self.probePoolEditBtn, 0, Qt.AlignmentFlag.AlignRight
-        )
-        self.probePoolCard.hBoxLayout.addSpacing(16)
-
         self.behaviorGroup.addSettingCard(self.preferredAudioLanguageCard)
         self.behaviorGroup.addSettingCard(self.deletionPolicyCard)
         self.behaviorGroup.addSettingCard(self.playlistSkipAuthcheckCard)
-        self.behaviorGroup.addSettingCard(self.autoRiskProbeCard)
-        self.behaviorGroup.addSettingCard(self.probePoolCard)
 
-        # 使其变为下属卡片的视觉样式
-        self._indent_setting_card(self.probePoolCard)
         layout.addWidget(self.behaviorGroup)
 
     def _init_postprocess_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
@@ -1913,6 +1852,9 @@ class SettingsPage(QWidget):
             now = time.time()
             # Check if 24 hours (86400 seconds) have passed.
             if now - last_check > 86400:
+                # 检查 app-core 更新（通过 ComponentUpdateManager）
+                self.appUpdateCard.check_for_update()
+                # 检查 bin/ 工具更新
                 dependency_manager.check_update("yt-dlp")
                 dependency_manager.check_update("ffmpeg")
                 dependency_manager.check_update("deno")
@@ -1962,12 +1904,6 @@ class SettingsPage(QWidget):
         self.playlistSkipAuthcheckCard.switchButton.blockSignals(True)
         self.playlistSkipAuthcheckCard.switchButton.setChecked(skip_authcheck)
         self.playlistSkipAuthcheckCard.switchButton.blockSignals(False)
-
-        # Behavior: auto risk probe
-        auto_risk_probe = bool(config_manager.get("auto_risk_probe", False))
-        self.autoRiskProbeCard.switchButton.blockSignals(True)
-        self.autoRiskProbeCard.switchButton.setChecked(auto_risk_probe)
-        self.autoRiskProbeCard.switchButton.blockSignals(False)
 
         # Postprocess: embed thumbnail
         embed_thumbnail = bool(config_manager.get("embed_thumbnail", True))
@@ -2152,15 +2088,6 @@ class SettingsPage(QWidget):
             parent=self,
         )
 
-    def _on_auto_risk_probe_changed(self, checked: bool) -> None:
-        config_manager.set("auto_risk_probe", bool(checked))
-        InfoBar.success(
-            "设置已更新",
-            "已开启自动风控探测" if checked else "已关闭自动风控探测",
-            duration=5000,
-            parent=self,
-        )
-
     def _on_embed_thumbnail_changed(self, checked: bool) -> None:
         """处理封面嵌入开关变更"""
         config_manager.set("embed_thumbnail", bool(checked))
@@ -2312,30 +2239,6 @@ class SettingsPage(QWidget):
             InfoBar.success("保存成功", f"代理已更新为 {new_proxy}", duration=5000, parent=self)
         else:
             InfoBar.info("已清空", "代理地址已清空。", duration=5000, parent=self)
-
-    def _on_probe_pool_clicked(self):
-        pool = config_manager.get("probe_link_pool")
-        if not isinstance(pool, list):
-            pool = []
-
-        dialog = ProbePoolEditorDialog(pool, self.window())
-        if dialog.exec():
-            new_links = dialog.get_links()
-            if not new_links:
-                InfoBar.error(
-                    "配置错误", "连接池不能为空，至少需要一个有效的探测 URL", parent=self.window()
-                )
-                return
-
-            config_manager.set("probe_link_pool", new_links)
-            # 用户修改了链接池，清除旧的伪随机历史记录
-            config_manager.set("probe_link_history", {})
-
-            InfoBar.success(
-                "保存成功",
-                f"探针链接池已更新，共计 {len(new_links)} 个可用链接",
-                parent=self.window(),
-            )
 
     def _on_cookie_mode_changed(self, index: int) -> None:
         """Cookie 模式切换：0=浏览器提取, 1=DLE登录获取, 2=手动文件"""
@@ -2916,315 +2819,6 @@ class SettingsPage(QWidget):
 
         except Exception as e:
             self.cookieStatusCard.contentLabel.setText(f"状态获取失败: {e}")
-
-    def _on_diag_clicked(self) -> None:
-        """一键环境诊断 — 弹出二级诊断对话框"""
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtCore import QThread
-        from PySide6.QtCore import Signal as QSignal
-        from PySide6.QtWidgets import QGridLayout, QLabel, QSizePolicy
-        from qfluentwidgets import (
-            BodyLabel,
-            CaptionLabel,
-            IndeterminateProgressRing,
-            MessageBoxBase,
-            SubtitleLabel,
-        )
-
-        STEP_LABELS = {
-            1: "Cookie 文件",
-            2: "Cookie 有效性",
-            3: "YouTube 连通性",
-            4: "代理配置",
-            5: "Cookie + IP 实测",
-            6: "POT 服务",
-        }
-
-        # ---- Worker (same logic, moved here for closure) ----
-        class _DiagWorker(QThread):
-            step_done = QSignal(int, bool, str)
-            all_done = QSignal(str)
-
-            def run(self):
-                import time as _time
-
-                results = {}
-                info = None
-
-                # Step 1: Cookie 文件
-                try:
-                    from ..auth.cookie_sentinel import cookie_sentinel
-
-                    info = cookie_sentinel.get_status_info()
-                    if info["exists"]:
-                        count = info.get("cookie_count", 0)
-                        source = info.get("actual_source_display") or info.get("source") or "未知"
-                        self.step_done.emit(1, True, f"存在 ({count} 个, 来源: {source})")
-                        results["file"] = True
-                    else:
-                        self.step_done.emit(1, False, "Cookie 文件不存在")
-                        results["file"] = False
-                except Exception as e:
-                    self.step_done.emit(1, False, f"检测失败: {e}")
-                    results["file"] = False
-
-                # Step 2: Cookie 有效性
-                try:
-                    if results.get("file") and info is not None:
-                        valid = info.get("cookie_valid", False)
-                        msg = info.get("cookie_valid_msg", "")
-                        if valid:
-                            self.step_done.emit(2, True, msg or "Cookie 有效")
-                        else:
-                            self.step_done.emit(2, False, msg or "Cookie 无效或不完整")
-                        results["valid"] = valid
-                    else:
-                        self.step_done.emit(2, False, "跳过 (无 Cookie 文件)")
-                        results["valid"] = False
-                except Exception as e:
-                    self.step_done.emit(2, False, f"检测失败: {e}")
-                    results["valid"] = False
-
-                # Step 3: YouTube 连通性
-                try:
-                    from ..utils.error_parser import probe_youtube_connectivity
-
-                    t0 = _time.monotonic()
-                    reachable = probe_youtube_connectivity(timeout=8.0)
-                    latency = int((_time.monotonic() - t0) * 1000)
-                    if reachable:
-                        self.step_done.emit(3, True, f"可达 (延迟 {latency}ms)")
-                    else:
-                        self.step_done.emit(3, False, f"不可达 (耗时 {latency}ms)")
-                    results["network"] = reachable
-                except Exception as e:
-                    self.step_done.emit(3, False, f"检测失败: {e}")
-                    results["network"] = False
-
-                # Step 4: 代理配置
-                try:
-                    from ..core.config_manager import config_manager
-
-                    proxy_mode = str(config_manager.get("proxy_mode") or "off").lower().strip()
-                    proxy_url = str(config_manager.get("proxy_url", "") or "").strip()
-                    if proxy_mode == "manual" and proxy_url:
-                        self.step_done.emit(4, True, f"手动代理: {proxy_url}")
-                    elif proxy_mode == "system":
-                        self.step_done.emit(4, True, "使用系统代理")
-                    else:
-                        self.step_done.emit(4, False, "未配置代理 (可能无法访问 YouTube)")
-                    results["proxy"] = proxy_mode != "off"
-                except Exception as e:
-                    self.step_done.emit(4, False, f"检测失败: {e}")
-                    results["proxy"] = False
-
-                # Step 5: Cookie + IP 综合实测
-                try:
-                    if results.get("network"):
-                        from ..auth.cookie_sentinel import cookie_sentinel as _cs
-                        from ..utils.error_parser import probe_cookie_and_ip
-
-                        cpath = _cs.get_cookie_file_path() if results.get("file") else None
-                        probe = probe_cookie_and_ip(cookie_file=cpath, timeout=15.0)
-                        results["cookie_real"] = probe["cookie_ok"]
-                        results["ip_ok"] = probe["ip_ok"]
-
-                        if probe["cookie_ok"] and probe["ip_ok"]:
-                            self.step_done.emit(5, True, probe["detail"])
-                        elif probe["ip_ok"] and not probe["cookie_ok"]:
-                            self.step_done.emit(5, False, probe["detail"])
-                        else:
-                            self.step_done.emit(5, False, probe["detail"])
-                    else:
-                        self.step_done.emit(5, False, "跳过 (网络不通)")
-                        results["ip_ok"] = False
-                        results["cookie_real"] = False
-                except Exception as e:
-                    self.step_done.emit(5, False, f"检测失败: {e}")
-                    results["ip_ok"] = False
-                    results["cookie_real"] = False
-
-                # Step 6: POT 服务状态 (L0 + L1 + L2 分层验证)
-                try:
-                    from ..core.config_manager import config_manager
-
-                    if config_manager.get("pot_provider_enabled", True):
-                        from ..youtube.pot_manager import pot_manager
-
-                        if not pot_manager.is_running():
-                            # 服务未运行，尝试自动启动
-                            pot_manager.start_server()
-
-                        # 用 get_health_status() 做综合诊断
-                        health = pot_manager.get_health_status()
-
-                        if health["overall_ok"]:
-                            detail_parts = [f"端口 {health['port']}"]
-                            detail_parts.append(health["token_detail"])
-                            if health["minter_ok"]:
-                                detail_parts.append(health["minter_detail"])
-                            self.step_done.emit(6, True, " | ".join(detail_parts))
-                            results["pot"] = True
-                        elif health["running"] and not health["token_ok"]:
-                            # 服务在运行但 Token 生成有问题
-                            self.step_done.emit(
-                                6, False, f"服务运行中但 Token 无效: {health['token_detail']}"
-                            )
-                            results["pot"] = False
-                        else:
-                            self.step_done.emit(
-                                6,
-                                False,
-                                health["summary"]
-                                or "未运行且启动失败 — 请检查 POT Provider 是否已安装",
-                            )
-                            results["pot"] = False
-                    else:
-                        self.step_done.emit(6, True, "已禁用 (不影响基本功能)")
-                        results["pot"] = True
-                except Exception as e:
-                    self.step_done.emit(6, False, f"检测失败: {e}")
-                    results["pot"] = False
-
-                # 综合建议
-                suggestions = []
-                if not results.get("proxy"):
-                    suggestions.append("建议在「设置 > 网络连接」中配置代理")
-                if not results.get("network"):
-                    suggestions.append("网络不通，请检查代理是否运行")
-                elif not results.get("ip_ok"):
-                    suggestions.append("当前 IP/节点被 YouTube 风控，建议更换代理节点")
-                if not results.get("file"):
-                    suggestions.append("请先通过登录或浏览器提取获取 Cookie")
-                elif results.get("cookie_real") is False and results.get("ip_ok"):
-                    suggestions.append("Cookie 已失效 (服务端验证不通过)，请重新获取")
-                if not results.get("pot", True):
-                    # 区分"未运行"和"运行中但 Token 异常"
-                    try:
-                        from ..youtube.pot_manager import pot_manager
-
-                        if pot_manager.is_running():
-                            suggestions.append(
-                                "POT Provider 服务运行中但 Token 生成异常（可能是首次初始化较慢或 BotGuard 被限制）。"
-                                "建议重启应用或更新 POT Provider 版本"
-                            )
-                        else:
-                            suggestions.append(
-                                "POT Provider 服务未运行，可能导致机器人检测。"
-                                "请在「组件管理」中安装或更新 POT Provider"
-                            )
-                    except Exception:
-                        suggestions.append(
-                            "POT Provider 服务异常，可能导致机器人检测。"
-                            "请在「组件管理」中安装或更新 POT Provider"
-                        )
-                elif not results.get("valid"):
-                    suggestions.append("Cookie 缺少必要字段，请重新获取")
-
-                if not suggestions:
-                    self.all_done.emit("✅ 所有检测通过，环境正常")
-                else:
-                    self.all_done.emit("💡 " + "；".join(suggestions))
-
-        # ---- Dialog ----
-        class _DiagDialog(MessageBoxBase):
-            def __init__(self, parent):
-                super().__init__(parent)
-                self.titleLabel = SubtitleLabel("🔍 环境诊断", self)
-                self.viewLayout.addWidget(self.titleLabel)
-
-                # 5-row grid: icon | label | result
-                grid_widget = QWidget(self)
-                self._grid = QGridLayout(grid_widget)
-                self._grid.setContentsMargins(0, 12, 0, 12)
-                self._grid.setHorizontalSpacing(12)
-                self._grid.setVerticalSpacing(8)
-
-                self._icon_labels: dict[int, QLabel] = {}
-                self._result_labels: dict[int, CaptionLabel] = {}
-                self._spinners: dict[int, IndeterminateProgressRing] = {}
-
-                for step in range(1, 7):
-                    row = step - 1
-                    # spinner (will be hidden when done)
-                    spinner = IndeterminateProgressRing(grid_widget)
-                    spinner.setFixedSize(16, 16)
-                    self._spinners[step] = spinner
-                    self._grid.addWidget(spinner, row, 0)
-
-                    # icon label (hidden initially, shown when done)
-                    icon_lbl = BodyLabel("", grid_widget)
-                    icon_lbl.setFixedWidth(20)
-                    icon_lbl.hide()
-                    self._icon_labels[step] = icon_lbl
-                    self._grid.addWidget(icon_lbl, row, 0)
-
-                    # step name
-                    name_lbl = BodyLabel(STEP_LABELS[step], grid_widget)
-                    name_lbl.setFixedWidth(110)
-                    self._grid.addWidget(name_lbl, row, 1)
-
-                    # result
-                    result_lbl = CaptionLabel("检测中...", grid_widget)
-                    result_lbl.setWordWrap(True)
-                    result_lbl.setSizePolicy(
-                        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-                    )
-                    self._result_labels[step] = result_lbl
-                    self._grid.addWidget(result_lbl, row, 2)
-
-                self.viewLayout.addWidget(grid_widget)
-
-                # suggestion row
-                self._suggestionLabel = CaptionLabel("", self)
-                self._suggestionLabel.setWordWrap(True)
-                self._suggestionLabel.hide()
-                self.viewLayout.addWidget(self._suggestionLabel)
-
-                # buttons
-                self.yesButton.setText("关闭")
-                self.cancelButton.hide()
-
-                self.widget.setMinimumWidth(480)
-
-            def update_step(self, step: int, ok: bool, detail: str):
-                # hide spinner, show icon
-                self._spinners[step].hide()
-                icon_lbl = self._icon_labels[step]
-                icon_lbl.setText("✅" if ok else "❌")
-                icon_lbl.show()
-                self._result_labels[step].setText(detail)
-
-            def set_suggestion(self, text: str):
-                self._suggestionLabel.setText(text)
-                self._suggestionLabel.show()
-
-        # create dialog and worker
-        dlg = _DiagDialog(self.window())
-        worker = _DiagWorker(dlg)
-
-        def _on_step(step, ok, detail):
-            dlg.update_step(step, ok, detail)
-
-        def _on_all_done(suggestion):
-            dlg.set_suggestion(suggestion)
-            # also update the card description briefly
-            self.diagCard.setContent(suggestion)
-
-        worker.step_done.connect(_on_step, _Qt.ConnectionType.QueuedConnection)
-        worker.all_done.connect(_on_all_done, _Qt.ConnectionType.QueuedConnection)
-        worker.start()
-
-        dlg.exec()
-
-        # cleanup
-        try:
-            worker.quit()
-            worker.wait(2000)
-        except Exception:
-            from ...utils.logger import logger
-
-            logger.warning("Swallowed exception in settings", exc_info=True)
 
     def _on_check_updates_startup_changed(self, checked: bool) -> None:
         config_manager.set("check_updates_on_startup", checked)

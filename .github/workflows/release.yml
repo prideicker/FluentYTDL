@@ -129,7 +129,7 @@ jobs:
           $targets = "all"
           $publish = "false"
           $strict = "true"
-          
+
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $targets = "${{ github.event.inputs.targets }}"
             $publish = "${{ github.event.inputs.publish }}"
@@ -144,44 +144,70 @@ jobs:
               $version = "${{ github.event.inputs.version }}"
               Write-Host "使用 workflow_dispatch 输入版本: $version"
             } else {
-              $content = Get-Content pyproject.toml -Raw
-              if ($content -match 'version\s*=\s*"([^"]+)"') {
-                $version = $matches[1]
-                Write-Host "workflow_dispatch 未提供版本，使用 pyproject.toml 版本: $version"
+              # 从 VERSION 文件读取（保留完整前缀格式）
+              $versionFile = "VERSION"
+              if (Test-Path $versionFile) {
+                $version = (Get-Content $versionFile -Raw).Trim()
+                Write-Host "workflow_dispatch 未提供版本，使用 VERSION 文件: $version"
               } else {
                 $version = "0.0.0"
-                Write-Host "workflow_dispatch 未提供版本且无法读取 pyproject.toml，使用默认版本: $version"
+                Write-Host "workflow_dispatch 未提供版本且 VERSION 文件不存在，使用默认版本: $version"
               }
             }
           } elseif ("${{ github.ref_type }}" -eq "tag") {
-            $version = "${{ github.ref_name }}".TrimStart("v")
+            # 标签格式: v-3.0.18 / pre-3.0.18 / beta-0.0.5（完整保留）
+            $version = "${{ github.ref_name }}"
             $targets = "all"
             $publish = "true"
             $strict = "true"
             Write-Host "使用 Git 标签版本: $version"
           } else {
-            $content = Get-Content pyproject.toml -Raw
-            if ($content -match 'version\s*=\s*"([^"]+)"') {
-              $version = $matches[1]
-              Write-Host "使用 pyproject.toml 版本: $version"
+            $versionFile = "VERSION"
+            if (Test-Path $versionFile) {
+              $version = (Get-Content $versionFile -Raw).Trim()
+              Write-Host "使用 VERSION 文件版本: $version"
             } else {
               $version = "0.0.0"
-              Write-Host "使用默认版本: $version"
+              Write-Host "VERSION 文件不存在，使用默认版本: $version"
             }
           }
-          
-          Write-Host "最终版本号: $version"
+
+          # 解析版本前缀
+          $prefix = "v"
+          $numeric = $version
+          $prerelease = "false"
+
+          if ($version -match "^(beta|pre|v)-(.+)$") {
+            $prefix = $matches[1]
+            $numeric = $matches[2]
+          }
+
+          # beta 不发布到 GitHub Release
+          if ($prefix -eq "beta") {
+            $publish = "false"
+            Write-Host "⚠ beta 版本不发布到 GitHub Release，仅上传 Artifacts"
+          }
+
+          # pre 标记为预发布
+          if ($prefix -eq "pre") {
+            $prerelease = "true"
+          }
+
+          Write-Host "最终版本号: $version (前缀: $prefix, 数字: $numeric)"
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "NUMERIC_VERSION=$numeric" >> $env:GITHUB_OUTPUT
+          echo "PREFIX=$prefix" >> $env:GITHUB_OUTPUT
+          echo "IS_PRERELEASE=$prerelease" >> $env:GITHUB_OUTPUT
           echo "TARGETS=$targets" >> $env:GITHUB_OUTPUT
           echo "PUBLISH=$publish" >> $env:GITHUB_OUTPUT
           echo "STRICT=$strict" >> $env:GITHUB_OUTPUT
-          echo "PACKAGE_VERSION=v$version" >> $env:GITHUB_ENV
+          echo "PACKAGE_VERSION=$version" >> $env:GITHUB_ENV
 
           $tagName = ""
           if ("${{ github.ref_type }}" -eq "tag") {
             $tagName = "${{ github.ref_name }}"
           } elseif ($publish -eq "true") {
-            $tagName = "v$version"
+            $tagName = "$version"
           }
           echo "TAG_NAME=$tagName" >> $env:GITHUB_OUTPUT
 
@@ -191,27 +217,27 @@ jobs:
           $publish = "${{ steps.version.outputs.PUBLISH }}"
           $strict = "${{ steps.version.outputs.STRICT }}"
           $expected = "${{ steps.version.outputs.VERSION }}"
+          $expectedNumeric = "${{ steps.version.outputs.NUMERIC_VERSION }}"
 
           if ($publish -ne "true") {
             Write-Host "publish=false，跳过版本一致性校验"
             exit 0
           }
 
-          $content = Get-Content pyproject.toml -Raw
-          if ($content -notmatch 'version\s*=\s*"([^"]+)"') {
-            Write-Host "❌ 无法从 pyproject.toml 读取版本号"
-            exit 1
+          # 使用 version_manager.py 检查一致性
+          $checkResult = python scripts/version_manager.py check
+          Write-Host $checkResult
+
+          # 检查 VERSION 文件与标签是否一致
+          if (Test-Path "VERSION") {
+            $versionFile = (Get-Content "VERSION" -Raw).Trim()
+            if ($versionFile -eq $expected) {
+              Write-Host "✓ 版本一致: VERSION=$versionFile, tag=$expected"
+              exit 0
+            }
           }
 
-          $actual = $matches[1]
-          # 允许 pre-release 后缀：tag 为 v2.0.1-pre 时，仅比较基础版本号
-          $expectedBase = ($expected -split '-')[0]
-          if ($actual -eq $expected -or $actual -eq $expectedBase) {
-            Write-Host "✓ 版本一致: pyproject.toml=$actual, release=$expected"
-            exit 0
-          }
-
-          $msg = "版本不一致: pyproject.toml=$actual, release=$expected"
+          $msg = "版本不一致: VERSION=$versionFile, tag=$expected"
           if ($strict -eq "true") {
             Write-Host "❌ $msg"
             exit 1
@@ -226,17 +252,17 @@ jobs:
       - name: "🔨 构建所有目标"
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.targets == 'all' || github.event.inputs.targets == ''
         shell: pwsh
-        run: python scripts/build.py --target all --version "v${{ steps.version.outputs.VERSION }}"
+        run: python scripts/build.py --target all --version "${{ steps.version.outputs.VERSION }}"
 
       - name: "🔨 构建 Setup"
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.targets == 'setup'
         shell: pwsh
-        run: python scripts/build.py --target setup --version "v${{ steps.version.outputs.VERSION }}"
+        run: python scripts/build.py --target setup --version "${{ steps.version.outputs.VERSION }}"
 
       - name: "🔨 构建 Full"
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.targets == 'full'
         shell: pwsh
-        run: python scripts/build.py --target full --version "v${{ steps.version.outputs.VERSION }}"
+        run: python scripts/build.py --target full --version "${{ steps.version.outputs.VERSION }}"
 
 
 
@@ -259,12 +285,12 @@ jobs:
           }
 
           if ($targets -eq "all" -or $targets -eq "") {
-            Assert-Exists "FluentYTDL-v$version-*-full.7z"
-            Assert-Exists "FluentYTDL-v$version-*-setup.exe"
+            Assert-Exists "FluentYTDL-$version-*-full.7z"
+            Assert-Exists "FluentYTDL-$version-*-setup.exe"
           } elseif ($targets -eq "full") {
-            Assert-Exists "FluentYTDL-v$version-*-full.7z"
+            Assert-Exists "FluentYTDL-$version-*-full.7z"
           } elseif ($targets -eq "setup") {
-            Assert-Exists "FluentYTDL-v$version-*-setup.exe"
+            Assert-Exists "FluentYTDL-$version-*-setup.exe"
           } else {
             throw "未知 targets: $targets"
           }
@@ -299,29 +325,31 @@ jobs:
       # ========================================
       - name: "🚀 创建 GitHub Release"
         uses: softprops/action-gh-release@v2
-        if: success() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true'))
+        if: success() && steps.version.outputs.PREFIX != 'beta' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true'))
         with:
-          name: FluentYTDL v${{ steps.version.outputs.VERSION }}
+          name: FluentYTDL ${{ steps.version.outputs.VERSION }}
           tag_name: ${{ steps.version.outputs.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+          prerelease: ${{ steps.version.outputs.IS_PRERELEASE == 'true' }}
           generate_release_notes: true
           files: |
             release/*.exe
             release/*.7z
+            release/update-manifest.json
             release/SHA256SUMS.txt
           body: |
             ## 📦 下载
-            
+
             | 版本 | 说明 | 适用场景 |
             |------|------|----------|
             | `*-setup.exe` | Windows 安装包 | 推荐普通用户使用 |
             | `*-full.7z` | 便携完整版 | 无需安装，解压即用 |
-            
+            | `*-app-core.7z` | 主程序更新包 | 增量更新（不含 bin/ 工具） |
+
             ## ✅ 校验
             下载后请使用 `SHA256SUMS.txt` 校验文件完整性。
-            
+
             ---
             自动构建于 ${{ github.sha }}
         env:

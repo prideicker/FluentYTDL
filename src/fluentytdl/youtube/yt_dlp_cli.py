@@ -12,6 +12,7 @@ from typing import Any
 from fluentytdl.utils.paths import (
     config_path,
     find_bundled_executable,
+    frozen_internal_dir,
     get_clean_env,
     is_frozen,
     locate_runtime_tool,
@@ -378,7 +379,7 @@ def ydl_opts_to_cli_args(ydl_opts: dict[str, Any]) -> list[str]:
         ("concurrent_fragment_downloads", "-N"),  # 并发分片数
     ]:
         v = ydl_opts.get(key)
-        if isinstance(v, (int, float)):
+        if isinstance(v, (int, float)) and int(v) > 0:
             args += [flag, str(int(v))]
 
     # 外部下载器

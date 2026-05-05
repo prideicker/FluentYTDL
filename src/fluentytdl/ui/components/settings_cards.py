@@ -629,39 +629,6 @@ class AudioLanguageMultiSelectCard(SettingCard):
         self._update_button_text()
 
 
-from qfluentwidgets import TextEdit  # noqa: E402
-
-
-class ProbePoolEditorDialog(MessageBox):
-    """探针链接池编辑对话框"""
-
-    def __init__(self, current_pool: list[str], parent=None):
-        super().__init__(
-            "管理探针链接池", "添加或删除风控探测时用于测试的 YouTube 链接（每行一个）。", parent
-        )
-
-        self.textEdit = TextEdit(self.widget)
-        self.textEdit.setMinimumHeight(250)
-        self.textEdit.setMinimumWidth(500)
-
-        # 将现有的列表转成多行文本
-        self.textEdit.setPlainText("\n".join(current_pool))
-
-        self.textLayout.addWidget(self.textEdit)
-        self.widget.setMinimumWidth(550)
-
-    def get_links(self) -> list[str]:
-        """获取编辑后的有效链接列表"""
-        text = self.textEdit.toPlainText()
-        links = []
-        for line in text.split("\n"):
-            line = line.strip()
-            # 简单的验证，只保留非空且看起来像 url 的行
-            if line and line.startswith("http"):
-                links.append(line)
-        return links
-
-
 class EmbedTypeComboCard(SettingCard):
     """嵌入类型下拉框卡片"""
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from enum import Enum
 from typing import Any
 
@@ -44,6 +45,7 @@ from .settings_page import SettingsPage
 from .subtitle_download_page import SubtitleDownloadPage
 from .unified_task_list_page import UnifiedTaskListPage
 from .vr_parse_page import VRParsePage
+from .channel_parse_page import ChannelParsePage
 from .welcome_wizard import WelcomeWizardDialog
 
 
@@ -169,8 +171,10 @@ class MainWindow(FluentWindow):
 
         self._is_admin = is_admin()
 
-        # 设置窗口标题（管理员模式添加标识）
-        title = "FluentYTDL Pro"
+        # 设置窗口标题（含版本号，管理员模式添加标识）
+        from fluentytdl import __version__
+
+        title = f"FluentYTDL Pro {__version__}"
         if self._is_admin:
             title += " (管理员)"
         self.setWindowTitle(title)
@@ -192,6 +196,7 @@ class MainWindow(FluentWindow):
 
         self.parse_page = ParsePage(self)
         self.vr_parse_page = VRParsePage(self)
+        self.channel_parse_page = ChannelParsePage(self)
         self.subtitle_page = SubtitleDownloadPage(self)
         self.cover_page = CoverDownloadPage(self)
         self.settings_interface = SettingsPage(self)
@@ -218,6 +223,7 @@ class MainWindow(FluentWindow):
             lambda url: self.show_selection_dialog(url, smart_detect=False, playlist_flat=True)
         )
         self.vr_parse_page.parse_requested.connect(self.show_vr_selection_dialog)
+        self.channel_parse_page.parse_requested.connect(self._show_channel_dialog)
         self.subtitle_page.parse_requested.connect(self.show_subtitle_selection_dialog)
         self.cover_page.parse_requested.connect(self.show_cover_selection_dialog)
         self.history_page.reparse_requested.connect(
@@ -246,6 +252,11 @@ class MainWindow(FluentWindow):
         # === 标题栏扩展 ===
         self.init_title_bar()
 
+        # === 软件更新通知 ===
+        from ..core.component_update_manager import component_update_manager
+
+        component_update_manager.app_update_available.connect(self._on_app_update_available)
+
         # === 首次启动检测 ===
         QTimer.singleShot(1000, self.check_first_run)
 
@@ -269,6 +280,18 @@ class MainWindow(FluentWindow):
             # UI 初始化完成后触发一次 pump，启动排队中的任务
             QTimer.singleShot(500, download_manager.pump)
 
+    def _on_app_update_available(self, info: dict) -> None:
+        """主窗口顶部弹出 InfoBar，提示软件更新可用。"""
+        version = info.get("version", "?")
+        is_pre = info.get("is_prerelease", False)
+        prefix = "预发布版本" if is_pre else "新版本"
+        InfoBar.info(
+            "软件更新",
+            f"{prefix} v{version} 已可用，前往设置页面更新",
+            duration=10000,
+            parent=self,
+        )
+
     def init_navigation(self):
         # 1. 新建任务
         self.addSubInterface(
@@ -280,7 +303,12 @@ class MainWindow(FluentWindow):
             self.vr_parse_page, FluentIcon.GAME, "VR 下载", position=NavigationItemPosition.TOP
         )
 
-        # 2.1 字幕下载
+        # 2.1 频道下载
+        self.addSubInterface(
+            self.channel_parse_page, FluentIcon.VIDEO, "频道下载", position=NavigationItemPosition.TOP
+        )
+
+        # 2.2 字幕下载
         self.addSubInterface(
             self.subtitle_page, FluentIcon.FONT, "字幕下载", position=NavigationItemPosition.TOP
         )
@@ -555,12 +583,20 @@ class MainWindow(FluentWindow):
     def show_selection_dialog(
         self, url: str, smart_detect: bool = False, playlist_flat: bool = False
     ):
+        self._remember_recent_target_url(url)
         self._show_config_window(
             url, mode="default", smart_detect=smart_detect, playlist_flat=playlist_flat
         )
 
     def show_vr_selection_dialog(self, url: str, smart_detect: bool = True):
+        self._remember_recent_target_url(url)
         self._show_config_window(url, mode="vr", vr_mode=True, smart_detect=smart_detect)
+
+    def _show_channel_dialog(self, url: str) -> None:
+        """频道解析入口：先规范化 URL（追加 /videos 后缀），再走播放列表 flat 解析路径。"""
+        from ..youtube.youtube_service import YoutubeService
+        normalized = YoutubeService._normalize_channel_url(url, "videos")
+        self.show_selection_dialog(normalized, smart_detect=False, playlist_flat=True)
 
     def handle_vr_switch_request(self, url: str):
         """响应智能检测的 VR 切换请求"""
@@ -573,10 +609,18 @@ class MainWindow(FluentWindow):
         self.show_selection_dialog(url, smart_detect=True)
 
     def show_subtitle_selection_dialog(self, url: str):
+        self._remember_recent_target_url(url)
         self._show_config_window(url, mode="subtitle")
 
     def show_cover_selection_dialog(self, url: str):
+        self._remember_recent_target_url(url)
         self._show_config_window(url, mode="cover")
+
+    def _remember_recent_target_url(self, url: str) -> None:
+        value = str(url or "").strip()
+        if not value:
+            return
+        config_manager.set("recent_target_url", value)
 
     def add_tasks(self, tasks):
         """添加下载任务到统一任务列表"""
@@ -1249,9 +1293,6 @@ class MainWindow(FluentWindow):
                     f"{auth_service.last_status.cookie_count} 个 Cookie)"
                 )
 
-            # 所有模式统一：延迟服务端探测
-            QTimer.singleShot(10000, self._startup_cookie_probe)
-
         except Exception as e:
             logger.error(f"[MainWindow] Cookie状态检查失败: {e}")
 
@@ -1308,50 +1349,3 @@ class MainWindow(FluentWindow):
         dialog.manual_import_requested.connect(on_manual_import)
 
         dialog.exec()
-
-    def _startup_cookie_probe(self) -> None:
-        """启动后延迟执行一次带节流的 Cookie+IP 探测"""
-        try:
-            from ..auth.cookie_probe_throttle import cookie_probe_throttle
-
-            if not cookie_probe_throttle.should_probe():
-                return
-
-            import threading
-
-            def _probe():
-                result = cookie_probe_throttle.probe_if_allowed()
-                if not result:
-                    return
-
-                if result.get("cookie_ok"):
-                    return  # 一切正常
-
-                detail = result.get("detail", "")
-                ip_ok = result.get("ip_ok", True)
-                logger.warning(f"[StartupProbe] 服务端探测异常: {detail}")
-
-                # 准备 UI 提示内容
-                if not ip_ok:
-                    title = "⚠️ IP 可能被 YouTube 限制"
-                    content = "服务端检测到当前网络节点触发了风控，建议更换代理节点。"
-                else:
-                    title = "⚠️ Cookie 可能已失效"
-                    content = "服务端检测到 Cookie 无法通过验证，建议前往设置页刷新。"
-
-                # 回到主线程显示 UI（使用 QTimer.singleShot 线程安全）
-                QTimer.singleShot(0, lambda t=title, c=content: self._show_probe_warning(t, c))
-
-            threading.Thread(target=_probe, daemon=True, name="StartupCookieProbe").start()
-        except Exception:
-            pass
-
-    def _show_probe_warning(self, title: str, content: str) -> None:
-        """在主线程显示服务端探测警告"""
-        InfoBar.warning(
-            title,
-            content,
-            duration=8000,
-            parent=self,
-            position=InfoBarPosition.TOP,
-        )

@@ -68,6 +68,18 @@ class DLEProvider:
         ext_dir.mkdir()
         user_data_dir.mkdir()
 
+        # 管理员模式下：放宽临时目录的 ACL 权限，
+        # 否则 Edge/Chrome 沙箱子进程（低完整性级别）无法读写 user-data-dir，
+        # 导致 "无法创建数据目录" 错误。
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["icacls", str(temp_dir), "/grant", "Everyone:(OI)(CI)F", "/T", "/Q"],
+                    capture_output=True, timeout=5,
+                )
+            except Exception as e:
+                logger.debug(f"icacls failed (non-critical): {e}")
+
         browser_process: subprocess.Popen | None = None
 
         try:

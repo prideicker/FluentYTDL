@@ -52,10 +52,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff pyright
 
+      - name: 🔢 版本一致性检查
+        run: python scripts/version_manager.py check
+
       - name: 🔍 Ruff 代码检查 (仅关键错误)
         run: |
           # 只检查关键错误：未定义变量(F821)
-          # 忽略风格问题：E701(多语句)、E722(bare except)、E741(变量名)、F401(未使用import)、F841(未使用变量)
           ruff check src/ --select=F821
 
       - name: 🔍 Ruff 格式检查
@@ -133,30 +135,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[dev]"
 
-      - name: 🔨 验证 PyInstaller 配置
+      - name: 🔨 验证 PyInstaller 构建配置
         shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          # 只验证 PyInstaller 能够解析依赖，不实际构建
           python -c "
           import PyInstaller.__main__
-          from pathlib import Path
           print('PyInstaller 可用')
-          
-          # 检查入口点
-          main_py = Path('main.py')
-          if main_py.exists():
-              print(f'入口点存在: {main_py}')
-          else:
-              raise FileNotFoundError('main.py 不存在')
-          
-          # 检查 src 目录
-          src_dir = Path('src/fluentytdl')
-          if src_dir.exists():
-              print(f'源码目录存在: {src_dir}')
-          else:
-              raise FileNotFoundError('src/fluentytdl 不存在')
-          
-          print('✓ 构建配置检查通过')
+          PyInstaller.__main__.run([
+              'scripts/FluentYTDL.spec',
+              '--noconfirm',
+              '--log-level', 'WARN',
+              '--workpath', 'build',
+              '--distpath', 'dist',
+          ])
+          print('✓ PyInstaller Analysis 通过')
           "

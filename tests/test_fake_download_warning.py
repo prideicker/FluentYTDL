@@ -45,14 +45,10 @@ class TestDownloadWarningMock(unittest.TestCase):
         # Fake cancel check
         def fake_cancel_check(): return False
         
-        class DummyStrategy:
-            label = "test"
-            
         try:
             executor.execute(
                 url="https://youtube.com/watch?v=mock_id_456",
                 ydl_opts=opts,
-                strategy=DummyStrategy(),
                 on_progress=lambda d: None,
                 on_status=mock_on_status,
                 on_path=lambda p: None,
