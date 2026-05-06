@@ -140,26 +140,55 @@ def _extract_7z(archive_path: Path, dest_dir: Path) -> None:
         log("通过 py7zr 解压完成")
         return
     except ImportError:
-        log("py7zr 未安装，尝试系统 7z")
+        log("py7zr 未安装，尝试 7z CLI")
     except Exception as e:
-        log(f"py7zr 解压失败: {e}，尝试系统 7z")
+        log(f"py7zr 解压失败: {e}，尝试 7z CLI")
 
-    # 回退到系统 7z
-    sevenzip = shutil.which("7z") or shutil.which("7za")
-    if sevenzip:
-        kwargs = {}
-        if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        subprocess.run(
-            [sevenzip, "x", str(archive_path), f"-o{dest_dir}", "-aoa", "-y"],
-            check=True,
-            capture_output=True,
-            **kwargs,
-        )
-        log("通过系统 7z 解压完成")
-        return
+    # 回退到 7z CLI
+    # 优先使用应用自带的 bin/7z.exe
+    sevenzip: str | None = None
+    for candidate in [
+        dest_dir / "bin" / "7z.exe",
+        dest_dir / "bin" / "7z" / "7z.exe",
+    ]:
+        if candidate.exists():
+            sevenzip = str(candidate)
+            log(f"使用应用自带 7z: {sevenzip}")
+            break
 
-    raise RuntimeError("无法解压 7z 文件: py7zr 未安装且系统中未找到 7z")
+    if not sevenzip:
+        sevenzip = shutil.which("7z") or shutil.which("7za")
+        if sevenzip:
+            log(f"使用系统 7z: {sevenzip}")
+
+    if not sevenzip:
+        raise RuntimeError("无法解压 7z 文件: py7zr 不支持此压缩格式且系统中未找到 7z")
+
+    # 使用 shell 模式避免路径含空格/括号时 -o 参数解析失败
+    # 7z 的 -o 参数格式要求: -o"path with spaces"
+    # Python subprocess 列表模式会将整个 "-opath (1)" 加引号导致 7z 解析错误
+    cmd = f'"{sevenzip}" x "{archive_path}" -o"{dest_dir}" -aoa -y'
+    log(f"7z 命令: {cmd}")
+
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+    result = subprocess.run(
+        cmd, shell=True, capture_output=True, **kwargs,
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        stdout = result.stdout.decode("utf-8", errors="replace").strip()
+        log(f"7z 退出码: {result.returncode}")
+        if stderr:
+            log(f"7z stderr: {stderr}")
+        if stdout:
+            log(f"7z stdout: {stdout}")
+        raise RuntimeError(f"7z 解压失败 (exit {result.returncode}): {stderr or stdout}")
+
+    log("通过 7z CLI 解压完成")
 
 
 def _extract_zip(archive_path: Path, dest_dir: Path) -> None:
