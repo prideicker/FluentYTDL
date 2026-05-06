@@ -633,8 +633,10 @@ class Builder:
         """构建 updater.exe（独立更新器）。"""
         spec_file = ROOT / "scripts" / "updater.spec"
         if not spec_file.exists():
-            print("⚠ updater.spec 不存在，跳过更新器构建")
-            return Path()
+            raise FileNotFoundError(
+                f"updater.spec 不存在: {spec_file}\n"
+                "updater.exe 是自动更新功能的必要组件，请确保 scripts/updater.spec 已提交到仓库。"
+            )
 
         print("🔨 构建 updater.exe ...")
         cmd = [
@@ -652,8 +654,9 @@ class Builder:
 
         updater_exe = ROOT / "dist" / "updater.exe"
         if not updater_exe.exists():
-            print("⚠ updater.exe 构建失败")
-            return Path()
+            raise ChildProcessError(
+                "updater.exe 构建失败：PyInstaller 运行完成但未生成 updater.exe，请检查构建日志。"
+            )
 
         # 复制到目标目录
         if copy_to:

@@ -47,6 +47,7 @@ dist/
 release/
 *.spec
 !scripts/FluentYTDL.spec
+!scripts/updater.spec
 
 # PyInstaller 临时文件
 *.manifest
