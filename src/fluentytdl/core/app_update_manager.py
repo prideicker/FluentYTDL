@@ -32,7 +32,7 @@ from .config_manager import config_manager
 
 def _parse_version(ver: str) -> tuple[int, ...]:
     """将 '3.0.0' 或 'v3.0.0-pre' 解析为可比较的整数元组"""
-    clean = re.sub(r"^v", "", str(ver).strip())
+    clean = re.sub(r"^v-?", "", str(ver).strip())
     clean = clean.split("-")[0]  # 去掉 -pre / -beta
     parts: list[int] = []
     for p in clean.split("."):

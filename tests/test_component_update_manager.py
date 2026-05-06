@@ -19,7 +19,7 @@ class TestParseVersion:
     def _parse(ver: str) -> tuple[int, ...]:
         """Reproduce the _parse_version logic for testing."""
         import re
-        clean = re.sub(r"^(v|pre-|beta-)", "", str(ver).strip())
+        clean = re.sub(r"^(v-?|pre-|beta-)", "", str(ver).strip())
         clean = clean.split("-")[0]
         parts = []
         for p in clean.split("."):
@@ -40,6 +40,12 @@ class TestParseVersion:
 
     def test_strips_v_prefix(self):
         assert self._parse("v3.0.18") == (3, 0, 18)
+
+    def test_strips_v_dash_prefix(self):
+        assert self._parse("v-3.0.19") == (3, 0, 19)
+
+    def test_v_dash_newer_than_v_dash(self):
+        assert self._parse("v-3.0.19") > self._parse("v-3.0.18")
 
     def test_strips_pre_prefix(self):
         assert self._parse("pre-3.0.18") == (3, 0, 18)

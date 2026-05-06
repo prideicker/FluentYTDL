@@ -40,7 +40,7 @@ MANIFEST_FILENAME = "update-manifest.json"
 
 def _parse_version(ver: str) -> tuple[int, ...]:
     """将 '3.0.0' 或 'v3.0.0' 解析为可比较的整数元组"""
-    clean = re.sub(r"^(v|pre-|beta-)", "", str(ver).strip())
+    clean = re.sub(r"^(v-?|pre-|beta-)", "", str(ver).strip())
     clean = clean.split("-")[0]
     parts: list[int] = []
     for p in clean.split("."):
