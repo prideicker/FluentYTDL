@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import logging
 import os
 import shutil
 import subprocess
@@ -30,10 +31,35 @@ INFINITE = 0xFFFFFFFF
 MOVEFILE_REPLACE_EXISTING = 0x1
 MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
 
+# ─── 文件日志 ─────────────────────────────────────────────
+
+_logger: logging.Logger | None = None
+
+
+def _init_log(dest_dir: Path) -> None:
+    """初始化文件日志（console=False 时 stderr 不可见）。"""
+    global _logger
+    log_dir = dest_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _logger = logging.getLogger("updater")
+    _logger.setLevel(logging.DEBUG)
+    handler = logging.FileHandler(
+        log_dir / "updater.log", encoding="utf-8", mode="w"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [updater] %(message)s", datefmt="%H:%M:%S")
+    )
+    _logger.addHandler(handler)
+
 
 def log(msg: str) -> None:
-    """简单日志输出到 stderr（不影响 stdout 的 JSON 通信）"""
-    print(f"[updater] {msg}", file=sys.stderr, flush=True)
+    """日志输出到文件 + stderr（双通道，确保可追溯）。"""
+    if _logger:
+        _logger.info(msg)
+    try:
+        print(f"[updater] {msg}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
 
 
 def wait_for_process(pid: int, timeout: int = 30) -> bool:
@@ -204,7 +230,7 @@ def _elevate_self() -> bool:
             sys.executable if getattr(sys, "frozen", False) else sys.executable,
             f'"{__file__}" {args}' if not getattr(sys, "frozen", False) else args,
             None,
-            1,  # SW_SHOWNORMAL
+            0,  # SW_HIDE — 不显示窗口
         )
         if ret > 32:
             log("已启动管理员权限进程，当前进程退出")
@@ -230,6 +256,9 @@ def main() -> int:
     dest_dir = Path(args.dest)
     exe_name = args.exe
     exe_path = dest_dir / exe_name
+
+    # 初始化文件日志（console=False 后 stderr 不可见）
+    _init_log(dest_dir)
 
     log("=" * 50)
     log("FluentYTDL 更新器启动")
@@ -307,33 +336,43 @@ def main() -> int:
             exe_old.rename(exe_path)
         return 1
 
-    # 清理旧文件
-    log("清理旧文件...")
-    if internal_old.exists():
-        shutil.rmtree(internal_old, ignore_errors=True)
-    if exe_old.exists():
-        try:
-            exe_old.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-    # 删除归档文件
-    try:
-        archive_path.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-    # 启动新版本
+    # 优先启动新版本（不被清理阻塞）
     log(f"启动新版本: {exe_path}")
     if exe_path.exists():
         subprocess.Popen(
             [str(exe_path)],
             cwd=str(dest_dir),
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            creationflags=subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0,
         )
     else:
         log(f"错误: 新版本 {exe_path} 不存在")
         return 1
+
+    # 等待新版本进程初始化后再清理旧文件（best-effort）
+    # 即使清理失败，主程序启动时也会兜底清理
+    log("等待 2 秒后清理旧文件...")
+    time.sleep(2)
+
+    log("清理旧文件...")
+    if internal_old.exists():
+        try:
+            shutil.rmtree(internal_old, ignore_errors=True)
+            log("✓ _internal_old/ 已删除")
+        except Exception as e:
+            log(f"⚠ _internal_old/ 清理失败（主程序启动时会重试）: {e}")
+    if exe_old.exists():
+        try:
+            exe_old.unlink(missing_ok=True)
+            log("✓ .exe.old 已删除")
+        except OSError as e:
+            log(f"⚠ .exe.old 清理失败（主程序启动时会重试）: {e}")
+
+    # 删除归档文件
+    try:
+        archive_path.unlink(missing_ok=True)
+        log("✓ 归档文件已删除")
+    except OSError:
+        pass
 
     # 自删除
     log("更新完成，自删除...")

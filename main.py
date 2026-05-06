@@ -30,6 +30,52 @@ from PySide6.QtGui import QFont  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
+
+def _cleanup_update_residuals() -> None:
+    """清理更新残留文件（.old 文件、旧备份目录、临时目录）。
+
+    设计为 best-effort：任何失败都静默跳过，不阻塞启动。
+    仅在 frozen（打包）模式下执行。
+    """
+    if not getattr(sys, "frozen", False):
+        return
+
+    import shutil
+    import tempfile
+
+    app_dir = Path(sys.executable).resolve().parent
+
+    # 1. 清理 _internal_old/ 备份目录
+    internal_old = app_dir / "_internal_old"
+    if internal_old.exists():
+        try:
+            shutil.rmtree(internal_old, ignore_errors=True)
+        except Exception:
+            pass
+
+    # 2. 清理 *.exe.old 文件
+    try:
+        for old_file in app_dir.glob("*.exe.old"):
+            try:
+                old_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3. 清理 %TEMP% 中过时的更新临时目录
+    try:
+        temp_root = Path(tempfile.gettempdir())
+        for tmp_dir in temp_root.glob("fluentytdl_update_*"):
+            if tmp_dir.is_dir():
+                try:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 def main() -> None:
     # Ensure "src" is importable when running from repo root
     root_dir = Path(__file__).resolve().parent
@@ -42,6 +88,9 @@ def main() -> None:
         from fluentytdl.core.updater_worker import run_worker
 
         sys.exit(run_worker())
+
+    # === 启动清理: 删除更新残留文件 ===
+    _cleanup_update_residuals()
 
     # === 1. 修改缩放策略 (关键) ===
     # 如觉得太小，可改为 1.5；或删除本行让 Qt/系统自动接管。
