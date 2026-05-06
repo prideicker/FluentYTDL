@@ -39,7 +39,7 @@ jobs:
     
     steps:
       - name: 📥 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🐍 设置 Python
         uses: actions/setup-python@v5
@@ -70,7 +70,7 @@ jobs:
     
     steps:
       - name: 📥 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🐍 设置 Python
         uses: actions/setup-python@v5
@@ -98,7 +98,7 @@ jobs:
     
     steps:
       - name: 📥 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🐍 设置 Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -122,7 +122,7 @@ jobs:
     
     steps:
       - name: 📥 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🐍 设置 Python
         uses: actions/setup-python@v5
