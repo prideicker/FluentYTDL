@@ -22,8 +22,11 @@ entry_script = os.path.join(spec_dir, '..', 'src', 'fluentytdl', 'core', 'update
 
 # ----------------------------------------------------------------------------
 # 2. Hidden imports (py7zr 用于 7z 解压)
+#    py7zr 有大量子模块 (compressor, archiveinfo, properties, callbacks 等)，
+#    仅列几个无法在运行时成功 import。使用 collect_submodules 全量收集。
 # ----------------------------------------------------------------------------
-hiddenimports = ['py7zr', 'py7zr.lzma', 'py7zr.helpers']
+from PyInstaller.utils.hooks import collect_submodules
+hiddenimports = collect_submodules('py7zr')
 
 # ----------------------------------------------------------------------------
 # 3. Analysis

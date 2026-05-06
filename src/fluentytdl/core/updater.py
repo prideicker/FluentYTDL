@@ -147,10 +147,14 @@ def _extract_7z(archive_path: Path, dest_dir: Path) -> None:
     # 回退到系统 7z
     sevenzip = shutil.which("7z") or shutil.which("7za")
     if sevenzip:
+        kwargs = {}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         subprocess.run(
             [sevenzip, "x", str(archive_path), f"-o{dest_dir}", "-aoa", "-y"],
             check=True,
             capture_output=True,
+            **kwargs,
         )
         log("通过系统 7z 解压完成")
         return
@@ -338,15 +342,22 @@ def main() -> int:
 
     # 优先启动新版本（不被清理阻塞）
     log(f"启动新版本: {exe_path}")
-    if exe_path.exists():
-        subprocess.Popen(
-            [str(exe_path)],
-            cwd=str(dest_dir),
-            creationflags=subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0,
-        )
-    else:
+    if not exe_path.exists():
         log(f"错误: 新版本 {exe_path} 不存在")
         return 1
+
+    if sys.platform == "win32":
+        # 使用 ShellExecuteW 启动 GUI 应用（等同于双击 exe，最可靠）
+        # subprocess.Popen + DETACHED_PROCESS 从 windowed 进程启动 GUI 不可靠
+        ret = ctypes.windll.shell32.ShellExecuteW(  # type: ignore[union-attr]
+            None, "open", str(exe_path), None, str(dest_dir), 1,  # SW_SHOWNORMAL
+        )
+        if ret <= 32:
+            log(f"错误: ShellExecuteW 返回 {ret}，启动新版本失败")
+            return 1
+        log(f"✓ ShellExecuteW 成功 (ret={ret})")
+    else:
+        subprocess.Popen([str(exe_path)], cwd=str(dest_dir))
 
     # 等待新版本进程初始化后再清理旧文件（best-effort）
     # 即使清理失败，主程序启动时也会兜底清理
