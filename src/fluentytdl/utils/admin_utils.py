@@ -93,7 +93,7 @@ def restart_as_admin(reason: str = "", auto_restart: bool = False) -> bool:
     except Exception as e:
         from ..utils.logger import logger
 
-        logger.error(f"请求管理员重启失败: {e}", exc_info=True)
+        logger.exception("请求管理员重启失败")
         return False
 
 

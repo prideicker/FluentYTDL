@@ -12,7 +12,7 @@
 
 ; --- 版本定义 (可通过命令行覆盖) ---
 #ifndef MyAppVersion
-  #define MyAppVersion "3.0.18"
+  #define MyAppVersion "3.0.19"
 #endif
 
 #ifndef SourceDir
@@ -131,6 +131,7 @@ Name: "addtopath"; Description: "{cm:AddToPath}"; GroupDescription: "{cm:SystemI
 [Dirs]
 Name: "{app}\logs"; Permissions: users-modify
 Name: "{app}\bin"; Permissions: users-modify
+Name: "{app}\state"; Permissions: users-modify
 
 ; ============================================================================
 ; [Files] 文件部署
@@ -178,12 +179,16 @@ Type: filesandordirs; Name: "{app}\config.json"
 Type: filesandordirs; Name: "{app}\*.log"
 Type: filesandordirs; Name: "{app}\cache"
 Type: filesandordirs; Name: "{app}\data"
+Type: filesandordirs; Name: "{app}\state"
 
 ; 清理用户目录中的应用数据 (AppData)
 ; 注意: 这些是用户数据目录，卸载时清理是预期行为
 ; 如果以管理员身份卸载，将清理运行卸载程序的用户的数据
 Type: filesandordirs; Name: "{userappdata}\FluentYTDL"
 Type: filesandordirs; Name: "{localappdata}\FluentYTDL"
+
+; 清理旧版 Documents 中的应用数据
+Type: filesandordirs; Name: "{userdocs}\FluentYTDL"
 
 ; 清理应用创建的注册表 (通过 [UninstallRun] 或 [Code] 实现)
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import time
 from collections import deque
 from enum import Enum
@@ -45,6 +44,7 @@ from ...models.video_task import VideoTask
 from ...processing import subtitle_service
 from ...utils.filesystem import sanitize_filename
 from ...utils.image_loader import get_image_loader
+from ...utils.logger import logger
 from ...utils.paths import resource_path
 from ...youtube.youtube_service import YoutubeServiceOptions
 from ..delegates.playlist_delegate import PlaylistItemDelegate
@@ -67,8 +67,6 @@ from .selection_dialog import (
 )
 from .subtitle_selector import SubtitleSelectorWidget
 from .vr_format_selector import VR_PRESETS, VRFormatSelectorWidget
-
-logger = logging.getLogger(__name__)
 
 
 class _PlaylistModelRowProxy:
@@ -1157,7 +1155,7 @@ class DownloadConfigWindow(FramelessWindow):
 
         from ...utils.error_parser import ErrorCategory, classify_error, parse_ytdlp_error
 
-        friendly_title, friendly_content, parsed_suggests_update = parse_ytdlp_error(raw_error)
+        friendly_title, friendly_content, _parsed_suggests_update = parse_ytdlp_error(raw_error)
         category = classify_error(raw_error) if raw_error else ErrorCategory.OTHER
 
         title = friendly_title if raw_error else str(err_data.get("title") or "解析失败")
@@ -1175,8 +1173,6 @@ class DownloadConfigWindow(FramelessWindow):
             pass
         self.viewLayout.addWidget(self._error_label)
 
-        suggests_component_update = parsed_suggests_update or bool(err_data.get("suggests_component_update", False))
-
         # === 根据分类决定显示哪个面板 ===
         if category == ErrorCategory.COOKIE:
             self._switch_to_state(WindowState.ERROR_GENERIC)
@@ -1184,8 +1180,8 @@ class DownloadConfigWindow(FramelessWindow):
             if hasattr(self, "_error_label") and self._error_label:
                 self._error_label.hide()
                 
-            from .cookie_repair_dialog import CookieRepairDialog
             from ...auth.auth_service import AuthSourceType, auth_service
+            from .cookie_repair_dialog import CookieRepairDialog
             
             current_source = auth_service.current_source
             source_map = {
@@ -1340,53 +1336,6 @@ class DownloadConfigWindow(FramelessWindow):
 
         self._probe_worker.finished.connect(_on_done, Qt.ConnectionType.QueuedConnection)
         self._probe_worker.start()
-
-    def _run_connectivity_probe(
-        self, friendly_title: str, raw_error: str, suggests_component_update: bool = False
-    ) -> None:
-        """
-        403 模糊错误 → 异步探测 YouTube 连通性后决定显示哪个面板。
-        """
-
-        from PySide6.QtCore import QThread
-        from PySide6.QtCore import Signal as QSignal
-
-        class _ProbeWorker(QThread):
-            finished = QSignal(bool)
-
-            def run(self):
-                from ...utils.error_parser import probe_youtube_connectivity
-
-                result = probe_youtube_connectivity(timeout=8.0)
-                self.finished.emit(result)
-
-        self._ambig_probe_worker = _ProbeWorker(self)
-
-        def _on_done(reachable: bool):
-            if self._is_closing:
-                return
-            if reachable:
-                # 网络通 → Cookie 问题
-                self.retryWidget.show()
-                if suggests_component_update:
-                    self._authSegment.setCurrentItem("update")
-                else:
-                    self._authSegment.setCurrentItem("dle")
-                self.networkDiagWidget.hide()
-            else:
-                # 网络不通 → 网络问题
-                if self._error_label:
-                    self._error_label.setText(
-                        "网络连接异常\n\n"
-                        "无法连接到 YouTube 服务器。\n"
-                        "请检查代理/VPN 是否正常运行，或在下方进行网络诊断。"
-                    )
-                self.retryWidget.hide()
-                self.networkDiagWidget.show()
-                self._netProbeResult.setText("⚠️ 自动探测：无法连接 YouTube")
-
-        self._ambig_probe_worker.finished.connect(_on_done, Qt.ConnectionType.QueuedConnection)
-        self._ambig_probe_worker.start()
 
     def _retry_parse_with_auth(self) -> None:
         """重试解析（使用 auth_service 管理的 Cookie）"""
@@ -3119,7 +3068,7 @@ class DownloadConfigWindow(FramelessWindow):
         # 1. Single Video Mode
         if not self._is_playlist:
             if not self.video_info:
-                print("[DEBUG] get_selected_tasks: video_info is None")
+                logger.debug("get_selected_tasks: video_info is None")
                 return []
 
             info = self.video_info
@@ -3253,12 +3202,10 @@ class DownloadConfigWindow(FramelessWindow):
                         try:
                             embed_override = self._check_subtitle_and_ask(config=sub_config_override)
                         except ValueError as e:
-                            print(f"[DEBUG] get_selected_tasks: User cancelled - {e}")
+                            logger.debug("get_selected_tasks: User cancelled - {}", e)
                             return []
                         except Exception as e:
-                            print(
-                                f"[ERROR] get_selected_tasks: Exception in _check_subtitle_and_ask - {e}"
-                            )
+                            logger.error("get_selected_tasks: Exception in _check_subtitle_and_ask - {}", e)
                             embed_override = None
 
                     subtitle_opts = subtitle_service.apply(

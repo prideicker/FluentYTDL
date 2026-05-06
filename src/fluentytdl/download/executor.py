@@ -19,13 +19,13 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from ..models.errors import YtDlpExecutionError
 from ..utils.container_compat import choose_lossless_merge_container
 from ..youtube.yt_dlp_cli import (
     prepare_yt_dlp_env,
     resolve_yt_dlp_exe,
     ydl_opts_to_cli_args,
 )
-from ..models.errors import YtDlpExecutionError
 from .output_parser import YtDlpOutputParser
 
 # 字幕/封面等附属文件后缀，不应被视为主输出文件
@@ -677,13 +677,13 @@ def _find_ffmpeg() -> str | None:
         if ffmpeg_path and Path(ffmpeg_path).exists():
             return ffmpeg_path
     except Exception:
-        pass
+        logger.debug("_find_ffmpeg: config_manager lookup failed")
     try:
         from ..utils.paths import locate_runtime_tool
 
         return str(locate_runtime_tool("ffmpeg.exe", "ffmpeg/ffmpeg.exe"))
     except Exception:
-        pass
+        logger.debug("_find_ffmpeg: locate_runtime_tool failed")
     return shutil.which("ffmpeg")
 
 

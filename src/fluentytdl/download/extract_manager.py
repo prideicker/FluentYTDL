@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import logging
-
 from PySide6.QtCore import QMutex, QMutexLocker, QObject, QRunnable, QThreadPool, Signal, Slot
 
 from ..models.yt_dto import YtMediaDTO
+from ..utils.logger import logger
 from ..youtube.youtube_service import YoutubeServiceOptions
 from .workers import EntryDetailWorker
-
-logger = logging.getLogger(__name__)
 
 
 class MetadataFetchRunnable(QRunnable):

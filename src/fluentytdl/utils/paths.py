@@ -16,9 +16,49 @@ def project_root() -> Path:
 
 
 def user_data_dir(app_name: str = "FluentYTDL") -> Path:
-    # Prefer Documents on Windows; aligns with existing log path choice.
+    """Return the root directory for all runtime data (config, DB, logs).
+
+    - Frozen (packaged): use the application install directory so that all
+      data stays inside the folder and the user can sweep-delete it.
+    - Dev: use project root.
+    - Fallback: if the app directory is read-only (e.g. Program Files without
+      ACL modification), fall back to ~/Documents/<app_name>.
+    """
+    if is_frozen():
+        app_dir = frozen_app_dir()
+    else:
+        app_dir = project_root()
+
+    # Verify writability; fall back to Documents if read-only.
+    try:
+        test_file = app_dir / ".writetest"
+        test_file.write_text("ok", encoding="ascii")
+        test_file.unlink()
+        return app_dir
+    except OSError:
+        home = Path(os.path.expanduser("~"))
+        fallback = home / "Documents" / app_name
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def old_user_data_dir(app_name: str = "FluentYTDL") -> Path:
+    """The legacy user data directory (~/Documents/FluentYTDL).
+    Used only for one-time migration of existing data."""
     home = Path(os.path.expanduser("~"))
     return home / "Documents" / app_name
+
+
+def _migrate_file(src: Path, dst: Path) -> bool:
+    """One-time best-effort file migration. Returns True if migration happened."""
+    try:
+        if src.exists() and src.resolve() != dst.resolve() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            return True
+    except OSError:
+        pass
+    return False
 
 
 def resource_path(*parts: str) -> Path:
@@ -267,11 +307,7 @@ def locate_runtime_tool(*relative_candidates: str) -> Path:
 
 
 def config_path() -> Path:
-    # Dev: keep repo-root config.json for convenience.
-    # Frozen: store config under a writable per-user directory.
-    if is_frozen():
-        return user_data_dir() / "config.json"
-    return project_root() / "config.json"
+    return user_data_dir() / "config.json"
 
 
 def legacy_config_path() -> Path:

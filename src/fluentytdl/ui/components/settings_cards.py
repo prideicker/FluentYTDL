@@ -78,7 +78,7 @@ class CookieRefreshWorker(QThread):
         except Exception as e:
             success = False
             message = f"刷新异常: {str(e)}"
-            logger.error(f"[CookieRefreshWorker] 异常: {e}", exc_info=True)
+            logger.exception("[CookieRefreshWorker] 异常")
 
         # 发射信号（线程安全，第三个参数保留但不再使用）
         self.finished.emit(success, message, False)

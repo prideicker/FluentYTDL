@@ -12,13 +12,11 @@ TaskDB 异步写入器
 
 from __future__ import annotations
 
-import logging
 from queue import Empty, Queue
 from threading import Thread
 
 from ..storage.task_db import task_db
-
-logger = logging.getLogger(__name__)
+from ..utils.logger import logger
 
 
 class TaskDBWriter:

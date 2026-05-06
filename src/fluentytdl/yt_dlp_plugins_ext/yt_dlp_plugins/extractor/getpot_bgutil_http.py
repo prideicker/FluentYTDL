@@ -182,7 +182,7 @@ class BgUtilHTTPPTP(BgUtilPTPBase):
             )
 
         po_token = response_json["poToken"]
-        self.logger.trace(f"Generated POT: {po_token}")
+        self.logger.trace("Generated POT: {}...", po_token[:16] if po_token else "empty")
         return PoTokenResponse(po_token=po_token)
 
 

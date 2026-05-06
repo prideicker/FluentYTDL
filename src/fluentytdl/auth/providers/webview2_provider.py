@@ -68,6 +68,7 @@ def _extract_simple_cookie(cookie) -> tuple[str, dict[str, Any]] | None:
             "httponly": bool(morsel.get("httponly", "")),
         }
     except Exception:
+        logger.debug("Failed to extract SimpleCookie fields")
         return None
 
 
@@ -314,7 +315,7 @@ def _format_cookies(raw_cookies: list) -> list[dict[str, Any]]:
                 if parsed:
                     expires = calendar.timegm(parsed)
             except Exception:
-                pass
+                logger.debug("Failed to parse cookie expires: {}", raw_expires)
         elif isinstance(raw_expires, (int, float)) and raw_expires > 0:
             expires = int(raw_expires)
 
@@ -427,4 +428,4 @@ class WebView2CookieProvider:
 
             auth_service._last_status = AuthStatus(valid=False, message=message)
         except Exception:
-            pass
+            logger.debug("Failed to set error status")

@@ -6,18 +6,11 @@ import tempfile
 
 from loguru import logger
 
+from .paths import user_data_dir
+
 # 1. 确定日志存储路径
-# 优先使用项目根目录下的 logs 文件夹
-# 在开发环境中，根目录是 src 的上级；在打包后，我们需要一个可写路径
-if getattr(sys, "frozen", False):
-    # 【打包后】使用用户文档目录，因为 Program Files 通常不可写
-    # C:/Users/Name/Documents/FluentYTDL/logs
-    LOG_DIR = os.path.join(os.path.expanduser("~"), "Documents", "FluentYTDL", "logs")
-else:
-    # 【开发环境】使用项目根目录下的 logs
-    # 假设当前文件在 src/fluentytdl/utils/logger.py -> 上3级是根目录
-    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
-    LOG_DIR = os.path.join(BASE_DIR, "logs")
+# 统一使用 user_data_dir()，开发模式在项目根目录，打包模式在 exe 同级目录
+LOG_DIR = str(user_data_dir() / "logs")
 
 if not os.path.exists(LOG_DIR):
     try:

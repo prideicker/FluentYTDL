@@ -1,4 +1,3 @@
-import logging
 import os
 import shutil
 import subprocess
@@ -7,10 +6,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ...utils.logger import logger
 from ..extension_gen import ExtensionGenerator
 from ..server import LocalCookieServer
-
-logger = logging.getLogger(__name__)
 
 
 class DLEProvider:

@@ -18,16 +18,14 @@ PlaylistScheduler — 播放列表详情抓取调度器
 
 from __future__ import annotations
 
-import logging
 from collections import deque
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from ..download.extract_manager import AsyncExtractManager
+from ..utils.logger import logger
 from ..youtube.youtube_service import YoutubeServiceOptions
-
-logger = logging.getLogger(__name__)
 
 
 class PlaylistScheduler(QObject):

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, QTimer, Signal
 
 from ...download.workers import DownloadWorker
-
-logger = logging.getLogger(__name__)
 
 
 class DownloadListModel(QAbstractListModel):

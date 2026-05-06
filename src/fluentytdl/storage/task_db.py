@@ -1,5 +1,4 @@
 import json
-import logging
 import shutil
 import sqlite3
 import threading
@@ -7,9 +6,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..utils.paths import config_path, user_data_dir
-
-logger = logging.getLogger(__name__)
+from ..utils.logger import logger
+from ..utils.paths import config_path, old_user_data_dir, user_data_dir, _migrate_file
 
 
 class TaskDB:
@@ -51,19 +49,14 @@ class TaskDB:
 
     def _resolve_db_path(self) -> Path:
         preferred = user_data_dir() / "state" / "tasks" / "tasks.db"
-        legacy = config_path().parent / "tasks.db"
 
-        # One-time best-effort migration from old location.
-        try:
-            preferred.parent.mkdir(parents=True, exist_ok=True)
-            if (
-                legacy.exists()
-                and legacy.resolve() != preferred.resolve()
-                and not preferred.exists()
-            ):
-                shutil.copy2(legacy, preferred)
-        except Exception:
-            pass
+        # Migration from old Documents location
+        old_docs_db = old_user_data_dir() / "state" / "tasks" / "tasks.db"
+        _migrate_file(old_docs_db, preferred)
+
+        # Migration from legacy config-adjacent location
+        legacy = config_path().parent / "tasks.db"
+        _migrate_file(legacy, preferred)
 
         return preferred
 

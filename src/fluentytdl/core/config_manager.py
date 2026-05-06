@@ -7,7 +7,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Signal
 
 from ..models.subtitle_config import SubtitleConfig
-from ..utils.paths import config_path, legacy_config_path
+from ..utils.paths import config_path, legacy_config_path, old_user_data_dir, _migrate_file
 
 
 class ConfigManager(QObject):
@@ -144,8 +144,11 @@ class ConfigManager(QObject):
         self.config: dict[str, Any] = self._load_config()
 
     def _load_config(self) -> dict[str, Any]:
+        # One-time migration: old Documents location -> new location
+        old_docs_config = old_user_data_dir() / "config.json"
+        _migrate_file(old_docs_config, self.config_file)
+
         # Backward-compat: if new location doesn't exist but legacy exists, load legacy.
-        # If we are running frozen, also migrate the legacy file into the new location.
         candidates = [self.config_file]
         legacy = legacy_config_path()
         if legacy != self.config_file:

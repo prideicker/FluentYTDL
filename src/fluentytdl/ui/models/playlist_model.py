@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, QTimer, Signal
 
 from ...models.video_task import VideoTask
-
-logger = logging.getLogger(__name__)
 
 
 class PlaylistModelRoles:

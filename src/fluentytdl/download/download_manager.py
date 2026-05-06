@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 from ..core.config_manager import config_manager
 from ..storage.db_writer import db_writer
 from ..storage.task_db import task_db
+from ..utils.logger import logger
 from .workers import DownloadWorker
 
 
@@ -79,6 +80,7 @@ class DownloadManager(QObject):
         try:
             n = int(config_manager.get("max_concurrent_downloads", 3) or 3)
         except Exception:
+            logger.debug("max_concurrent_downloads parse error, using default")
             n = 3
         # Use 32-bit int max to avoid overflow in UI / Qt validators.
         return max(1, min(2_147_483_647, n))
@@ -101,7 +103,7 @@ class DownloadManager(QObject):
         try:
             self._pending_workers = deque([w for w in self._pending_workers if w is not worker])
         except Exception:
-            pass
+            logger.debug("_remove_from_pending failed")
 
     def is_queued(self, worker: DownloadWorker) -> bool:
         return any(w is worker for w in self._pending_workers)
@@ -235,11 +237,11 @@ class DownloadManager(QObject):
                     try:
                         worker.terminate()
                     except Exception:
-                        pass
+                        logger.debug("Failed to terminate worker thread")
                     try:
                         worker.wait(500)
                     except Exception:
-                        pass
+                        logger.debug("Failed to wait for worker thread after terminate")
             except Exception:
                 all_stopped = False
 

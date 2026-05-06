@@ -1211,7 +1211,7 @@ class MainWindow(FluentWindow):
             else:
                 InfoBar.warning("Cookie提取失败", message, duration=8000, parent=self)
         except Exception as e:
-            logger.error(f"[AdminMode] Cookie刷新异常: {e}", exc_info=True)
+            logger.exception("[AdminMode] Cookie刷新异常")
             InfoBar.error("Cookie提取异常", str(e), duration=5000, parent=self)
 
     def check_cookie_status(self):

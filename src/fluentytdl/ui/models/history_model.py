@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
 
 from ...storage.history_service import HistoryRecord, on_history_updated
-
-logger = logging.getLogger(__name__)
 
 
 class HistoryModelRoles:

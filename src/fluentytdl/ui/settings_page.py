@@ -30,7 +30,6 @@ from qfluentwidgets import (
     ToolTipPosition,
 )
 
-from ..core.component_update_manager import component_update_manager
 from ..core.config_manager import config_manager
 from ..core.dependency_manager import dependency_manager
 from ..core.hardware_manager import hardware_manager
@@ -95,7 +94,7 @@ class CookieRefreshWorker(QThread):
         except Exception as e:
             success = False
             message = f"刷新异常: {str(e)}"
-            logger.error(f"[CookieRefreshWorker] 异常: {e}", exc_info=True)
+            logger.exception("[CookieRefreshWorker] 异常")
 
         # 发射信号（线程安全，第三个参数保留但不再使用）
         self.finished.emit(success, message, False)
@@ -1411,7 +1410,7 @@ class SettingsPage(QWidget):
         except Exception:
             from ...utils.logger import logger
 
-            logger.warning("Swallowed exception in settings", exc_info=True)
+            logger.exception("Swallowed exception in settings")
 
     @staticmethod
     def _fix_windows_path(text: str) -> str:
@@ -1737,7 +1736,7 @@ class SettingsPage(QWidget):
                         except Exception:
                             from ...utils.logger import logger
 
-                            logger.warning("Swallowed exception in settings", exc_info=True)
+                            logger.exception("Swallowed exception in settings")
                     InfoBar.success("清理完成", "已删除所有日志文件", parent=self.window())
                 else:
                     InfoBar.info("无需清理", "日志目录不存在", parent=self.window())
@@ -2865,7 +2864,7 @@ class SettingsPage(QWidget):
         except Exception:
             from ...utils.logger import logger
 
-            logger.warning("Swallowed exception in settings", exc_info=True)
+            logger.exception("Swallowed exception in settings")
 
     def _on_concurrent_fragments_changed(self, index: int) -> None:
         val = index + 1
@@ -2905,7 +2904,7 @@ class SettingsPage(QWidget):
             except Exception:
                 from ...utils.logger import logger
 
-                logger.warning("Swallowed exception in settings", exc_info=True)
+                logger.exception("Swallowed exception in settings")
             return
 
         config_manager.set("yt_dlp_exe_path", path)
@@ -2915,7 +2914,7 @@ class SettingsPage(QWidget):
         except Exception:
             from ...utils.logger import logger
 
-            logger.warning("Swallowed exception in settings", exc_info=True)
+            logger.exception("Swallowed exception in settings")
 
     def _yt_dlp_status_text(self) -> str:
         cfg = str(config_manager.get("yt_dlp_exe_path") or "").strip()
@@ -2926,7 +2925,7 @@ class SettingsPage(QWidget):
             except Exception:
                 from ...utils.logger import logger
 
-                logger.warning("Swallowed exception in settings", exc_info=True)
+                logger.exception("Swallowed exception in settings")
 
         if is_frozen():
             p = find_bundled_executable(
@@ -3006,7 +3005,7 @@ class SettingsPage(QWidget):
             except Exception:
                 from ...utils.logger import logger
 
-                logger.warning("Swallowed exception in settings", exc_info=True)
+                logger.exception("Swallowed exception in settings")
         else:
             try:
                 self.ffmpegCard.setValue("")
@@ -3014,7 +3013,7 @@ class SettingsPage(QWidget):
             except Exception:
                 from ...utils.logger import logger
 
-                logger.warning("Swallowed exception in settings", exc_info=True)
+                logger.exception("Swallowed exception in settings")
 
     def _ffmpeg_status_text(self) -> str:
         custom = str(config_manager.get("ffmpeg_path") or "").strip()
@@ -3025,7 +3024,7 @@ class SettingsPage(QWidget):
             except Exception:
                 from ...utils.logger import logger
 
-                logger.warning("Swallowed exception in settings", exc_info=True)
+                logger.exception("Swallowed exception in settings")
 
         # Auto-detect priority: bundled (_internal) > PATH
         bundled = (
@@ -3117,7 +3116,7 @@ class SettingsPage(QWidget):
         except Exception:
             from ...utils.logger import logger
 
-            logger.warning("Swallowed exception in settings", exc_info=True)
+            logger.exception("Swallowed exception in settings")
 
         node = shutil.which("node") or shutil.which("node.exe")
         if node:
@@ -3193,7 +3192,7 @@ class SettingsPage(QWidget):
             except Exception:
                 from ...utils.logger import logger
 
-                logger.warning("Swallowed exception in settings", exc_info=True)
+                logger.exception("Swallowed exception in settings")
             return
 
         config_manager.set("js_runtime_path", path)
@@ -3203,7 +3202,7 @@ class SettingsPage(QWidget):
         except Exception:
             from ...utils.logger import logger
 
-            logger.warning("Swallowed exception in settings", exc_info=True)
+            logger.exception("Swallowed exception in settings")
 
     def _check_js_runtime(self) -> None:
         rid, exe, source = self._resolve_js_runtime_exe()
@@ -3227,7 +3226,7 @@ class SettingsPage(QWidget):
                     except Exception:
                         from ...utils.logger import logger
 
-                        logger.warning("Swallowed exception in settings", exc_info=True)
+                        logger.exception("Swallowed exception in settings")
                     try:
                         si = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
                         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
@@ -3236,7 +3235,7 @@ class SettingsPage(QWidget):
                     except Exception:
                         from ...utils.logger import logger
 
-                        logger.warning("Swallowed exception in settings", exc_info=True)
+                        logger.exception("Swallowed exception in settings")
 
                 proc = subprocess.run(
                     cmd,

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import os
-import time as _time
 import threading
 from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
 from ..core.config_manager import config_manager
+from ..models.errors import YtDlpExecutionError
 from ..models.yt_dto import YtMediaDTO
+from ..utils.error_parser import diagnose_error
 from ..utils.logger import logger
 from ..utils.translator import translate_error
-from ..utils.error_parser import diagnose_error
-from ..models.errors import YtDlpExecutionError
 from ..youtube.youtube_service import YoutubeServiceOptions, youtube_service
 from ..youtube.yt_dlp_cli import YtDlpCancelled
 from .executor import DownloadExecutor
@@ -323,7 +322,7 @@ class DownloadWorker(QThread):
                 else:
                     proc.terminate()
             except Exception:
-                pass
+                logger.debug("Failed to terminate process for {}", self.url)
         logger.info("下载已取消: {}", self.url)
 
     @property

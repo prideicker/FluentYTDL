@@ -474,7 +474,7 @@ class CookieSentinel:
                 return False, f"更新失败: {auth_service.last_status.message}"
 
         except Exception as e:
-            logger.error(f"[CookieSentinel] 强制刷新异常: {e}", exc_info=True)
+            logger.exception("[CookieSentinel] 强制刷新异常")
             return False, f"更新异常: {e}"
 
         finally:

@@ -2,6 +2,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from .logger import logger
+
 
 class PathManager:
     """基于 EXE 物理路径的简洁路径管理器。
@@ -42,7 +44,7 @@ class PathManager:
             if local_path.exists():
                 p = local_path.resolve()
                 # 便于打包后调试，保留一条可观测输出
-                print(f"[PathManager] Found local tool: {p}")
+                logger.info("PathManager: Found local tool: {}", p)
                 return p
         except Exception:
             pass
@@ -51,14 +53,14 @@ class PathManager:
         try:
             system_path = shutil.which(tool_name)
             if system_path:
-                print(f"[PathManager] Found system tool: {system_path}")
+                logger.info("PathManager: Found system tool: {}", system_path)
                 return Path(system_path)
         except Exception:
             pass
 
         # 调试信息：打印查询位置
         try:
-            print(f"[PathManager] NOT FOUND. Looked in: {self.bin_dir}")
+            logger.debug("PathManager: NOT FOUND. Looked in: {}", self.bin_dir)
         except Exception:
             pass
         return None
