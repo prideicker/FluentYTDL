@@ -169,6 +169,7 @@ class YoutubeService:
             "outtmpl": str(Path(download_dir) / "%(title)s.%(ext)s")
             if download_dir
             else "%(title)s.%(ext)s",
+            "overwrites": True,  # 强制覆盖同名文件，防止因文件存在导致任务直接跳过并显示为完成
         }
 
         # 音频偏好语言注入 (Multi-Language Audio Track support)
@@ -1224,6 +1225,12 @@ class YoutubeService:
                 except Exception as fallback_exc:
                     self._emit_log("warning", f"降级解析也失败: {fallback_exc}")
 
+            fallback_info = self._handle_channel_tab_fallback(
+                url, msg, tuned, ["--flat-playlist", "--lazy-playlist"], cancel_event
+            )
+            if fallback_info:
+                return fallback_info
+
             raise
 
     def extract_vr_info_sync(
@@ -1418,7 +1425,13 @@ class YoutubeService:
                     else:
                         raise
                 else:
-                    raise
+                    fallback_info = self._handle_channel_tab_fallback(
+                        url, msg, ydl_opts, ["--flat-playlist", "--lazy-playlist"], cancel_event
+                    )
+                    if fallback_info:
+                        info = fallback_info
+                    else:
+                        raise
 
             if not isinstance(info, dict):
                 raise RuntimeError("播放列表解析失败：返回结果为空")
@@ -1573,7 +1586,13 @@ class YoutubeService:
                     else:
                         raise
                 else:
-                    raise
+                    fallback_info = self._handle_channel_tab_fallback(
+                        normalized_url, msg, ydl_opts, extra_args, cancel_event
+                    )
+                    if fallback_info:
+                        info = fallback_info
+                    else:
+                        raise
 
             if not isinstance(info, dict):
                 raise RuntimeError("频道解析失败：返回结果为空")
@@ -1593,9 +1612,59 @@ class YoutubeService:
                 url = url[: -len(suffix)]
                 break
         # 拼接目标标签页
-        if tab == "shorts":
-            return url + "/shorts"
-        return url + "/videos"
+        if tab == "all":
+            return url # 返回基础URL给ChannelExtractWorker处理
+        if tab in ("videos", "shorts", "streams"):
+            return f"{url}/{tab}"
+        return f"{url}/videos" # 默认回退
 
+    def _handle_channel_tab_fallback(
+        self,
+        url: str,
+        exc_msg: str,
+        opts: dict[str, Any],
+        extra_args: list[str],
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any] | None:
+        """如果遇到频道缺少某个标签页的错误，自动尝试回退到其他标签页"""
+        msg_lower = exc_msg.lower()
+        if "does not have a" not in msg_lower or "tab" not in msg_lower:
+            return None
+            
+        tabs_to_try = []
+        if url.endswith("/videos"):
+            tabs_to_try = ["/shorts", "/streams", "/playlists", "/releases", "/podcasts"]
+            base_url = url[:-7]
+        elif url.endswith("/shorts"):
+            tabs_to_try = ["/videos", "/streams", "/playlists", "/releases", "/podcasts"]
+            base_url = url[:-7]
+        elif url.endswith("/streams"):
+            tabs_to_try = ["/videos", "/shorts", "/playlists", "/releases", "/podcasts"]
+            base_url = url[:-8]
+        else:
+            return None
+            
+        for fallback_tab in tabs_to_try:
+            if cancel_event and cancel_event.is_set():
+                break
+                
+            new_url = base_url + fallback_tab
+            self._emit_log("warning", f"频道当前标签页不存在，自动尝试回退解析: {fallback_tab} ...")
+            try:
+                info = run_dump_single_json(
+                    new_url, opts, extra_args=extra_args, cancel_event=cancel_event
+                )
+                if info:
+                    self._emit_log("info", f"✅ 回退解析成功: {fallback_tab}")
+                    return cast(dict[str, Any], info)
+            except Exception as e:
+                if isinstance(e, YtDlpCancelled):
+                    raise
+                new_msg = str(e).lower()
+                if "does not have a" in new_msg and "tab" in new_msg:
+                    continue  # 尝试下一个
+                raise  # 其他错误直接抛出
+                
+        return None
 
 youtube_service = YoutubeService()

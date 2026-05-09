@@ -13,7 +13,7 @@ from ..utils.error_parser import diagnose_error
 from ..utils.logger import logger
 from ..utils.translator import translate_error
 from ..youtube.youtube_service import YoutubeServiceOptions, youtube_service
-from ..youtube.yt_dlp_cli import YtDlpCancelled
+from ..youtube.yt_dlp_cli import YtDlpCancelled, run_dump_single_json
 from .executor import DownloadExecutor
 from .features import (
     DownloadContext,
@@ -69,6 +69,86 @@ class InfoExtractWorker(QThread):
             return
         except Exception as exc:
             logger.exception("解析失败: {}", self.url)
+            self.error.emit(translate_error(exc))
+
+
+class ChannelExtractWorker(QThread):
+    """频道多标签页智能解析工人"""
+
+    progress = Signal(str)  # 进度消息
+    finished_tab = Signal(str, dict)  # (tab_name, info_dict)
+    finished_all = Signal(dict) # 汇总信息和状态，用于更新UI组合
+    error = Signal(dict)
+
+    def __init__(
+        self,
+        base_url: str,
+        target_tabs: list[str],
+        options: YoutubeServiceOptions | None = None,
+    ):
+        super().__init__()
+        self.base_url = base_url
+        self.target_tabs = target_tabs
+        self.options = options
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    def run(self) -> None:
+        try:
+            results = {}
+            total = len(self.target_tabs)
+            for i, tab in enumerate(self.target_tabs, 1):
+                if self._cancel_event.is_set():
+                    return
+                
+                # Format progress message
+                tab_display = {"videos": "常规视频", "shorts": "Shorts", "streams": "直播回放"}.get(tab, tab)
+                self.progress.emit(f"正在解析 {tab_display} ({i}/{total})...")
+                
+                url = f"{self.base_url}/{tab}"
+                
+                # 直播页面的特定处理，避免卡死在进行中的直播
+                extra_args = ["--flat-playlist", "--lazy-playlist"]
+                if tab == "streams":
+                    extra_args.extend(["--match-filter", "is_live != True"])
+                
+                try:
+                    ydl_opts = dict(youtube_service.build_ydl_options(self.options))
+                    ydl_opts.update({
+                        "skip_download": True,
+                        "extract_flat": True,
+                        "lazy_playlist": True,
+                        "ignoreerrors": False,
+                    })
+                    
+                    info = run_dump_single_json(
+                        url, ydl_opts, extra_args=extra_args, cancel_event=self._cancel_event
+                    )
+                    if info:
+                        info["__fluentytdl_tab"] = tab
+                        results[tab] = {"status": "loaded", "data": info}
+                        self.finished_tab.emit(tab, info)
+                except Exception as e:
+                    msg = str(e).lower()
+                    if "does not have a" in msg and "tab" in msg:
+                        # 标记为不支持
+                        results[tab] = {"status": "unsupported", "data": None}
+                    elif isinstance(e, YtDlpCancelled):
+                        return
+                    else:
+                        # 其他错误也标记为不支持以跳过，避免整个任务崩溃
+                        logger.warning(f"频道 {tab} 标签页解析出错: {e}")
+                        results[tab] = {"status": "unsupported", "data": None}
+            
+            if self._cancel_event.is_set():
+                return
+                
+            self.finished_all.emit(results)
+
+        except Exception as exc:
+            logger.exception("频道解析失败: {}", self.base_url)
             self.error.emit(translate_error(exc))
 
 

@@ -493,15 +493,17 @@ class CookieSentinel:
         if not ytdlp_stderr:
             return ""
 
-        from ..utils.error_parser import ErrorCategory, classify_error
+        from ..models.errors import ErrorCode
+        from ..utils.error_parser import diagnose_error
 
-        category = classify_error(ytdlp_stderr)
+        diag = diagnose_error(1, ytdlp_stderr)
+        category = diag.code
 
-        if category == ErrorCategory.COOKIE:
+        if category in (ErrorCode.LOGIN_REQUIRED, ErrorCode.COOKIE_EXPIRED):
             return "cookie"
-        elif category == ErrorCategory.NETWORK:
+        elif category == ErrorCode.NETWORK_ERROR:
             return "network"
-        elif category == ErrorCategory.AMBIGUOUS:
+        elif category == ErrorCode.GENERAL:
             return "ambiguous"
         return ""
 

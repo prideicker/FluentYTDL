@@ -175,11 +175,12 @@ class HistoryPage(QWidget):
 
     def _populate(self, records: list[HistoryRecord]) -> None:
         """用记录列表填充 UI"""
-        # 清空旧卡片
-        for card in self._cards:
-            self.scroll_layout.removeWidget(card)
-            card.setParent(None)
-            card.deleteLater()
+        # 彻底清空布局中的所有元素（包括卡片和旧弹簧），防止布局计算漂移或重叠
+        while self.scroll_layout.count() > 0:
+            item = self.scroll_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+                item.widget().deleteLater()
         self._cards.clear()
 
         # 创建新卡片
@@ -188,11 +189,21 @@ class HistoryPage(QWidget):
             card.remove_requested.connect(self._on_remove)
             card.reparse_requested.connect(self.reparse_requested.emit)
             self._cards.append(card)
-            # 插入到 stretch 之前
-            self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, card)
+            self.scroll_layout.addWidget(card)
 
-        self._update_empty_state()
+        # 重新在底部添加弹簧
+        self.scroll_layout.addStretch(1)
+
         self._update_stats()
+        
+        # 始终通过搜索过滤机制统一设置卡片的可见性
+        # 这也是修复 Qt 在父控件可见性变化时，新添加卡片 isHidden() 初始值不同步导致“交替显示”Bug 的关键
+        if hasattr(self, "search_box"):
+            self._on_search(self.search_box.text())
+        else:
+            for card in self._cards:
+                card.setVisible(True)
+            self._update_empty_state()
 
     def add_record(self, record: HistoryRecord) -> None:
         """实时添加一条新记录（下载完成时调用）"""
@@ -201,8 +212,14 @@ class HistoryPage(QWidget):
         card.reparse_requested.connect(self.reparse_requested.emit)
         self._cards.insert(0, card)
         self.scroll_layout.insertWidget(0, card)
-        self._update_empty_state()
+        
         self._update_stats()
+        
+        if hasattr(self, "search_box"):
+            self._on_search(self.search_box.text())
+        else:
+            card.setVisible(True)
+            self._update_empty_state()
 
     # ------ 搜索 ------
 

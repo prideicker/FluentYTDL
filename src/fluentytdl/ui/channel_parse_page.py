@@ -20,7 +20,7 @@ class ChannelParsePage(QWidget):
     允许用户粘贴 YouTube 频道链接，自动解析频道内所有视频。
     """
 
-    parse_requested = Signal(str)
+    parse_requested = Signal(str, str)  # (url, target_tab)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -94,8 +94,22 @@ class ChannelParsePage(QWidget):
         self.inputLayout.addWidget(self.pasteBtn)
         self.cardLayout.addLayout(self.inputLayout)
 
-        # 按钮行 (右对齐)
+        # 按钮与选项行
         self.btnLayout = QHBoxLayout()
+        self.btnLayout.setSpacing(12)
+
+        self.scopeLabel = CaptionLabel("解析范围:", self)
+        self.btnLayout.addWidget(self.scopeLabel)
+
+        from qfluentwidgets import ComboBox
+        self.scopeCombo = ComboBox(self)
+        self.scopeCombo.addItem("全部 / 智能探测", userData="all")
+        self.scopeCombo.addItem("仅常规视频", userData="videos")
+        self.scopeCombo.addItem("仅 Shorts", userData="shorts")
+        self.scopeCombo.addItem("仅直播回放", userData="streams")
+        self.scopeCombo.setMinimumWidth(160)
+        self.btnLayout.addWidget(self.scopeCombo)
+
         self.btnLayout.addStretch(1)
 
         self.parseBtn = PrimaryPushButton(FluentIcon.SEARCH, "开始解析频道", self)
@@ -129,7 +143,8 @@ class ChannelParsePage(QWidget):
     def on_parse_clicked(self) -> None:
         url = self.urlInput.text().strip()
         if url:
-            self.parse_requested.emit(url)
+            target_tab = self.scopeCombo.currentData()
+            self.parse_requested.emit(url, target_tab)
 
     def _update_style(self):
         from qfluentwidgets import isDarkTheme

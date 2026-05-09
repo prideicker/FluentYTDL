@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections import deque
 from functools import partial
 from typing import Any
@@ -31,8 +32,20 @@ class DownloadManager(QObject):
         # tasks 是按照 created_at DESC 排序的，反转以按先后顺序加载
         for row in reversed(tasks):
             state = row.get("state", "queued")
-            if state in ("completed", "error", "cancelled"):
+            if state in ("completed", "cancelled"):
                 continue
+
+            # error 状态的任务：检查过期时间，并在未过期时恢复到 UI 以便用户重试或清理
+            if state == "error":
+                retention_days = config_manager.get("failed_task_retention_days", 3)
+                if retention_days > 0:
+                    updated_at = row.get("updated_at", 0)
+                    now = time.time()
+                    if now - updated_at > retention_days * 86400:
+                        task_db.delete_task(row["id"])
+                        continue
+                # 不自动重试，仅保持 error 状态展示在 UI
+                pass  # 将在下方创建 Worker 壳
 
             opts = json.loads(row.get("ydl_opts_json", "{}"))
 
@@ -51,6 +64,11 @@ class DownloadManager(QObject):
                 task_db.update_task_status(
                     row["id"], state, row.get("progress", 0.0), "⏸️ 下载已暂停 (应用重启)"
                 )
+                
+            # error 状态不入队也不 start，仅创建 Worker 壳展示在 UI
+            if state == "error":
+                self._restore_task_to_ui(row, opts, state)
+                continue
 
             cached = {"title": row.get("title", ""), "thumbnail": row.get("thumbnail_url", "")}
 

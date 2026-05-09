@@ -956,13 +956,32 @@ class SettingsPage(QWidget):
         self.maxConcurrentCard.comboBox.setCurrentIndex(max(0, min(9, int(current_max) - 1)))
         self.maxConcurrentCard.comboBox.currentIndexChanged.connect(self._on_max_concurrent_changed)
 
+        self.failedTaskRetentionCard = InlineComboBoxCard(
+            FluentIcon.HISTORY,
+            "失败任务保留时间",
+            "设置下载失败的任务记录自动清理时间 (默认: 3 天)",
+            ["1 天", "3 天", "7 天", "15 天", "30 天", "永久保留"],
+            self.downloadGroup,
+        )
+        current_retention = config_manager.get("failed_task_retention_days", 3)
+        mapping = {1: 0, 3: 1, 7: 2, 15: 3, 30: 4, -1: 5}
+        self.failedTaskRetentionCard.comboBox.setCurrentIndex(mapping.get(int(current_retention), 1))
+        self.failedTaskRetentionCard.comboBox.currentIndexChanged.connect(self._on_retention_days_changed)
+
         self.downloadGroup.addSettingCard(self.downloadFolderCard)
         self.downloadGroup.addSettingCard(self.concurrentFragmentsCard)
         self.downloadGroup.addSettingCard(self.maxConcurrentCard)
+        self.downloadGroup.addSettingCard(self.failedTaskRetentionCard)
         layout.addWidget(self.downloadGroup)
 
         # Trigger warning check initially
         self._on_max_concurrent_changed(self.maxConcurrentCard.comboBox.currentIndex())
+
+    def _on_retention_days_changed(self, index: int):
+        days = [1, 3, 7, 15, 30, -1][index]
+        config_manager.set("failed_task_retention_days", days)
+        from ..utils.logger import logger
+        logger.info(f"失败任务保留天数已更新为: {days}")
 
     def _init_network_group(self, parent_widget: QWidget | None, layout: QVBoxLayout) -> None:
         self.networkGroup = SettingCardGroup("网络连接", parent_widget)

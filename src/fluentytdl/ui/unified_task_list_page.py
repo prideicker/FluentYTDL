@@ -184,6 +184,7 @@ class UnifiedTaskListPage(QWidget):
         self.pivot.addItem(routeKey="queued", text="排队中")
         self.pivot.addItem(routeKey="paused", text="已暂停")
         self.pivot.addItem(routeKey="completed", text="已完成")
+        self.pivot.addItem(routeKey="error", text="已失败")
         self.pivot.currentItemChanged.connect(self._on_pivot_changed)
         self.pivot.setCurrentItem("all")
 
@@ -438,6 +439,7 @@ class UnifiedTaskListPage(QWidget):
                     "queued": ("📋", "没有排队中的任务", "所有任务已开始"),
                     "paused": ("⏸️", "没有暂停的任务", "所有任务运行中"),
                     "completed": ("✅", "没有已完成的任务", "完成的任务会显示在这里"),
+                    "error": ("❌", "没有失败的任务", "太棒了，一切顺利！"),
                 }
                 icon, title, subtitle = messages.get(self._current_filter, ("🍃", "暂无任务", ""))
                 self.empty_icon.setText(icon)

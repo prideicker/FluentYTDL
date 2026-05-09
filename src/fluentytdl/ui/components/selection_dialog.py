@@ -1220,15 +1220,19 @@ class SelectionDialog(MessageBoxBase):
         suggestion = str(err_data.get("suggestion") or "")
         raw_error = str(err_data.get("raw_error") or "")
 
-        from ...utils.error_parser import ErrorCategory, classify_error
-        category = classify_error(raw_error) if raw_error else ErrorCategory.OTHER
+        from ...models.errors import ErrorCode
+        from ...utils.error_parser import diagnose_error
+        
+        category = ErrorCode.GENERAL
+        if raw_error:
+            category = diagnose_error(1, raw_error).code
 
         text = f"{title}\n\n{content}"
         if suggestion:
             text += f"\n\n建议操作：\n{suggestion}"
         
         # === 根据分类决定显示哪个面板 ===
-        if category == ErrorCategory.COOKIE:
+        if category in (ErrorCode.LOGIN_REQUIRED, ErrorCode.COOKIE_EXPIRED):
             self.titleLabel.setText("身份验证失败")
             # 不用长文显示 _error_label，避免视觉打断
             self.retryWidget.hide()

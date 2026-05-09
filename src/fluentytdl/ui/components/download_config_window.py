@@ -277,6 +277,7 @@ class DownloadConfigWindow(FramelessWindow):
         mode: str = "default",
         smart_detect: bool = False,
         playlist_flat: bool = False,
+        target_tab: str | None = None,
     ):
         # parent=None ensures independent window behavior (taskbar icon, not always-on-top of main)
         super().__init__(parent=None)
@@ -345,7 +346,14 @@ class DownloadConfigWindow(FramelessWindow):
         # === 状态初始化 ===
         self._is_playlist = False
         self._is_channel = False
-        self._channel_tab = "videos"
+        self._target_tab = target_tab or "all"  # user's initial selection
+        self._channel_tab = self._target_tab  # current selected tab in UI
+        self._channel_caches = {
+            "all": {"status": "unloaded", "data": None},
+            "videos": {"status": "unloaded", "data": None},
+            "shorts": {"status": "unloaded", "data": None},
+            "streams": {"status": "unloaded", "data": None},
+        }
         self._channel_reverse = False
         self.download_tasks: list[dict[str, Any]] = []
         self._active_workers: list[QThread] = []
@@ -967,14 +975,66 @@ class DownloadConfigWindow(FramelessWindow):
             show_ring=True,
         )
         self._current_options = None
-        if self._vr_mode:
+
+        from ...utils.validators import UrlValidator
+        self._is_channel = UrlValidator.is_channel_url(self.url)
+
+        if self._is_channel:
+            from ...download.workers import ChannelExtractWorker
+            target_tabs = ["videos", "shorts", "streams"] if self._target_tab == "all" else [self._target_tab]
+            w = ChannelExtractWorker(self.url, target_tabs, self._current_options)
+            w.progress.connect(self._on_channel_progress)
+            w.finished_all.connect(self.on_channel_parse_success)
+            w.error.connect(self.on_parse_error)
+            self.worker = w
+            w.start()
+        elif self._vr_mode:
             w = VRInfoExtractWorker(self.url)
+            w.finished.connect(self.on_parse_success)
+            w.error.connect(self.on_parse_error)
+            self.worker = w
+            w.start()
         else:
-            w = InfoExtractWorker(self.url, self._current_options)
-        w.finished.connect(self.on_parse_success)
-        w.error.connect(self.on_parse_error)
-        self.worker = w
-        w.start()
+            w = InfoExtractWorker(self.url, self._current_options, playlist_flat=self._playlist_flat)
+            w.finished.connect(self.on_parse_success)
+            w.error.connect(self.on_parse_error)
+            self.worker = w
+            w.start()
+
+    def _on_channel_progress(self, msg: str) -> None:
+        self.loadingTitleLabel.setText(msg)
+
+    def on_channel_parse_success(self, results: dict) -> None:
+        if self._is_closing:
+            return
+
+        # Update cache pool
+        for tab, cache_data in results.items():
+            self._channel_caches[tab] = cache_data
+
+        # Construct a combined info_dict
+        combined_entries = []
+        for tab in ["videos", "shorts", "streams"]:
+            cache = self._channel_caches.get(tab, {})
+            if cache.get("status") == "loaded" and cache.get("data"):
+                entries = cache["data"].get("entries", [])
+                combined_entries.extend(entries)
+
+        if not combined_entries and all(c.get("status") in ("unsupported", "unloaded") for c in self._channel_caches.values() if c is not self._channel_caches.get("all")):
+            self.on_parse_error({"title": "解析失败", "content": "未能找到任何频道内容。"})
+            return
+
+        # Set combined into the first loaded tab's dict as base
+        base_info = next((c["data"] for c in self._channel_caches.values() if c.get("status") == "loaded" and c.get("data")), {})
+        info_dict = dict(base_info)
+        info_dict["entries"] = combined_entries
+        info_dict["_type"] = "playlist"
+        
+        # Calculate max tab count to update UI
+        if all(self._channel_caches.get(t, {}).get("status") in ("loaded", "unsupported") for t in ["videos", "shorts", "streams"]):
+            self._channel_caches["all"]["status"] = "loaded"
+
+        self.on_parse_success(info_dict)
 
     def _ask_switch_to_normal(self) -> bool:
         """询问用户是否切换回普通模式"""
@@ -1153,13 +1213,28 @@ class DownloadConfigWindow(FramelessWindow):
 
         raw_error = str(err_data.get("raw_error") or "")
 
-        from ...utils.error_parser import ErrorCategory, classify_error, parse_ytdlp_error
+        from ...models.errors import ErrorCode
+        from ...utils.error_parser import diagnose_error
 
-        friendly_title, friendly_content, _parsed_suggests_update = parse_ytdlp_error(raw_error)
-        category = classify_error(raw_error) if raw_error else ErrorCategory.OTHER
+        code_val = err_data.get("code")
+        if code_val is not None:
+            try:
+                category = ErrorCode(code_val)
+                friendly_title = err_data.get("user_title", "")
+                friendly_content = err_data.get("user_message", "")
+            except ValueError:
+                diag = diagnose_error(1, raw_error)
+                category = diag.code
+                friendly_title = diag.user_title
+                friendly_content = diag.user_message
+        else:
+            diag = diagnose_error(1, raw_error)
+            category = diag.code
+            friendly_title = diag.user_title
+            friendly_content = diag.user_message
 
-        title = friendly_title if raw_error else str(err_data.get("title") or "解析失败")
-        content = friendly_content if raw_error else str(err_data.get("content") or "")
+        title = friendly_title if friendly_title else str(err_data.get("title") or "解析失败")
+        content = friendly_content if friendly_content else str(err_data.get("content") or "")
         suggestion = str(err_data.get("suggestion") or "")
 
         text = f"{title}\n\n{content}"
@@ -1174,7 +1249,7 @@ class DownloadConfigWindow(FramelessWindow):
         self.viewLayout.addWidget(self._error_label)
 
         # === 根据分类决定显示哪个面板 ===
-        if category == ErrorCategory.COOKIE:
+        if category in (ErrorCode.LOGIN_REQUIRED, ErrorCode.COOKIE_EXPIRED):
             self._switch_to_state(WindowState.ERROR_GENERIC)
             # 隐藏 _error_label 以免长篇大论影响体验
             if hasattr(self, "_error_label") and self._error_label:
@@ -1239,15 +1314,15 @@ class DownloadConfigWindow(FramelessWindow):
 
             dialog.manual_import_requested.connect(on_manual_import)
             dialog.show()
-        elif category == ErrorCategory.NETWORK:
+        elif category == ErrorCode.NETWORK_ERROR:
             self._switch_to_state(WindowState.ERROR_NETWORK)
             self._netProbeResult.setText("")
-        elif category == ErrorCategory.BOT:
+        elif category == ErrorCode.POTOKEN_FAILURE:
             self._switch_to_state(WindowState.ERROR_GENERIC)
             self.retryWidget.show()
             self._authSegment.setCurrentItem("update")
             self.networkDiagWidget.hide()
-        elif category == ErrorCategory.AMBIGUOUS:
+        elif category in (ErrorCode.GENERAL, ErrorCode.EXTRACTOR_ERROR, ErrorCode.HTTP_ERROR, ErrorCode.FORMAT_UNAVAILABLE, ErrorCode.GEO_RESTRICTED, ErrorCode.RATE_LIMITED, ErrorCode.DISK_FULL, ErrorCode.SUCCESS, ErrorCode.UNKNOWN):
             self._switch_to_state(WindowState.ERROR_GENERIC)
             self.retryWidget.hide()
             self.networkDiagWidget.hide()
@@ -1689,10 +1764,19 @@ class DownloadConfigWindow(FramelessWindow):
             channel_controls.addWidget(tab_label)
 
             self._channel_tab_combo = ComboBox(self.contentWidget)
-            self._channel_tab_combo.addItems(["视频", "Shorts"])
-            # 恢复当前标签页选中状态
-            if self._channel_tab == "shorts":
-                self._channel_tab_combo.setCurrentIndex(1)
+            self._channel_tab_combo_mapper = []
+            
+            # 动态生成 ComboBox 选项
+            for tab, name in [("all", "全部"), ("videos", "常规视频"), ("shorts", "Shorts"), ("streams", "直播回放")]:
+                cache = self._channel_caches.get(tab, {})
+                if cache.get("status") != "unsupported":
+                    self._channel_tab_combo.addItem(name, userData=tab)
+                    self._channel_tab_combo_mapper.append(tab)
+            
+            # 设置当前选中
+            if self._channel_tab in self._channel_tab_combo_mapper:
+                idx = self._channel_tab_combo_mapper.index(self._channel_tab)
+                self._channel_tab_combo.setCurrentIndex(idx)
             self._channel_tab_combo.currentIndexChanged.connect(self._on_channel_tab_changed)
             channel_controls.addWidget(self._channel_tab_combo)
 
@@ -1995,8 +2079,9 @@ class DownloadConfigWindow(FramelessWindow):
     # ── 频道标签页/排序切换 ────────────────────────────────────────────────
 
     def _on_channel_tab_changed(self, index: int) -> None:
-        tab_map = {0: "videos", 1: "shorts"}
-        new_tab = tab_map.get(index, "videos")
+        if not hasattr(self, "_channel_tab_combo_mapper") or index < 0 or index >= len(self._channel_tab_combo_mapper):
+            return
+        new_tab = self._channel_tab_combo_mapper[index]
         if new_tab == self._channel_tab:
             return
         self._channel_tab = new_tab
@@ -2046,8 +2131,44 @@ class DownloadConfigWindow(FramelessWindow):
         except Exception:
             pass
 
-        # 3. 切换到 loading 状态
-        tab_name = "Shorts" if self._channel_tab == "shorts" else "视频"
+        # 3. 检查缓存状态，决定是否需要发网络请求
+        if self._channel_tab == "all":
+            # 对于 all，检查是否所有的 target 都是 loaded 或 unsupported
+            needs_fetch = [tab for tab in ["videos", "shorts", "streams"] if self._channel_caches.get(tab, {}).get("status") == "unloaded"]
+        else:
+            needs_fetch = [self._channel_tab] if self._channel_caches.get(self._channel_tab, {}).get("status") == "unloaded" else []
+
+        if not needs_fetch:
+            # 全部在缓存中，直接拼装并渲染
+            combined_entries = []
+            if self._channel_tab == "all":
+                for tab in ["videos", "shorts", "streams"]:
+                    cache = self._channel_caches.get(tab, {})
+                    if cache.get("status") == "loaded" and cache.get("data"):
+                        combined_entries.extend(cache["data"].get("entries", []))
+            else:
+                cache = self._channel_caches.get(self._channel_tab, {})
+                if cache.get("status") == "loaded" and cache.get("data"):
+                    combined_entries.extend(cache["data"].get("entries", []))
+
+            base_info = next((c["data"] for c in self._channel_caches.values() if c.get("status") == "loaded" and c.get("data")), {})
+            if not base_info:
+                self.on_parse_error({"title": "切换失败", "content": "找不到有效的频道数据。"})
+                return
+
+            info_dict = dict(base_info)
+            info_dict["entries"] = combined_entries
+            info_dict["_type"] = "playlist"
+            
+            # 由于没有发起请求，我们手动调用 parse_success
+            # 为了防止卡死UI或状态机，通过 QTimer singleShot 调用
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.on_parse_success(info_dict))
+            return
+
+        # 4. 需要拉取数据
+        # 切换到 loading 状态
+        tab_name = {"all": "全部", "videos": "常规视频", "shorts": "Shorts", "streams": "直播回放"}.get(self._channel_tab, self._channel_tab)
         sort_name = "最旧在前" if self._channel_reverse else "最新在前"
         self._switch_to_state(
             WindowState.LOADING,
@@ -2055,15 +2176,10 @@ class DownloadConfigWindow(FramelessWindow):
             show_ring=True,
         )
 
-        # 4. 重新 flat 解析
-        from ...youtube.youtube_service import youtube_service
-        normalized_url = youtube_service._normalize_channel_url(
-            self.url, self._channel_tab
-        )
-
-        from ...download.workers import InfoExtractWorker
-        w = InfoExtractWorker(normalized_url, self._current_options, playlist_flat=True)
-        w.finished.connect(self.on_parse_success)
+        from ...download.workers import ChannelExtractWorker
+        w = ChannelExtractWorker(self.url, needs_fetch, self._current_options)
+        w.progress.connect(self._on_channel_progress)
+        w.finished_all.connect(self.on_channel_parse_success)
         w.error.connect(self.on_parse_error)
         self.worker = w
         w.start()

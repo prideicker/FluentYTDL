@@ -364,7 +364,7 @@ class MainWindow(FluentWindow):
 
         # 清空已完成
         clear_completed = TransparentToolButton(FluentIcon.DELETE, self)
-        clear_completed.setToolTip("清空已完成记录")
+        clear_completed.setToolTip("清空已完成/已失败记录")
         clear_completed.installEventFilter(
             ToolTipFilter(clear_completed, showDelay=300, position=ToolTipPosition.BOTTOM)
         )
@@ -532,6 +532,7 @@ class MainWindow(FluentWindow):
         vr_mode: bool = False,
         smart_detect: bool = False,
         playlist_flat: bool = False,
+        target_tab: str | None = None,
     ):
         """通用方法：显示非阻塞的任务配置窗口"""
         try:
@@ -543,6 +544,7 @@ class MainWindow(FluentWindow):
                 mode=mode,
                 smart_detect=smart_detect,
                 playlist_flat=playlist_flat,
+                target_tab=target_tab,
             )
 
             # 连接信号
@@ -581,22 +583,23 @@ class MainWindow(FluentWindow):
             logger.info(f"Closed sub-window. Active windows: {len(self._active_sub_windows)}")
 
     def show_selection_dialog(
-        self, url: str, smart_detect: bool = False, playlist_flat: bool = False
+        self, url: str, smart_detect: bool = False, playlist_flat: bool = False, target_tab: str | None = None
     ):
         self._remember_recent_target_url(url)
         self._show_config_window(
-            url, mode="default", smart_detect=smart_detect, playlist_flat=playlist_flat
+            url, mode="default", smart_detect=smart_detect, playlist_flat=playlist_flat, target_tab=target_tab
         )
 
     def show_vr_selection_dialog(self, url: str, smart_detect: bool = True):
         self._remember_recent_target_url(url)
         self._show_config_window(url, mode="vr", vr_mode=True, smart_detect=smart_detect)
 
-    def _show_channel_dialog(self, url: str) -> None:
-        """频道解析入口：先规范化 URL（追加 /videos 后缀），再走播放列表 flat 解析路径。"""
+    def _show_channel_dialog(self, url: str, target_tab: str = "all") -> None:
+        """频道解析入口：规范化 URL 后，走播放列表 flat 解析路径，传递 target_tab。"""
         from ..youtube.youtube_service import YoutubeService
-        normalized = YoutubeService._normalize_channel_url(url, "videos")
-        self.show_selection_dialog(normalized, smart_detect=False, playlist_flat=True)
+        # 始终传递 "all" 来获取纯净的 base_url，因为具体的 tab 会由 ChannelExtractWorker 拼接
+        normalized = YoutubeService._normalize_channel_url(url, "all")
+        self.show_selection_dialog(normalized, smart_detect=False, playlist_flat=True, target_tab=target_tab)
 
     def handle_vr_switch_request(self, url: str):
         """响应智能检测的 VR 切换请求"""
@@ -1062,28 +1065,37 @@ class MainWindow(FluentWindow):
 
             s = worker.effective_state
             if s in {"paused", "error", "queued"}:
-                self.on_resume_task(i)
+                self.on_pause_resume_task(i)
 
     def on_pause_all(self):
         download_manager.stop_all()
 
     def on_clear_completed(self):
-        # Gather rows that are completed
-        completed_rows = []
+        clearable_rows = []
         for i in range(self.task_page.model.rowCount()):
             task = self.task_page.model.get_task(i)
             if not task:
                 continue
             worker = task.get("worker")
-            if worker and worker.effective_state == "completed":
-                completed_rows.append(i)
+            if worker and worker.effective_state in ("completed", "error", "cancelled"):
+                clearable_rows.append(i)
 
-        if not completed_rows:
+        if not clearable_rows:
             return
+
+        n_completed = sum(1 for r in clearable_rows if self.task_page.model.get_task(r).get("worker").effective_state == "completed")
+        n_error = sum(1 for r in clearable_rows if self.task_page.model.get_task(r).get("worker").effective_state in ("error", "cancelled"))
+
+        parts = []
+        if n_completed:
+            parts.append(f"{n_completed} 个已完成")
+        if n_error:
+            parts.append(f"{n_error} 个已失败/已取消")
+
         if MessageBox(
-            "清空记录", "确定要清空所有已完成任务记录吗？\n(不会删除本地文件)", self
+            "清空记录", f"确定要清空 {'、'.join(parts)} 的任务记录吗？\n(不会删除本地文件)", self
         ).exec():
-            for row in sorted(completed_rows, reverse=True):
+            for row in sorted(clearable_rows, reverse=True):
                 task = self.task_page.model.get_task(row)
                 if task and task.get("worker"):
                     if self.controller:
